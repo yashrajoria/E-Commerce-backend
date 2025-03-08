@@ -13,7 +13,7 @@ var mongoClient *mongo.Client
 var DB *mongo.Database
 
 func Connect() error {
-	uri := "mongodb+srv://yashrajoria:YxjSO59EeYLQldp9@ecommerce-cluster.men4he8.mongodb.net/"
+	uri := "ajsdasjdpoasjopdasjpodasjdpoasjdpo/"
 
 	clientOptions := options.Client().ApplyURI(uri)
 
