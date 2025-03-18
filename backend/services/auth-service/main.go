@@ -6,6 +6,9 @@ import (
 	"auth-service/models"
 	"log"
 	"net/http"
+	"time"
+
+	"github.com/gin-contrib/cors"
 
 	"github.com/gin-gonic/gin"
 )
@@ -23,7 +26,15 @@ func main() {
 
 	// Initialize Gin router
 	r := gin.Default()
-
+	// CORS Configuration
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:3000"}, // Allowed origins
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour, // Cache preflight request for 12 hours
+	}))
 	// Health check route
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "OK"})
