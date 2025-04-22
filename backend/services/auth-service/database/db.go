@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 )
 
-var DB *gorm.DB // ✅ Define a global DB variable
+var DB *gorm.DB
 
 func Connect() error {
 	// Load .env file
@@ -22,10 +22,9 @@ func Connect() error {
 	dbUser := os.Getenv("POSTGRES_USER")
 	dbPassword := os.Getenv("POSTGRES_PASSWORD")
 	dbName := os.Getenv("POSTGRES_DB")
-	dbHost := os.Getenv("POSTGRES_HOST") // ✅ Allow setting the host via .env
-	dbPort := os.Getenv("POSTGRES_PORT") // ✅ Allow setting the port via .env
+	dbHost := os.Getenv("POSTGRES_HOST")
+	dbPort := os.Getenv("POSTGRES_PORT")
 
-	// Set default values if not provided
 	if dbHost == "" {
 		dbHost = "localhost"
 	}
@@ -33,11 +32,11 @@ func Connect() error {
 		dbPort = "5432"
 	}
 
-	// ✅ Correct DSN format
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=Asia/Kolkata",
-		dbHost, dbUser, dbPassword, dbName, dbPort)
+	dsn := fmt.Sprintf("host=postgres user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=Asia/Kolkata",
+		dbUser, dbPassword, dbName, dbPort)
 
-	// ✅ Don't shadow the err variable
+	log.Println(dsn)
+
 	var err error
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
