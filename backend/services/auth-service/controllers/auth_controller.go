@@ -25,10 +25,19 @@ type LoginRequest struct {
 
 // Struct for user registration
 type RegisterRequest struct {
-	Email       string `json:"email" binding:"required"`
-	Password    string `json:"password" binding:"required"`
-	PhoneNumber string `json:"phone_number"`
-	Role        string `json:"role"`
+	Email    string `json:"email" binding:"required"`
+	Password string `json:"password" binding:"required"`
+	// PhoneNumber string `json:"phone_number"`
+	Role string `json:"role"`
+}
+
+type AddressRequest struct {
+	Type       string `json:"type" binding:"required,oneof=billing shipping"`
+	Street     string `json:"street" binding:"required"`
+	City       string `json:"city" binding:"required"`
+	State      string `json:"state" binding:"required"`
+	PostalCode string `json:"postal_code" binding:"required"`
+	Country    string `json:"country" binding:"required"`
 }
 
 // Login handles user authentication and JWT generation
@@ -61,6 +70,7 @@ func Login(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
 		return
 	}
+	log.Println("Generated token:", token)
 
 	// Set token in HTTP-Only cookie
 	c.SetCookie("token", token, 86400, "/", "localhost", false, true) // ✅ Secure HttpOnly cookie
@@ -69,10 +79,10 @@ func Login(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Login successful",
 		"user": gin.H{
-			"id":           user.ID,
-			"email":        user.Email,
-			"phone_number": user.PhoneNumber,
-			"role":         user.Role,
+			"id":    user.ID,
+			"email": user.Email,
+			// "phone_number": user.PhoneNumber,
+			"role": user.Role,
 		},
 	})
 }
@@ -107,11 +117,11 @@ func Register(c *gin.Context) {
 
 	// Create new user
 	newUser := models.User{
-		ID:          uuid.New(),
-		Email:       registerReq.Email,
-		Password:    string(hashedPassword),
-		PhoneNumber: registerReq.PhoneNumber,
-		Role:        registerReq.Role,
+		ID:       uuid.New(),
+		Email:    registerReq.Email,
+		Password: string(hashedPassword),
+		// PhoneNumber: registerReq.PhoneNumber,
+		Role: registerReq.Role,
 	}
 	newUser.VerificationCode = generateRandomCode(6)
 
@@ -132,10 +142,9 @@ func Register(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "Account created successfully",
 		"user": gin.H{
-			"id":           newUser.ID,
-			"email":        newUser.Email,
-			"phone_number": newUser.PhoneNumber,
-			"role":         newUser.Role,
+			"id":    newUser.ID,
+			"email": newUser.Email,
+			"role":  newUser.Role,
 		},
 	})
 }
