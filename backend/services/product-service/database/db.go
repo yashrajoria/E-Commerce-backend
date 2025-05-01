@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -21,16 +20,18 @@ var (
 
 // Connect initializes MongoDB connection
 func Connect() error {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatalf("Error loading .env file")
+
+	if err := godotenv.Load(); err != nil {
+		log.Println("Warning: No .env file found, using system environment variables")
 	}
 	// Load URI from environment variable
-	uri := os.Getenv("MONGO_DB_URL")
+	// uri := os.Getenv("MONGO_DB_URL")
+	uri := "mongodb+srv://yashrajoria:MvpTpbFRNGqDRhGC@ecommerce.dafay.mongodb.net/"
 	if uri == "" {
-		return fmt.Errorf("MONGODB_URI is not set")
+		return fmt.Errorf("MONGO_DB_URL is not set")
 	}
 
+	log.Println((uri))
 	// Set timeout for connection
 	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
 
