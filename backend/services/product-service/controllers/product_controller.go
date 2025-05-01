@@ -76,25 +76,54 @@ func GetProductByID(c *gin.Context) {
 	c.JSON(http.StatusOK, product)
 }
 
-// CreateProduct inserts a new product into the database.
-func CreateProduct(c *gin.Context) {
-	var product models.Product
+type ProductInput struct {
+	Name        string   `json:"title" binding:"required"`
+	Price       float64  `json:"price" binding:"required"`
+	Category    string   `json:"category" binding:"required"`
+	Images      []string `json:"images"`
+	Quantity    int      `json:"quantity"`
+	Description string   `json:"description"`
+}
 
-	if err := c.ShouldBindJSON(&product); err != nil {
+func CreateProduct(c *gin.Context) {
+	var input ProductInput
+
+	// Bind and validate JSON input
+	if err := c.ShouldBindJSON(&input); err != nil {
+		log.Println("Invalid JSON body:", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON body"})
 		return
 	}
 
+	// Convert category ID from string to ObjectID
+	catID, err := primitive.ObjectIDFromHex(input.Category)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category ID format"})
+		return
+	}
+
 	// Validate category exists
+	ctx := c.Request.Context()
 	var category models.Category
-	err := database.DB.Collection("categories").FindOne(c, bson.M{"_id": product.Category}).Decode(&category)
+	err = database.DB.Collection("categories").FindOne(ctx, bson.M{"_id": catID}).Decode(&category)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category ID"})
 		return
 	}
 
-	product.ID = primitive.NewObjectID()
-	_, err = database.DB.Collection("products").InsertOne(c, product)
+	// Create product object for insertion
+	product := models.Product{
+		ID:          primitive.NewObjectID(),
+		Name:        input.Name,
+		Price:       input.Price,
+		Category:    catID,
+		Images:      input.Images,
+		Quantity:    input.Quantity,
+		Description: input.Description,
+	}
+
+	// Insert product into DB
+	_, err = database.DB.Collection("products").InsertOne(ctx, product)
 	if err != nil {
 		log.Println("Error inserting product:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to insert product"})
