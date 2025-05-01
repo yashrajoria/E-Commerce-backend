@@ -81,7 +81,6 @@ func main() {
 		forwardRequest(c, "http://auth-service:8081"+c.Param("any"))
 	})
 	userGroup.POST("/*any", func(c *gin.Context) {
-		// forwardRequest(c, "http://localhost:8081"+c.Param("any"))
 		forwardRequest(c, "http://auth-service:8081")
 
 	})
@@ -92,7 +91,12 @@ func main() {
 
 	// Forward requests to Product Service (Protected)
 	protected.GET("/products/*any", func(c *gin.Context) {
-		forwardRequest(c, "http://localhost:8082"+c.Param("any"))
+		// forwardRequest(c, "http://localhost:8082"+c.Param("any"))
+		forwardRequest(c, "http://product-service:8082"+c.Param("any"))
+	})
+	protected.POST("/products/*any", func(c *gin.Context) {
+		// forwardRequest(c, "http://localhost:8082"+c.Param("any"))
+		forwardRequest(c, "http://product-service:8082"+c.Param("any"))
 	})
 
 	// Forward requests to Order Service (Protected)
