@@ -48,6 +48,11 @@ func main() {
 	authGroup.POST("/register", controllers.Register)
 	authGroup.POST("/login", controllers.Login)
 	authGroup.POST("/verify-email", controllers.VerifyEmail)
+	authGroup.POST("/address", controllers.CreateAddress)
+
+	//Address Routes
+	// routes.RegisterAddressRoutes(r)
+
 	log.Println("Auth Service started on port 8081")
 	// Start the server on port 8081
 	if err := r.Run(":8081"); err != nil {
