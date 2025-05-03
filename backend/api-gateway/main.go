@@ -54,7 +54,7 @@ func main() {
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
-		AllowCredentials: true, // Required if using cookies or Authorization headers
+		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
 
@@ -91,12 +91,16 @@ func main() {
 
 	// Forward requests to Product Service (Protected)
 	protected.GET("/products/*any", func(c *gin.Context) {
-		// forwardRequest(c, "http://localhost:8082"+c.Param("any"))
-		forwardRequest(c, "http://product-service:8082"+c.Param("any"))
+		path := c.Param("any")
+		if path == "" || path == "/" {
+			path = ""
+		}
+		forwardRequest(c, "http://product-service:8082/products"+path)
 	})
+
 	protected.POST("/products/*any", func(c *gin.Context) {
-		// forwardRequest(c, "http://localhost:8082"+c.Param("any"))
-		forwardRequest(c, "http://product-service:8082"+c.Param("any"))
+
+		forwardRequest(c, "http://product-service:8082/products")
 	})
 
 	// Forward requests to Order Service (Protected)
