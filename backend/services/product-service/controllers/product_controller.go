@@ -1,9 +1,12 @@
 package controllers
 
 import (
+	"encoding/csv"
 	"log"
+	"math"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/yashrajoria/product-service/database"
@@ -15,22 +18,26 @@ import (
 )
 
 // GetProducts retrieves paginated products from the database.
+// GetProducts retrieves paginated products from the database.
 func GetProducts(c *gin.Context) {
 	collection := database.DB.Collection("products")
 
-	// Pagination parameters
-	limit, err := strconv.Atoi(c.DefaultQuery("limit", "10"))
-	if err != nil || limit <= 0 {
-		limit = 10
+	// Parse query parameters
+	page, err := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if err != nil || page < 1 {
+		page = 1
 	}
-	skip, err := strconv.Atoi(c.DefaultQuery("skip", "0"))
-	if err != nil || skip < 0 {
-		skip = 0
+
+	perPage, err := strconv.Atoi(c.DefaultQuery("perPage", "10"))
+	if err != nil || perPage <= 0 {
+		perPage = 10
 	}
+
+	skip := (page - 1) * perPage
 
 	// MongoDB query options
 	findOptions := options.Find()
-	findOptions.SetLimit(int64(limit))
+	findOptions.SetLimit(int64(perPage))
 	findOptions.SetSkip(int64(skip))
 
 	var products []models.Product
@@ -44,11 +51,29 @@ func GetProducts(c *gin.Context) {
 
 	if err := cursor.All(c, &products); err != nil {
 		log.Println("Error decoding products:", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"erroar": "Failed to decode products"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode products"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"products": products})
+	total, err := collection.CountDocuments(c, bson.M{})
+	if err != nil {
+		log.Println("Error counting products:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count products"})
+		return
+	}
+
+	totalPages := int(math.Ceil(float64(total) / float64(perPage)))
+
+	// Respond with products and pagination metadata
+	c.JSON(http.StatusOK, gin.H{
+		"products": products,
+		"meta": gin.H{
+			"page":       page,
+			"perPage":    perPage,
+			"total":      total,
+			"totalPages": totalPages,
+		},
+	})
 }
 
 // GetProductByID retrieves a single product by ID.
@@ -192,4 +217,124 @@ func UpdateProduct(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Product updated successfully"})
+}
+
+func CreateBulkProducts(c *gin.Context) {
+	// Step 1: Upload and open the file
+	file, err := c.FormFile("file")
+	if err != nil {
+		log.Println("Error getting file:", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "File upload required"})
+		return
+	}
+
+	// Open the file
+	src, err := file.Open()
+	if err != nil {
+		log.Println("Error opening file:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open file"})
+		return
+	}
+	defer src.Close()
+
+	// Step 2: Read CSV data
+	r := csv.NewReader(src)
+	records, err := r.ReadAll()
+	if err != nil {
+		log.Println("Error reading CSV:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read CSV"})
+		return
+	}
+
+	// Step 3: Skip the header row (first row)
+	if len(records) > 0 {
+		records = records[1:]
+	}
+
+	// Step 4: Validate records
+	if len(records) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No records found in CSV"})
+		return
+	}
+
+	var products []models.Product
+	var categoryIDs map[string]primitive.ObjectID = make(map[string]primitive.ObjectID)
+
+	// Step 5: Process each record
+	for _, row := range records {
+		// Basic field validation
+		if len(row) < 5 {
+			log.Println("Invalid row format:", row)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid CSV row format"})
+			return
+		}
+
+		// Price validation
+		priceStr := strings.TrimSpace(row[1])
+		if priceStr == "" {
+			log.Println("Price is empty for product:", row[0])
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Price cannot be empty"})
+			return
+		}
+
+		price, err := strconv.ParseFloat(priceStr, 64)
+		if err != nil {
+			log.Printf("Error parsing price for %s: %v\n", row[0], err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid price format"})
+			return
+		}
+
+		// Quantity validation
+		quantityStr := strings.TrimSpace(row[4])
+		if quantityStr == "" {
+			log.Println("Quantity is empty for product:", row[0])
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Quantity cannot be empty"})
+			return
+		}
+
+		quantity, err := strconv.Atoi(quantityStr)
+		if err != nil {
+			log.Printf("Error parsing quantity for %s: %v\n", row[0], err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid quantity format"})
+			return
+		}
+
+		// Handle category - if it doesn't exist, create a new ID
+		categoryName := strings.TrimSpace(row[2]) // Assuming category name is in column 3
+		var categoryID primitive.ObjectID
+		if id, exists := categoryIDs[categoryName]; exists {
+			categoryID = id // Use existing category ID
+		} else {
+			categoryID = primitive.NewObjectID() // Assign new category ID
+			categoryIDs[categoryName] = categoryID
+		}
+
+		// Create the product object
+		product := models.Product{
+			ID:          primitive.NewObjectID(),
+			Name:        row[0],
+			Price:       price,
+			Category:    categoryID,
+			Images:      []string{row[2]}, // Assuming image URL is in column 3
+			Quantity:    quantity,
+			Description: row[3],
+		}
+		products = append(products, product)
+	}
+
+	// Step 6: Insert products into the database
+	var productInterfaces []interface{}
+	for _, product := range products {
+		productInterfaces = append(productInterfaces, product)
+	}
+
+	_, err = database.DB.Collection("products").InsertMany(c, productInterfaces)
+	if err != nil {
+		log.Println("Error inserting products:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to insert products"})
+		return
+	}
+
+	// Step 7: Return success response
+	c.JSON(http.StatusOK, gin.H{"message": "Products inserted successfully"})
 }
