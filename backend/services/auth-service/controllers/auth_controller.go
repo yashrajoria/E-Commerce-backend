@@ -53,6 +53,13 @@ func Login(c *gin.Context) {
 
 	err := database.DB.Where("email = ?", loginReq.Email).First(&user).Error
 
+	if err != nil {
+		if err.Error() == "record not found" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
+	}
+
 	if err := database.DB.Where("email = ?", loginReq.Email).First(&user).Error; err != nil {
 
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
@@ -73,18 +80,8 @@ func Login(c *gin.Context) {
 	log.Println("Generated token:", token)
 
 	// Set token in HTTP-Only cookie
-	c.SetCookie("token", token, 86400, "/", "localhost", false, true) // ✅ Secure HttpOnly cookie
-
-	// Return user details instead of token
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Login successful",
-		"user": gin.H{
-			"id":    user.ID,
-			"email": user.Email,
-			// "phone_number": user.PhoneNumber,
-			"role": user.Role,
-		},
-	})
+	c.SetCookie("token", token, 86400, "/", "localhost", false, true)
+	c.JSON(http.StatusOK, gin.H{"message": "Logged in"})
 }
 
 // Register a new user
