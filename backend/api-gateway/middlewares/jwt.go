@@ -3,7 +3,6 @@ package middlewares
 import (
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
@@ -15,23 +14,15 @@ var secretKey = []byte("your-secret-key")
 // JWT middleware function
 func JWTMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		tokenString := c.GetHeader("Authorization")
-		if tokenString == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is required"})
-			c.Abort()
-			return
-		}
+		tokenString, err := c.Cookie("token")
 
-		// Remove "Bearer " prefix from token string
-		if !strings.HasPrefix(tokenString, "Bearer ") {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token format"})
+		if err != nil || tokenString == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing authentication token"})
 			c.Abort()
 			return
 		}
-		tokenString = tokenString[7:]
 
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			// Ensure the token method is HMAC
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 			}
@@ -44,7 +35,11 @@ func JWTMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// Token is valid, proceed with request
+		// Optional: set user info from claims
+		if claims, ok := token.Claims.(jwt.MapClaims); ok {
+			c.Set("user_id", claims["user_id"])
+		}
+
 		c.Next()
 	}
 }
