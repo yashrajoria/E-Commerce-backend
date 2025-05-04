@@ -3,19 +3,18 @@ package middlewares
 import (
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
 )
 
-// Secret key for signing JWT tokens (use a more secure secret in production)
-var secretKey = []byte("your-secret-key")
-
-// JWT middleware function
+// JWTMiddleware checks and validates JWT token from cookies
 func JWTMiddleware() gin.HandlerFunc {
+	secretKey := []byte(os.Getenv("JWT_SECRET"))
+
 	return func(c *gin.Context) {
 		tokenString, err := c.Cookie("token")
-
 		if err != nil || tokenString == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing authentication token"})
 			c.Abort()
