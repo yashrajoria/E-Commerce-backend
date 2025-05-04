@@ -12,6 +12,7 @@ type User struct {
 	ID       uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
 	Email    string    `gorm:"unique;not null"`
 	Password string    `gorm:"not null"`
+	Name     string    `gorm:"not null"`
 	// PhoneNumber       *string   `gorm:"unique"`
 	EmailVerified     bool   `gorm:"default:false"`
 	VerificationCode  string `gorm:"size:6"`
