@@ -69,7 +69,7 @@ func main() {
 		log.Println("Handling OPTIONS request for:", c.Request.URL.Path)
 		origin := c.Request.Header.Get("Origin")
 		if origin == "" {
-			origin = "http://localhost:3000" // Default origin
+			origin = "http://localhost:3000"
 		}
 		c.Header("Access-Control-Allow-Origin", origin)
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -87,7 +87,7 @@ func main() {
 
 	// Protected routes (Require JWT authentication)
 	protected := r.Group("/")
-	protected.Use(middlewares.JWTMiddleware()) // Apply JWT only to protected routes
+	protected.Use(middlewares.JWTMiddleware())
 
 	// Forward requests to Product Service (Protected)
 	protected.GET("/products/*any", func(c *gin.Context) {
