@@ -1,6 +1,7 @@
 package middlewares
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 
@@ -11,55 +12,52 @@ import (
 // RequireRole checks if the user has the required role for the route
 func RequireRole(allowedRoles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Get the token from HTTP-only cookies
-		tokenString, err := c.Cookie("token")
+		claims, err := ExtractClaims(c)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing authentication token"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 			c.Abort()
 			return
 		}
 
-		// Parse the token using your JWT service
-		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			return []byte(os.Getenv("JWT_SECRET")), nil
-		})
-		if err != nil || !token.Valid {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
-			c.Abort()
-			return
-		}
-
-		// Extract user role from claims
-		claims, ok := token.Claims.(jwt.MapClaims)
-		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token claims"})
-			c.Abort()
-			return
-		}
-
-		userRole, ok := claims["role"].(string)
+		role, ok := claims["role"].(string)
 		if !ok {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing role in token"})
 			c.Abort()
 			return
 		}
 
-		// Check if the user role is allowed
-		roleAllowed := false
-		for _, role := range allowedRoles {
-			if userRole == role {
-				roleAllowed = true
-				break
+		for _, allowed := range allowedRoles {
+			if role == allowed {
+				c.Next()
+				return
 			}
 		}
 
-		if !roleAllowed {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
-			c.Abort()
-			return
-		}
-
-		// Proceed to the next middleware/handler
-		c.Next()
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		c.Abort()
 	}
+}
+
+func ExtractClaims(c *gin.Context) (jwt.MapClaims, error) {
+	tokenString, err := c.Cookie("token")
+	if err != nil {
+		return nil, fmt.Errorf("missing token")
+	}
+
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(os.Getenv("JWT_SECRET")), nil
+	})
+	if err != nil || !token.Valid {
+		return nil, fmt.Errorf("invalid token")
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, fmt.Errorf("invalid claims")
+	}
+
+	return claims, nil
 }
