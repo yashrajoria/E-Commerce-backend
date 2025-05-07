@@ -4,6 +4,7 @@ import (
 	"auth-service/database"
 	"auth-service/models"
 	"auth-service/services"
+	"errors"
 	"fmt"
 	"log"
 	"math/rand"
@@ -15,20 +16,22 @@ import (
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 // Struct to represent the login request body
 type LoginRequest struct {
 	Email    string `json:"email" binding:"required"`
 	Password string `json:"password" binding:"required"`
+	Role     string `json:"role" binding:"required,oneof=admin user"`
 }
 
 // Struct for user registration
 type RegisterRequest struct {
 	Email    string `json:"email" binding:"required"`
 	Password string `json:"password" binding:"required"`
-	// PhoneNumber string `json:"phone_number"`
-	Role string `json:"role"`
+	// FullName string `json:"full_name" binding:"required"`
+	Role string `json:"role" binding:"required,oneof=admin user"`
 }
 
 type AddressRequest struct {
@@ -40,48 +43,59 @@ type AddressRequest struct {
 	Country    string `json:"country" binding:"required"`
 }
 
-// Login handles user authentication and JWT generation
 func Login(c *gin.Context) {
 	var loginReq LoginRequest
 
+	// 1. Validate JSON body
 	if err := c.ShouldBindJSON(&loginReq); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 		return
 	}
 
 	var user models.User
 
+	// 2. Fetch user by email
 	err := database.DB.Where("email = ?", loginReq.Email).First(&user).Error
-
 	if err != nil {
-		if err.Error() == "record not found" {
-			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
-			return
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// Avoid leaking user existence
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 		}
-	}
-
-	if err := database.DB.Where("email = ?", loginReq.Email).First(&user).Error; err != nil {
-
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
 	}
 
-	// Compare hashed password
+	// 3. Check role match
+	if user.Role != loginReq.Role {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "You are not authorized to access this resource"})
+		return
+	}
+
+	// Check if email is verified
+	if !user.EmailVerified {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Email not verified"})
+		return
+	}
+
+	// 4. Validate password
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(loginReq.Password)); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid password"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
 		return
 	}
-	// Generate JWT token
+
+	// 5. Generate JWT token
 	token, err := services.GenerateJWT(user.ID.String(), user.Email, user.Role)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
 		return
 	}
-	log.Println("Generated token:", token)
 
-	// Set token in HTTP-Only cookie
+	// 6. Set token in HTTP-only cookie (adjust domain in production)
 	c.SetCookie("token", token, 86400, "/", "localhost", false, true)
-	c.JSON(http.StatusOK, gin.H{"message": "Logged in"})
+
+	// 7. Respond with success (omit token in response for security)
+	c.JSON(http.StatusOK, gin.H{"message": "Logged in successfully"})
 }
 
 // Register a new user
