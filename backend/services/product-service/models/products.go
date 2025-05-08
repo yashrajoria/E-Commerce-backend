@@ -14,6 +14,6 @@ type Product struct {
 	Images      []string           `json:"images" bson:"images"`
 	Quantity    int                `json:"quantity" bson:"quantity"`
 	Description string             `json:"description" bson:"description"`
-	CreatedAt   time.Time          `gorm:"autoCreateTime"`
-	UpdatedAt   time.Time          `gorm:"autoUpdateTime"`
+	CreatedAt   time.Time          `json:"createdAt" bson:"createdAt"`
+	UpdatedAt   time.Time          `json:"updatedAt" bson:"updatedAt"`
 }

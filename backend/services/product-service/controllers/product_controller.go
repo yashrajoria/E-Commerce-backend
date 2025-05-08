@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/yashrajoria/product-service/database"
@@ -145,6 +146,8 @@ func CreateProduct(c *gin.Context) {
 		Images:      input.Images,
 		Quantity:    input.Quantity,
 		Description: input.Description,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 
 	// Insert product into DB
@@ -300,7 +303,7 @@ func CreateBulkProducts(c *gin.Context) {
 		}
 
 		// Handle category - if it doesn't exist, create a new ID
-		categoryName := strings.TrimSpace(row[2]) // Assuming category name is in column 3
+		categoryName := strings.TrimSpace(row[2])
 		var categoryID primitive.ObjectID
 		if id, exists := categoryIDs[categoryName]; exists {
 			categoryID = id // Use existing category ID
@@ -315,9 +318,11 @@ func CreateBulkProducts(c *gin.Context) {
 			Name:        row[0],
 			Price:       price,
 			Category:    categoryID,
-			Images:      []string{row[2]}, // Assuming image URL is in column 3
+			Images:      []string{row[2]},
 			Quantity:    quantity,
 			Description: row[3],
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
 		}
 		products = append(products, product)
 	}
