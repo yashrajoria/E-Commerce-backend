@@ -95,7 +95,8 @@ func main() {
 		if path == "" || path == "/" {
 			path = ""
 		}
-		forwardRequest(c, "	"+path)
+		forwardRequest(c, "http://product-service:8082/products"+path)
+
 	})
 
 	protected.POST("/products/*any", func(c *gin.Context) {
