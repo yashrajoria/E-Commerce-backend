@@ -3,6 +3,7 @@ package controllers
 import (
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson"
@@ -65,6 +66,8 @@ func CreateCategory(c *gin.Context) {
 		Name:      requestBody.Name,
 		ParentIDs: parentIDs,
 		Ancestors: ancestorIDs,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	}
 
 	_, err := database.DB.Collection("categories").InsertOne(c, newCategory)
