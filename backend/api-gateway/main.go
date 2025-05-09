@@ -95,12 +95,19 @@ func main() {
 		if path == "" || path == "/" {
 			path = ""
 		}
-		forwardRequest(c, "http://product-service:8082/products"+path)
+		forwardRequest(c, "	"+path)
 	})
 
 	protected.POST("/products/*any", func(c *gin.Context) {
 
 		forwardRequest(c, "http://product-service:8082/products")
+	})
+
+	protected.GET("/category/*any", func(c *gin.Context) {
+		forwardRequest(c, "http://product-service:8082/category")
+	})
+	protected.POST("/category/*any", func(c *gin.Context) {
+		forwardRequest(c, "http://product-service:8082/category")
 	})
 
 	// Forward requests to Order Service (Protected)
