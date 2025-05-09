@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"encoding/csv"
+	"fmt"
 	"log"
 	"math"
 	"net/http"
@@ -18,7 +19,6 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// GetProducts retrieves paginated products from the database.
 // GetProducts retrieves paginated products from the database.
 func GetProducts(c *gin.Context) {
 	collection := database.DB.Collection("products")
@@ -105,7 +105,7 @@ func GetProductByID(c *gin.Context) {
 type ProductInput struct {
 	Name        string   `json:"title" binding:"required"`
 	Price       float64  `json:"price" binding:"required"`
-	Category    string   `json:"category" binding:"required"`
+	Categories  []string `json:"category" binding:"required"`
 	Images      []string `json:"images"`
 	Quantity    int      `json:"quantity"`
 	Description string   `json:"description"`
@@ -114,44 +114,65 @@ type ProductInput struct {
 func CreateProduct(c *gin.Context) {
 	var input ProductInput
 
-	// Bind and validate JSON input
 	if err := c.ShouldBindJSON(&input); err != nil {
 		log.Println("Invalid JSON body:", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON body"})
 		return
 	}
 
-	// Convert category ID from string to ObjectID
-	catID, err := primitive.ObjectIDFromHex(input.Category)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category ID format"})
+	if len(input.Categories) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "At least one category is required"})
 		return
 	}
 
-	// Validate category exists
 	ctx := c.Request.Context()
-	var category models.Category
-	err = database.DB.Collection("categories").FindOne(ctx, bson.M{"_id": catID}).Decode(&category)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category ID"})
-		return
+	var categoryIDs []primitive.ObjectID
+	var categoryPaths []string
+	categorySet := make(map[primitive.ObjectID]bool)
+	pathSet := make(map[string]bool)
+
+	for _, catName := range input.Categories {
+		var category models.Category
+		err := database.DB.Collection("categories").FindOne(ctx, bson.M{"name": catName}).Decode(&category)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Category '%s' not found", catName)})
+			return
+		}
+
+		if !categorySet[category.ID] {
+			categoryIDs = append(categoryIDs, category.ID)
+			categorySet[category.ID] = true
+		}
+		for _, ancestor := range category.Ancestors {
+			if !categorySet[ancestor] {
+				categoryIDs = append(categoryIDs, ancestor)
+				categorySet[ancestor] = true
+			}
+		}
+
+		for _, path := range category.Path {
+			if !pathSet[path] {
+				categoryPaths = append(categoryPaths, path)
+				pathSet[path] = true
+			}
+		}
 	}
 
-	// Create product object for insertion
 	product := models.Product{
-		ID:          primitive.NewObjectID(),
-		Name:        input.Name,
-		Price:       input.Price,
-		Category:    catID,
-		Images:      input.Images,
-		Quantity:    input.Quantity,
-		Description: input.Description,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:           primitive.NewObjectID(),
+		Name:         input.Name,
+		Price:        input.Price,
+		Quantity:     input.Quantity,
+		Description:  input.Description,
+		Images:       input.Images,
+		CategoryID:   categoryIDs[0],
+		CategoryIDs:  categoryIDs,
+		CategoryPath: categoryPaths,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 
-	// Insert product into DB
-	_, err = database.DB.Collection("products").InsertOne(ctx, product)
+	_, err := database.DB.Collection("products").InsertOne(ctx, product)
 	if err != nil {
 		log.Println("Error inserting product:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to insert product"})
@@ -223,7 +244,6 @@ func UpdateProduct(c *gin.Context) {
 }
 
 func CreateBulkProducts(c *gin.Context) {
-	// Step 1: Upload and open the file
 	file, err := c.FormFile("file")
 	if err != nil {
 		log.Println("Error getting file:", err)
@@ -231,7 +251,6 @@ func CreateBulkProducts(c *gin.Context) {
 		return
 	}
 
-	// Open the file
 	src, err := file.Open()
 	if err != nil {
 		log.Println("Error opening file:", err)
@@ -240,7 +259,6 @@ func CreateBulkProducts(c *gin.Context) {
 	}
 	defer src.Close()
 
-	// Step 2: Read CSV data
 	r := csv.NewReader(src)
 	records, err := r.ReadAll()
 	if err != nil {
@@ -249,97 +267,112 @@ func CreateBulkProducts(c *gin.Context) {
 		return
 	}
 
-	// Step 3: Skip the header row (first row)
-	if len(records) > 0 {
-		records = records[1:]
-	}
-
-	// Step 4: Validate records
-	if len(records) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No records found in CSV"})
+	if len(records) <= 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No product records in CSV"})
 		return
 	}
+	records = records[1:] // Skip header
 
+	// category name -> category object cache
+	categoryCache := make(map[string]models.Category)
 	var products []models.Product
-	var categoryIDs map[string]primitive.ObjectID = make(map[string]primitive.ObjectID)
 
-	// Step 5: Process each record
 	for _, row := range records {
-		// Basic field validation
-		if len(row) < 5 {
-			log.Println("Invalid row format:", row)
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid CSV row format"})
+		if len(row) < 6 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Each row must include: Name, Price, Categories, Description, Quantity, ImageURL"})
 			return
 		}
 
-		// Price validation
-		priceStr := strings.TrimSpace(row[1])
-		if priceStr == "" {
-			log.Println("Price is empty for product:", row[0])
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Price cannot be empty"})
-			return
-		}
-
-		price, err := strconv.ParseFloat(priceStr, 64)
+		name := strings.TrimSpace(row[0])
+		price, err := strconv.ParseFloat(strings.TrimSpace(row[1]), 64)
 		if err != nil {
-			log.Printf("Error parsing price for %s: %v\n", row[0], err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid price format"})
 			return
 		}
 
-		// Quantity validation
-		quantityStr := strings.TrimSpace(row[4])
-		if quantityStr == "" {
-			log.Println("Quantity is empty for product:", row[0])
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Quantity cannot be empty"})
-			return
-		}
-
-		quantity, err := strconv.Atoi(quantityStr)
+		rawCategories := strings.Split(row[2], ",")
+		description := strings.TrimSpace(row[3])
+		quantity, err := strconv.Atoi(strings.TrimSpace(row[4]))
 		if err != nil {
-			log.Printf("Error parsing quantity for %s: %v\n", row[0], err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid quantity format"})
 			return
 		}
+		image := strings.TrimSpace(row[5])
 
-		// Handle category - if it doesn't exist, create a new ID
-		categoryName := strings.TrimSpace(row[2])
-		var categoryID primitive.ObjectID
-		if id, exists := categoryIDs[categoryName]; exists {
-			categoryID = id // Use existing category ID
-		} else {
-			categoryID = primitive.NewObjectID() // Assign new category ID
-			categoryIDs[categoryName] = categoryID
+		var categoryIDs []primitive.ObjectID
+		var categoryPaths []string
+		categorySet := make(map[primitive.ObjectID]bool) // to dedupe ancestors
+
+		for _, catNameRaw := range rawCategories {
+			catName := strings.TrimSpace(catNameRaw)
+			if catName == "" {
+				continue
+			}
+
+			var cat models.Category
+			if cached, ok := categoryCache[catName]; ok {
+				cat = cached
+			} else {
+				err := database.DB.Collection("categories").FindOne(c, bson.M{"name": catName}).Decode(&cat)
+				if err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Category '%s' not found", catName)})
+					return
+				}
+				categoryCache[catName] = cat
+			}
+
+			if !categorySet[cat.ID] {
+				categoryIDs = append(categoryIDs, cat.ID)
+				categorySet[cat.ID] = true
+			}
+
+			for _, ancestor := range cat.Ancestors {
+				if !categorySet[ancestor] {
+					categoryIDs = append(categoryIDs, ancestor)
+					categorySet[ancestor] = true
+				}
+			}
+
+			categoryPaths = append(categoryPaths, cat.Path...)
 		}
 
-		// Create the product object
+		// Deduplicate path strings
+		pathSet := make(map[string]bool)
+		var dedupedPaths []string
+		for _, p := range categoryPaths {
+			if !pathSet[p] {
+				dedupedPaths = append(dedupedPaths, p)
+				pathSet[p] = true
+			}
+		}
+
 		product := models.Product{
-			ID:          primitive.NewObjectID(),
-			Name:        row[0],
-			Price:       price,
-			Category:    categoryID,
-			Images:      []string{row[2]},
-			Quantity:    quantity,
-			Description: row[3],
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+			ID:           primitive.NewObjectID(),
+			Name:         name,
+			Price:        price,
+			Quantity:     quantity,
+			Description:  description,
+			Images:       []string{image},
+			CategoryID:   categoryIDs[0], // use the first as primary
+			CategoryIDs:  categoryIDs,
+			CategoryPath: dedupedPaths,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
 		}
 		products = append(products, product)
 	}
 
-	// Step 6: Insert products into the database
-	var productInterfaces []interface{}
-	for _, product := range products {
-		productInterfaces = append(productInterfaces, product)
+	var inserts []interface{}
+	for _, p := range products {
+		inserts = append(inserts, p)
 	}
 
-	_, err = database.DB.Collection("products").InsertMany(c, productInterfaces)
+	_, err = database.DB.Collection("products").InsertMany(c, inserts)
 	if err != nil {
 		log.Println("Error inserting products:", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to insert products"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Bulk insert failed"})
 		return
 	}
 
-	// Step 7: Return success response
-	c.JSON(http.StatusOK, gin.H{"message": "Products inserted successfully"})
+	c.JSON(http.StatusOK, gin.H{"message": "Products inserted successfully", "count": len(products)})
 }
