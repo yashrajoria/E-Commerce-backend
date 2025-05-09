@@ -103,7 +103,7 @@ func GetProductByID(c *gin.Context) {
 }
 
 type ProductInput struct {
-	Name        string   `json:"title" binding:"required"`
+	Name        string   `json:"name" binding:"required"`
 	Price       float64  `json:"price" binding:"required"`
 	Categories  []string `json:"category" binding:"required"`
 	Images      []string `json:"images"`
