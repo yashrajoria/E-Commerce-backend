@@ -95,11 +95,19 @@ func main() {
 		if path == "" || path == "/" {
 			path = ""
 		}
-		forwardRequest(c, "http://product-service:8082/products"+path)
+		forwardRequest(c, "http://product-service:8082/products")
 
 	})
 
 	protected.POST("/products/*any", func(c *gin.Context) {
+
+		forwardRequest(c, "http://product-service:8082/products")
+	})
+	protected.DELETE("/products/*any", func(c *gin.Context) {
+
+		forwardRequest(c, "http://product-service:8082/products")
+	})
+	protected.PUT("/products/*any", func(c *gin.Context) {
 
 		forwardRequest(c, "http://product-service:8082/products")
 	})
