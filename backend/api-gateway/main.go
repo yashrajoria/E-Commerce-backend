@@ -31,7 +31,7 @@ func forwardRequest(c *gin.Context, targetBase string) {
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Println("Error forwarding request:", err)
-		c.JSON(http.StatusBadGateway, gin.H{"error": "Failed to reach auth service"})
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Failed to reach target service"})
 		return
 	}
 	defer resp.Body.Close()
@@ -119,9 +119,13 @@ func main() {
 		forwardRequest(c, "http://product-service:8082/category")
 	})
 
-	// Forward requests to Order Service (Protected)
-	protected.GET("/orders/*any", func(c *gin.Context) {
-		forwardRequest(c, "http://localhost:8083"+c.Param("any"))
+	protected.POST("/orders/*any", func(c *gin.Context) {
+		path := c.Param("any")
+		if path == "/" || path == "" {
+			path = ""
+		}
+		// forwardRequest(c, "http://order-service:8083/orders"+path)
+		forwardRequest(c, "http://order-service:8083/orders")
 	})
 	protected.GET("/inventory/*any", func(c *gin.Context) {
 		forwardRequest(c, "http://localhost:8084"+c.Param("any"))
