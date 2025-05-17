@@ -5,42 +5,71 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	db "github.com/yashrajoria/order-service/database"
-	models "github.com/yashrajoria/order-service/database"
-	"go.mongodb.org/mongo-driver/bson"
+	"github.com/google/uuid"
+	"github.com/yashrajoria/order-service/database"
+	"github.com/yashrajoria/order-service/models"
+	"gorm.io/gorm"
 )
 
-func GetOrder(c *gin.Context) {
+// Payload struct to bind JSON with order + items
+type CreateOrderRequest struct {
+	UserID uuid.UUID        `json:"user_id" binding:"required"`
+	Items  []OrderItemInput `json:"items" binding:"required,dive,required"`
+	Amount int              `json:"amount" binding:"required"`
+	Status string           `json:"status"`
+}
 
-	collection := db.DB.Collection("orders")
-	var orders []models.Order
+// Define input for order items (no ID needed here)
+type OrderItemInput struct {
+	ProductID uuid.UUID `json:"product_id" binding:"required"`
+	Quantity  int       `json:"quantity" binding:"required,min=1"`
+}
 
-	cursor, err := collection.Find(c, bson.M{})
-	if err != nil {
-		log.Println("Error finding products:", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch orders"})
+func CreateOrder(c *gin.Context) {
+	var req CreateOrderRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Println("Invalid data:", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid data"})
 		return
 	}
-	defer cursor.Close(c)
 
-	// Decode each document and append it to the products slice
-	for cursor.Next(c) {
-		var order models.Order
-		if err := cursor.Decode(&order); err != nil {
-			log.Println("Error decoding order:", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode order"})
-			return
+	order := models.Order{
+		UserID: req.UserID,
+		Amount: req.Amount,
+		Status: req.Status,
+	}
+
+	// Use transaction for atomic operation
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		// Save order
+		if err := tx.Create(&order).Error; err != nil {
+			return err
 		}
-		orders = append(orders, order)
-	}
 
-	// Handle cursor errors
-	if err := cursor.Err(); err != nil {
-		log.Println("Cursor error:", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Cursor error"})
+		// Prepare and insert order items
+		var orderItems []models.OrderItem
+		for _, item := range req.Items {
+			orderItems = append(orderItems, models.OrderItem{
+				ID:        uuid.New(),
+				OrderID:   order.ID,
+				ProductID: item.ProductID,
+				Quantity:  item.Quantity,
+			})
+		}
+
+		if err := tx.Create(&orderItems).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		log.Println("Failed to create order:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create order"})
 		return
 	}
-
-	c.JSON(http.StatusOK, gin.H{"products": orders})
+	c.JSON(http.StatusCreated, gin.H{"message": "Order created successfully", "order_id": order.ID})
 
 }
