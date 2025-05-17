@@ -4,12 +4,14 @@ import (
 	"log"
 
 	"github.com/gin-gonic/gin"
-	"github.com/yashrajoria/order-service/controllers"
-	db "github.com/yashrajoria/order-service/database"
+	"github.com/yashrajoria/order-service/database"
+	"github.com/yashrajoria/order-service/models"
+	"github.com/yashrajoria/order-service/routes"
 )
 
 func main() {
-	err := db.Connect()
+	err := database.Connect()
+	database.DB.AutoMigrate(&models.Order{}, &models.OrderItem{})
 
 	if err != nil {
 		log.Fatalf("Error connecting to database: %v", err)
@@ -17,8 +19,8 @@ func main() {
 
 	r := gin.Default()
 
-	r.GET("/orders", controllers.GetOrder)
-
+	// Register order routes
+	routes.RegisterOrderRoutes(r)
 	r.Run(":8083")
 
 }
