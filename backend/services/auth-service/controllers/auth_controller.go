@@ -30,8 +30,8 @@ type LoginRequest struct {
 type RegisterRequest struct {
 	Email    string `json:"email" binding:"required"`
 	Password string `json:"password" binding:"required"`
-	// FullName string `json:"full_name" binding:"required"`
-	Role string `json:"role" binding:"required,oneof=admin user"`
+	Name     string `json:"full_name" binding:"required"`
+	Role     string `json:"role" binding:"required,oneof=admin user"`
 }
 
 type AddressRequest struct {
@@ -131,8 +131,8 @@ func Register(c *gin.Context) {
 		ID:       uuid.New(),
 		Email:    registerReq.Email,
 		Password: string(hashedPassword),
-		// PhoneNumber: registerReq.PhoneNumber,
-		Role: registerReq.Role,
+		Name:     registerReq.Name,
+		Role:     registerReq.Role,
 	}
 	newUser.VerificationCode = generateRandomCode(6)
 
