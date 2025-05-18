@@ -127,6 +127,14 @@ func main() {
 		// forwardRequest(c, "http://order-service:8083/orders"+path)
 		forwardRequest(c, "http://order-service:8083/orders")
 	})
+	protected.GET("/orders/*any", func(c *gin.Context) {
+		path := c.Param("any")
+		if path == "/" || path == "" {
+			path = ""
+		}
+		forwardRequest(c, "http://order-service:8083/orders"+path)
+	})
+
 	protected.GET("/inventory/*any", func(c *gin.Context) {
 		forwardRequest(c, "http://localhost:8084"+c.Param("any"))
 	})
