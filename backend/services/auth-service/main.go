@@ -49,7 +49,7 @@ func main() {
 	authGroup.POST("/login", controllers.Login)
 	authGroup.POST("/verify-email", controllers.VerifyEmail)
 	authGroup.POST("/address", controllers.CreateAddress)
-
+	// routes.RegisterUserRoutes(r)
 	//Address Routes
 	// routes.RegisterAddressRoutes(r)
 
