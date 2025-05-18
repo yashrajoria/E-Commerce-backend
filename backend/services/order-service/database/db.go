@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/yashrajoria/order-service/models"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -54,6 +55,21 @@ func Connect() error {
 		DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 		if err == nil {
 			log.Println("✅ Connected to PostgreSQL successfully!")
+
+			// AutoMigrate models
+			importedModels := false
+			if !importedModels {
+				importedModels = true
+				err = DB.AutoMigrate(
+					&models.Order{},
+					&models.OrderItem{},
+				)
+				if err != nil {
+					log.Println("❌ AutoMigrate failed:", err)
+					return err
+				}
+			}
+
 			return nil
 		}
 		log.Println("❌ Connection failed:", err)
