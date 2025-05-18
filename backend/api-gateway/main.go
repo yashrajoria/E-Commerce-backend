@@ -16,6 +16,12 @@ func forwardRequest(c *gin.Context, targetBase string) {
 	log.Println("Forwarding request to:", targetBase+c.Param("any"))
 	targetURL := targetBase + c.Param("any")
 
+	// Append query string if present
+	queryString := c.Request.URL.RawQuery
+	if queryString != "" {
+		targetURL = targetURL + "?" + queryString
+	}
+
 	req, err := http.NewRequest(c.Request.Method, targetURL, c.Request.Body)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
