@@ -1,3 +1,5 @@
+// models/order.go
+
 package models
 
 import (
@@ -7,12 +9,12 @@ import (
 )
 
 type Order struct {
-	ID        uuid.UUID   `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
-	UserID    uuid.UUID   `json:"user_id" gorm:"type:uuid;not null"`
-	Amount    int         `json:"amount"` // total amount in paisa
-	Status    string      `json:"status"` // pending, paid, failed, etc.
-	CreatedAt time.Time   `json:"created_at" gorm:"autoCreateTime"`
-	Items     []OrderItem `json:"items" gorm:"foreignKey:OrderID;constraint:OnDelete:CASCADE"`
+	ID         uuid.UUID   `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
+	UserID     uuid.UUID   `json:"user_id" gorm:"type:uuid;not null"`
+	Amount     int         `json:"amount"` // total amount in paisa
+	Status     string      `json:"status"` // pending, paid, failed, etc.
+	CreatedAt  time.Time   `json:"created_at" gorm:"autoCreateTime"`
+	OrderItems []OrderItem `json:"items" gorm:"foreignKey:OrderID;constraint:OnDelete:CASCADE"`
 }
 
 type OrderItem struct {
