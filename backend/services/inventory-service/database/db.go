@@ -1,45 +1,31 @@
-package db
+package database
 
 import (
-	"context"
-	"fmt"
 	"log"
 
+	"github.com/yashrajoria/common/db"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-var mongoClient *mongo.Client
-var DB *mongo.Database
+var (
+	MongoClient *mongo.Client
+	DB          *mongo.Database
+)
 
 func Connect() error {
-	uri := "ajsdasjdpoasjopdasjpodasjdpoasjdpo/"
-
-	clientOptions := options.Client().ApplyURI(uri)
-
-	// Connect to MongoDB
-	client, err := mongo.Connect(context.TODO(), clientOptions)
+	var err error
+	MongoClient, DB, err = db.ConnectMongo()
 	if err != nil {
-		return fmt.Errorf("failed to connect to MongoDB: %w", err)
+		log.Println("❌ Failed to connect to MongoDB:", err)
+		return err
 	}
-
-	// Ping the database to ensure connectivity
-	err = client.Ping(context.TODO(), nil)
-	if err != nil {
-		return fmt.Errorf("failed to ping MongoDB: %w", err)
-	}
-
-	mongoClient = client
-	DB = client.Database("test")
-	log.Println(DB)
-
 	return nil
 }
 
 // Close disconnects from MongoDB
 func Close() error {
 	// Disconnect from MongoDB
-	err := mongoClient.Disconnect(context.TODO())
+	err := MongoClient.Disconnect(context.TODO())
 	if err != nil {
 		return fmt.Errorf("failed to disconnect from MongoDB: %w", err)
 	}
