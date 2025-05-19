@@ -3,6 +3,7 @@ package main
 import (
 	"auth-service/controllers"
 	"auth-service/database"
+	middlewares "auth-service/middleware"
 	"auth-service/models"
 	"log"
 	"net/http"
@@ -11,23 +12,40 @@ import (
 )
 
 func main() {
+	// Initialize logger
+	// 	logger.Initialize(os.Getenv("ENV"))
+
+	// Load configuration from environment variables
+	cfg, err := LoadConfig()
+	if err != nil {
+		log.Println("Config error", err)
+	}
+
 	// Connect to the database
 	if err := database.Connect(); err != nil {
-		log.Fatalf("Could not connect to PostgreSQL: %v", err)
-
+		log.Println("Could not connect to PostgreSQL", err)
 		return
 	}
 
 	// Run migrations
 	if err := models.Migrate(database.DB); err != nil {
-		log.Fatalf("Migration failed: %v", err)
+		log.Println("Migration failed", err)
 	}
 
 	// Initialize Gin router
 	r := gin.Default()
-	authGroup := r.Group("/auth")
-	authGroup.OPTIONS("/*any", func(c *gin.Context) {
-		log.Println("Handling OPTIONS request for:", c.Request.URL.Path)
+
+	// Apply security headers to all routes
+	r.Use(middlewares.SecurityHeaders())
+
+	// Apply rate limiting to all routes
+	r.Use(middlewares.RateLimitMiddleware())
+
+	// Apply request logging
+	//	r.Use(logger.RequestLogger())
+
+	// CORS configuration
+	r.Use(func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
 		if origin == "" {
 			origin = "http://localhost:3000" // Default origin
@@ -36,7 +54,12 @@ func main() {
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
 		c.Header("Access-Control-Allow-Credentials", "true")
-		c.Status(http.StatusOK)
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(http.StatusOK)
+			return
+		}
+		c.Next()
 	})
 
 	// Health check route
@@ -45,17 +68,25 @@ func main() {
 	})
 
 	// Auth routes
-	authGroup.POST("/register", controllers.Register)
-	authGroup.POST("/login", controllers.Login)
-	authGroup.POST("/verify-email", controllers.VerifyEmail)
-	authGroup.POST("/address", controllers.CreateAddress)
-	// routes.RegisterUserRoutes(r)
-	//Address Routes
-	// routes.RegisterAddressRoutes(r)
+	authGroup := r.Group("/auth")
+	{
+		// Public routes
+		authGroup.POST("/register", controllers.Register)
+		authGroup.POST("/login", controllers.Login)
+		authGroup.POST("/verify-email", controllers.VerifyEmail)
 
-	log.Println("Auth Service started on port 8081")
-	// Start the server on port 8081
-	if err := r.Run(":8081"); err != nil {
-		log.Fatalf("Error starting server: %v", err)
+		// Protected routes
+		protected := authGroup.Group("")
+		protected.Use(middlewares.RefreshTokenMiddleware())
+		{
+			protected.POST("/address", controllers.CreateAddress)
+			// Add more protected routes here
+		}
+	}
+
+	//logger.Log.Info("Auth Service started", "port", cfg.Port)
+	// Start the server on configured port
+	if err := r.Run(":" + cfg.Port); err != nil {
+		log.Println("Error starting server", err)
 	}
 }
