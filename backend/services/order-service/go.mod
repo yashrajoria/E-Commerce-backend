@@ -57,4 +57,4 @@ require (
 	gorm.io/driver/postgres v1.5.11 // indirect
 )
 
-replace github.com/yashrajoria/common => ./common
+replace github.com/yashrajoria/common => ../common

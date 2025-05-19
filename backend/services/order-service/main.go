@@ -14,14 +14,14 @@ func main() {
 	// Initialize logger
 	// 	logger.Initialize(os.Getenv("ENV"))
 
-	// Load configuration from environment variables
-	cfg, err := LoadConfig()
-	if err != nil {
-		log.Println("Config error", zap.Error(err))
-	}
+	// // Load configuration from environment variables
+	// cfg, err := LoadConfig()
+	// if err != nil {
+	// 	log.Println("Config error", zap.Error(err))
+	// }
 
 	// Connect to database
-	err = database.Connect()
+	err := database.Connect()
 	if err != nil {
 		log.Println("Error connecting to database", zap.Error(err))
 	}
@@ -39,9 +39,8 @@ func main() {
 	// Register order routes
 	routes.RegisterOrderRoutes(r)
 
-	//logger.Log.Info("Order Service started", zap.String("port", cfg.Port))
 	// Start server on configured port
-	if err := r.Run(":" + cfg.Port); err != nil {
+	if err := r.Run(":" + "8083"); err != nil {
 		log.Println("Error starting server", zap.Error(err))
 	}
 }
