@@ -6,7 +6,7 @@ toolchain go1.23.5
 
 require (
 	github.com/gin-gonic/gin v1.9.1
-	github.com/yashrajoria/common v0.0.0
+//	github.com/yashrajoria/common v0.0.0
 	go.mongodb.org/mongo-driver v1.17.3
 	go.uber.org/zap v1.26.0
 )
@@ -58,4 +58,4 @@ require (
 	gorm.io/gorm v1.26.1 // indirect
 )
 
-replace github.com/yashrajoria/common => ./common
+//replace github.com/yashrajoria/common => ./common

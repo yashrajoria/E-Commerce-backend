@@ -9,7 +9,7 @@ require (
 	github.com/golang-jwt/jwt/v4 v4.5.0
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
-	github.com/yashrajoria/common v0.0.0
+//	github.com/yashrajoria/common v0.0.0
 	golang.org/x/crypto v0.26.0
 	golang.org/x/time v0.11.0
 	gorm.io/gorm v1.26.1
@@ -60,4 +60,4 @@ require (
 	gorm.io/driver/postgres v1.5.11 // indirect
 )
 
-replace github.com/yashrajoria/common => ../common
+//replace github.com/yashrajoria/common => ../common
