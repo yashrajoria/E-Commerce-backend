@@ -97,32 +97,39 @@ func main() {
 
 	// Forward requests to Product Service (Protected)
 	protected.GET("/products/*any", func(c *gin.Context) {
-		path := c.Param("any")
-		if path == "" || path == "/" {
-			path = ""
-		}
 		forwardRequest(c, "http://product-service:8082/products")
-
 	})
 
 	protected.POST("/products/*any", func(c *gin.Context) {
-
 		forwardRequest(c, "http://product-service:8082/products")
 	})
+
 	protected.DELETE("/products/*any", func(c *gin.Context) {
-
 		forwardRequest(c, "http://product-service:8082/products")
 	})
+
 	protected.PUT("/products/*any", func(c *gin.Context) {
-
 		forwardRequest(c, "http://product-service:8082/products")
 	})
 
-	protected.GET("/category/*any", func(c *gin.Context) {
-		forwardRequest(c, "http://product-service:8082/category")
+	protected.GET("/categories/*any", func(c *gin.Context) {
+		forwardRequest(c, "http://product-service:8082/categories")
 	})
-	protected.POST("/category/*any", func(c *gin.Context) {
-		forwardRequest(c, "http://product-service:8082/category")
+
+	protected.POST("/categories/*any", func(c *gin.Context) {
+		forwardRequest(c, "http://product-service:8082/categories")
+	})
+
+	protected.PUT("/categories/*any", func(c *gin.Context) {
+		forwardRequest(c, "http://product-service:8082/categories")
+	})
+
+	protected.DELETE("/categories/*any", func(c *gin.Context) {
+		forwardRequest(c, "http://product-service:8082/categories")
+	})
+
+	protected.GET("/inventory/*any", func(c *gin.Context) {
+		forwardRequest(c, "http://localhost:8084"+c.Param("any"))
 	})
 
 	protected.POST("/orders/*any", func(c *gin.Context) {
@@ -139,10 +146,6 @@ func main() {
 			path = ""
 		}
 		forwardRequest(c, "http://order-service:8083/orders"+path)
-	})
-
-	protected.GET("/inventory/*any", func(c *gin.Context) {
-		forwardRequest(c, "http://localhost:8084"+c.Param("any"))
 	})
 
 	r.Run(":8080") // API Gateway runs on port 8080
