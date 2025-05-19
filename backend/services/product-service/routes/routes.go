@@ -8,22 +8,37 @@ import (
 func RegisterProductRoutes(r *gin.Engine) {
 	productRoutes := r.Group("/products")
 	{
+		// List products with filtering, pagination, and sorting
 		productRoutes.GET("/", controllers.GetProducts)
+		// Get a specific product
 		productRoutes.GET("/:id", controllers.GetProductByID)
+		// Create a new product
 		productRoutes.POST("/", controllers.CreateProduct)
+		// Bulk create products
 		productRoutes.POST("/bulk", controllers.CreateBulkProducts)
+		// Update a product
 		productRoutes.PUT("/:id", controllers.UpdateProduct)
+		// Delete a product
 		productRoutes.DELETE("/:id", controllers.DeleteProduct)
+		// Get products by category
+		productRoutes.GET("/category/:categoryId", controllers.GetProductsByCategory)
 	}
 }
 
 func RegisterCategoryRoutes(r *gin.Engine) {
-	categoryRoutes := r.Group("/category")
+	categoryRoutes := r.Group("/categories")
 	{
+		// List all categories
 		categoryRoutes.GET("/", controllers.GetCategories)
-		// categoryRoutes.GET("/:id", controllers.GetCategoryByID)
+		// Get a specific category
+		categoryRoutes.GET("/:id", controllers.GetCategoryByID)
+		// Create a new category
 		categoryRoutes.POST("/", controllers.CreateCategory)
-		// categoryRoutes.PUT("/:id", controllers.UpdateCategory)
-		// categoryRoutes.DELETE("/:id", controllers.DeleteCategory)
+		// Update a category
+		categoryRoutes.PUT("/:id", controllers.UpdateCategory)
+		// Delete a category
+		categoryRoutes.DELETE("/:id", controllers.DeleteCategory)
+		// Get all products in a category
+		categoryRoutes.GET("/:id/products", controllers.GetCategoryProducts)
 	}
 }

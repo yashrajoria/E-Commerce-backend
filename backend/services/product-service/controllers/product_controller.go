@@ -17,6 +17,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.uber.org/zap"
 )
 
 // GetProducts retrieves paginated products from the database.
@@ -44,26 +45,31 @@ func GetProducts(c *gin.Context) {
 	var products []models.Product
 	cursor, err := collection.Find(c, bson.M{}, findOptions)
 	if err != nil {
-		log.Println("Error finding products:", err)
+		log.Println(c, "Error finding products", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch products"})
 		return
 	}
 	defer cursor.Close(c)
-
 	if err := cursor.All(c, &products); err != nil {
-		log.Println("Error decoding products:", err)
+		log.Println(c, "Error decoding products", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode products"})
 		return
 	}
 
 	total, err := collection.CountDocuments(c, bson.M{})
 	if err != nil {
-		log.Println("Error counting products:", err)
+		log.Println(c, "Error counting products", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count products"})
 		return
 	}
 
 	totalPages := int(math.Ceil(float64(total) / float64(perPage)))
+
+	log.Println(c, "Products fetched successfully",
+		zap.Int("page", page),
+		zap.Int("perPage", perPage),
+		zap.Int64("total", total),
+		zap.Int("totalPages", totalPages))
 
 	// Respond with products and pagination metadata
 	c.JSON(http.StatusOK, gin.H{
@@ -82,7 +88,7 @@ func GetProductByID(c *gin.Context) {
 	id := c.Param("id")
 	objectID, err := primitive.ObjectIDFromHex(id)
 	if err != nil {
-		log.Println("Invalid product ID format:", err)
+		log.Println(c, "Invalid product ID format", zap.String("id", id))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid product ID format"})
 		return
 	}
@@ -91,14 +97,16 @@ func GetProductByID(c *gin.Context) {
 	err = database.DB.Collection("products").FindOne(c, bson.M{"_id": objectID}).Decode(&product)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
+			log.Println(c, "Product not found", zap.String("id", id))
 			c.JSON(http.StatusNotFound, gin.H{"message": "Product not found"})
 		} else {
-			log.Println("Database error:", err)
+			log.Println(c, "Database error", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal Server Error"})
 		}
 		return
 	}
 
+	log.Println(c, "Product fetched successfully", zap.String("id", id))
 	c.JSON(http.StatusOK, product)
 }
 
@@ -115,7 +123,7 @@ func CreateProduct(c *gin.Context) {
 	var input ProductInput
 
 	if err := c.ShouldBindJSON(&input); err != nil {
-		log.Println("Invalid JSON body:", err)
+		log.Println(c, "Invalid JSON body", zap.Error(err))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON body"})
 		return
 	}
@@ -174,7 +182,7 @@ func CreateProduct(c *gin.Context) {
 
 	_, err := database.DB.Collection("products").InsertOne(ctx, product)
 	if err != nil {
-		log.Println("Error inserting product:", err)
+		log.Println(c, "Error inserting product", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to insert product"})
 		return
 	}
@@ -187,14 +195,14 @@ func DeleteProduct(c *gin.Context) {
 	id := c.Param("id")
 	objectID, err := primitive.ObjectIDFromHex(id)
 	if err != nil {
-		log.Println("Invalid product ID format:", err)
+		log.Println(c, "Invalid product ID format", zap.Error(err))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid product ID format"})
 		return
 	}
 
 	result, err := database.DB.Collection("products").DeleteOne(c, bson.M{"_id": objectID})
 	if err != nil {
-		log.Println("Error deleting product:", err)
+		log.Println(c, "Error deleting product", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete product"})
 		return
 	}
@@ -212,7 +220,7 @@ func UpdateProduct(c *gin.Context) {
 	id := c.Param("id")
 	objectID, err := primitive.ObjectIDFromHex(id)
 	if err != nil {
-		log.Println("Invalid product ID format:", err)
+		log.Println(c, "Invalid product ID format", zap.Error(err))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid product ID format"})
 		return
 	}
@@ -230,7 +238,7 @@ func UpdateProduct(c *gin.Context) {
 
 	result, err := database.DB.Collection("products").UpdateOne(c, bson.M{"_id": objectID}, bson.M{"$set": updates})
 	if err != nil {
-		log.Println("Error updating product:", err)
+		log.Println(c, "Error updating product", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update product"})
 		return
 	}
@@ -246,14 +254,14 @@ func UpdateProduct(c *gin.Context) {
 func CreateBulkProducts(c *gin.Context) {
 	file, err := c.FormFile("file")
 	if err != nil {
-		log.Println("Error getting file:", err)
+		log.Println(c, "Error getting file", zap.Error(err))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "File upload required"})
 		return
 	}
 
 	src, err := file.Open()
 	if err != nil {
-		log.Println("Error opening file:", err)
+		log.Println(c, "Error opening file", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open file"})
 		return
 	}
@@ -262,7 +270,7 @@ func CreateBulkProducts(c *gin.Context) {
 	r := csv.NewReader(src)
 	records, err := r.ReadAll()
 	if err != nil {
-		log.Println("Error reading CSV:", err)
+		log.Println(c, "Error reading CSV", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read CSV"})
 		return
 	}
@@ -369,10 +377,87 @@ func CreateBulkProducts(c *gin.Context) {
 
 	_, err = database.DB.Collection("products").InsertMany(c, inserts)
 	if err != nil {
-		log.Println("Error inserting products:", err)
+		log.Println(c, "Error inserting products", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Bulk insert failed"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Products inserted successfully", "count": len(products)})
+}
+
+// GetProductsByCategory retrieves all products belonging to a specific category
+func GetProductsByCategory(c *gin.Context) {
+	categoryID := c.Param("categoryId")
+	objectID, err := primitive.ObjectIDFromHex(categoryID)
+	if err != nil {
+		log.Println(c, "Invalid category ID format", zap.String("id", categoryID))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category ID format"})
+		return
+	}
+
+	// Parse query parameters for pagination
+	page, err := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+
+	perPage, err := strconv.Atoi(c.DefaultQuery("perPage", "10"))
+	if err != nil || perPage <= 0 {
+		perPage = 10
+	}
+
+	skip := (page - 1) * perPage
+
+	// MongoDB query options
+	findOptions := options.Find()
+	findOptions.SetLimit(int64(perPage))
+	findOptions.SetSkip(int64(skip))
+
+	// Find products that belong to this category
+	filter := bson.M{
+		"category_ids": objectID,
+	}
+
+	var products []models.Product
+	cursor, err := database.DB.Collection("products").Find(c, filter, findOptions)
+	if err != nil {
+		log.Println(c, "Error finding products by category", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch products"})
+		return
+	}
+	defer cursor.Close(c)
+
+	if err := cursor.All(c, &products); err != nil {
+		log.Println(c, "Error decoding products", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode products"})
+		return
+	}
+
+	// Get total count for pagination
+	total, err := database.DB.Collection("products").CountDocuments(c, filter)
+	if err != nil {
+		log.Println(c, "Error counting products", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count products"})
+		return
+	}
+
+	totalPages := int(math.Ceil(float64(total) / float64(perPage)))
+
+	log.Println(c, "Products fetched by category successfully",
+		zap.String("categoryId", categoryID),
+		zap.Int("page", page),
+		zap.Int("perPage", perPage),
+		zap.Int64("total", total),
+		zap.Int("totalPages", totalPages))
+
+	// Respond with products and pagination metadata
+	c.JSON(http.StatusOK, gin.H{
+		"products": products,
+		"meta": gin.H{
+			"page":       page,
+			"perPage":    perPage,
+			"total":      total,
+			"totalPages": totalPages,
+		},
+	})
 }
