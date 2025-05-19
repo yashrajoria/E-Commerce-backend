@@ -4,6 +4,7 @@ import (
 	"auth-service/database"
 	"auth-service/models"
 	"auth-service/services"
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -48,6 +49,7 @@ func Login(c *gin.Context) {
 
 	// 1. Validate JSON body
 	if err := c.ShouldBindJSON(&loginReq); err != nil {
+		log.Println(c, "Invalid login request body", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 		return
 	}
@@ -59,8 +61,10 @@ func Login(c *gin.Context) {
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			// Avoid leaking user existence
+			log.Println(c, "Login attempt with non-existent email", "email", loginReq.Email)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
 		} else {
+			log.Println(c, "Database error during login", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 		}
 		return
@@ -68,18 +72,24 @@ func Login(c *gin.Context) {
 
 	// 3. Check role match
 	if user.Role != loginReq.Role {
+		log.Println(c, "Login attempt with wrong role",
+			"email", loginReq.Email,
+			"attempted_role", loginReq.Role,
+			"actual_role", user.Role)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "You are not authorized to access this resource"})
 		return
 	}
 
 	// Check if email is verified
 	if !user.EmailVerified {
+		log.Println(c, "Login attempt with unverified email", "email", loginReq.Email)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Email not verified"})
 		return
 	}
 
 	// 4. Validate password
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(loginReq.Password)); err != nil {
+		log.Println(c, "Invalid password attempt", "email", loginReq.Email)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
 		return
 	}
@@ -87,6 +97,7 @@ func Login(c *gin.Context) {
 	// 5. Generate JWT token
 	token, err := services.GenerateJWT(user.ID.String(), user.Email, user.Role)
 	if err != nil {
+		log.Println(c, "Failed to generate JWT token", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
 		return
 	}
@@ -94,6 +105,7 @@ func Login(c *gin.Context) {
 	// 6. Set token in HTTP-only cookie (adjust domain in production)
 	c.SetCookie("token", token, 86400, "/", "localhost", false, true)
 
+	log.Println(c, "User logged in successfully", "email", user.Email, "role", user.Role)
 	// 7. Respond with success (omit token in response for security)
 	c.JSON(http.StatusOK, gin.H{"message": "Logged in successfully"})
 }
@@ -163,7 +175,7 @@ func Register(c *gin.Context) {
 //Helper functions for verification code generation and email sending
 
 func generateRandomCode(length int) string {
-	log.Println("Generating random code of length:", length)
+	// logger.Debug(context.Background(), "Generating random code", "length", length)
 	code := ""
 
 	for i := 0; i < length; i++ {
@@ -175,16 +187,15 @@ func generateRandomCode(length int) string {
 
 // Helper function to send verification email
 func sendVerificationEmail(to string, code string) error {
-	log.Println("Attempting to send verification email to:", to)
-	log.Println("Verification code:", code)
+	log.Println(context.Background(), "Sending verification email", "to", to)
 
 	from := os.Getenv("SMTP_EMAIL")
 	password := os.Getenv("SMTP_PASSWORD")
 	smtpServer := "smtp.gmail.com"
 	port := "587"
-	log.Println(from, password)
+
 	if from == "" || password == "" {
-		log.Println("SMTP_EMAIL or SMTP_PASSWORD environment variable is missing")
+		log.Println(context.Background(), "SMTP configuration missing", nil)
 		return fmt.Errorf("SMTP configuration is missing")
 	}
 
@@ -197,11 +208,11 @@ func sendVerificationEmail(to string, code string) error {
 	auth := smtp.PlainAuth("", from, password, smtpServer)
 	err := smtp.SendMail(smtpServer+":"+port, auth, from, []string{to}, message)
 	if err != nil {
-		log.Println("Failed to send email:", err)
+		log.Println(context.Background(), "Failed to send verification email", err)
 		return err
 	}
 
-	log.Println("Verification email sent successfully to:", to)
+	log.Println(context.Background(), "Verification email sent successfully", "to", to)
 	return nil
 }
 
