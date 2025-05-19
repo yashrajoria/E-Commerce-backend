@@ -18,7 +18,7 @@ func init() {
 		log.Println("Warning: No .env file found, using system environment variables")
 	}
 	if len(secretKey) == 0 {
-		log.Fatal("Missing JWT_SECRET in environment variables")
+		log.Println("Missing JWT_SECRET in environment variables")
 	}
 }
 
