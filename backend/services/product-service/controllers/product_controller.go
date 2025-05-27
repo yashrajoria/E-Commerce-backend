@@ -1,7 +1,9 @@
 package controllers
 
 import (
+	"context"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math"
@@ -10,7 +12,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cloudinary/cloudinary-go/api/uploader"
+
+	"github.com/cloudinary/cloudinary-go"
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 	"github.com/yashrajoria/product-service/database"
 	"github.com/yashrajoria/product-service/models"
 	"go.mongodb.org/mongo-driver/bson"
@@ -19,6 +25,10 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
 )
+
+func init() {
+	_ = godotenv.Load()
+}
 
 // GetProducts retrieves paginated products from the database.
 func GetProducts(c *gin.Context) {
@@ -119,60 +129,143 @@ type ProductInput struct {
 	Description string   `json:"description"`
 }
 
-func CreateProduct(c *gin.Context) {
-	var input ProductInput
+func credentials() (*cloudinary.Cloudinary, context.Context, error) {
+	cld, err := cloudinary.New()
 
-	if err := c.ShouldBindJSON(&input); err != nil {
-		log.Println(c, "Invalid JSON body", zap.Error(err))
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON body"})
-		return
+	if err != nil {
+		return nil, nil, fmt.Errorf("cloudinary init error: %w", err)
 	}
+	cld.Config.URL.Secure = true
+	ctx := context.Background()
+	return cld, ctx, nil
+}
 
-	if len(input.Categories) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "At least one category is required"})
+func CreateProduct(c *gin.Context) {
+	if err := c.Request.ParseMultipartForm(32 << 20); err != nil {
+		log.Println("Failed to parse multipart form:", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid multipart form"})
 		return
 	}
 
 	ctx := c.Request.Context()
+	form := c.Request.MultipartForm
+
+	// Extract form fields
+	name := form.Value["name"]
+	category := form.Value["category"]
+	priceStr := form.Value["price"]
+	quantityStr := form.Value["quantity"]
+	description := form.Value["description"]
+
+	images := form.File["images"]
+
+	if len(name) == 0 || len(category) == 0 || len(priceStr) == 0 || len(quantityStr) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing required fields"})
+		return
+	}
+
+	price, err := strconv.ParseFloat(priceStr[0], 64)
+	if err != nil || price <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid price"})
+		return
+	}
+
+	quantity, err := strconv.Atoi(quantityStr[0])
+	if err != nil || quantity < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid quantity"})
+		return
+	}
+
+	// Parse category array (expected as JSON string)
+	var categoryNames []string
+	if err := json.Unmarshal([]byte(category[0]), &categoryNames); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category format"})
+		return
+	}
+
+	if len(categoryNames) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "At least one category is required"})
+		return
+	}
+
 	var categoryIDs []primitive.ObjectID
 	var categoryPaths []string
 	categorySet := make(map[primitive.ObjectID]bool)
 	pathSet := make(map[string]bool)
 
-	for _, catName := range input.Categories {
-		var category models.Category
-		err := database.DB.Collection("categories").FindOne(ctx, bson.M{"name": catName}).Decode(&category)
+	for _, catName := range categoryNames {
+		var cat models.Category
+		err := database.DB.Collection("categories").FindOne(ctx, bson.M{"name": catName}).Decode(&cat)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Category '%s' not found", catName)})
 			return
 		}
-
-		if !categorySet[category.ID] {
-			categoryIDs = append(categoryIDs, category.ID)
-			categorySet[category.ID] = true
+		if !categorySet[cat.ID] {
+			categoryIDs = append(categoryIDs, cat.ID)
+			categorySet[cat.ID] = true
 		}
-		for _, ancestor := range category.Ancestors {
+		for _, ancestor := range cat.Ancestors {
 			if !categorySet[ancestor] {
 				categoryIDs = append(categoryIDs, ancestor)
 				categorySet[ancestor] = true
 			}
 		}
-
-		for _, path := range category.Path {
+		for _, path := range cat.Path {
 			if !pathSet[path] {
 				categoryPaths = append(categoryPaths, path)
 				pathSet[path] = true
 			}
 		}
 	}
+	cld, ctx, err := credentials()
+	if err != nil {
+		log.Println("Cloudinary init failed:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Image upload service failed"})
+		return
+	}
 
+	var imageURLs []string
+
+	for i, fileHeader := range images {
+		file, err := fileHeader.Open()
+		if err != nil {
+
+			log.Println("Image upload failed:", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload image"})
+			return
+
+		}
+
+		defer file.Close()
+
+		uploadParams := uploader.UploadParams{
+			PublicID:  fmt.Sprintf("product_img_%d_%d", time.Now().Unix(), i),
+			Folder:    "ecommerce/products",
+			Overwrite: true,
+		}
+		uploadResp, err := cld.Upload.Upload(ctx, file, uploadParams)
+		if err != nil || uploadResp.SecureURL == "" {
+			log.Printf("Image %d upload failed: %v\n", i, err)
+			continue
+		}
+
+		imageURLs = append(imageURLs, uploadResp.SecureURL)
+	}
+
+	if err != nil {
+		log.Println("Image upload failed:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload image"})
+		return
+	}
+
+	// Build product
 	product := models.Product{
 		ID:           primitive.NewObjectID(),
-		Name:         input.Name,
-		Price:        input.Price,
-		Quantity:     input.Quantity,
-		Description:  input.Description,
-		Images:       input.Images,
+		Name:         name[0],
+		Price:        price,
+		Quantity:     quantity,
+		Description:  description[0],
+		Images:       imageURLs,
 		CategoryID:   categoryIDs[0],
 		CategoryIDs:  categoryIDs,
 		CategoryPath: categoryPaths,
@@ -180,10 +273,10 @@ func CreateProduct(c *gin.Context) {
 		UpdatedAt:    time.Now(),
 	}
 
-	_, err := database.DB.Collection("products").InsertOne(ctx, product)
+	_, err = database.DB.Collection("products").InsertOne(ctx, product)
 	if err != nil {
-		log.Println(c, "Error inserting product", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to insert product"})
+		log.Println("Failed to insert product:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save product"})
 		return
 	}
 
