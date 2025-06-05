@@ -141,6 +141,7 @@ func credentials() (*cloudinary.Cloudinary, context.Context, error) {
 }
 
 func CreateProduct(c *gin.Context) {
+	// Parse the multipart form with 32MB memory limit
 	if err := c.Request.ParseMultipartForm(32 << 20); err != nil {
 		log.Println("Failed to parse multipart form:", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid multipart form"})
@@ -150,16 +151,15 @@ func CreateProduct(c *gin.Context) {
 	ctx := c.Request.Context()
 	form := c.Request.MultipartForm
 
-	// Extract form fields
+	// Extract form values
 	name := form.Value["name"]
 	category := form.Value["category"]
 	priceStr := form.Value["price"]
 	quantityStr := form.Value["quantity"]
 	description := form.Value["description"]
-
 	images := form.File["images"]
 
-	if len(name) == 0 || len(category) == 0 || len(priceStr) == 0 || len(quantityStr) == 0 {
+	if len(name) == 0 || len(category) == 0 || len(priceStr) == 0 || len(quantityStr) == 0 || len(description) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing required fields"})
 		return
 	}
@@ -176,15 +176,10 @@ func CreateProduct(c *gin.Context) {
 		return
 	}
 
-	// Parse category array (expected as JSON string)
+	// Parse categories
 	var categoryNames []string
-	if err := json.Unmarshal([]byte(category[0]), &categoryNames); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category format"})
-		return
-	}
-
-	if len(categoryNames) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "At least one category is required"})
+	if err := json.Unmarshal([]byte(category[0]), &categoryNames); err != nil || len(categoryNames) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or empty category format"})
 		return
 	}
 
@@ -217,6 +212,8 @@ func CreateProduct(c *gin.Context) {
 			}
 		}
 	}
+
+	// Initialize Cloudinary
 	cld, ctx, err := credentials()
 	if err != nil {
 		log.Println("Cloudinary init failed:", err)
@@ -224,41 +221,39 @@ func CreateProduct(c *gin.Context) {
 		return
 	}
 
+	// Upload images
 	var imageURLs []string
-
 	for i, fileHeader := range images {
+		log.Printf("Uploading image %d: %s\n", i, fileHeader.Filename)
+
 		file, err := fileHeader.Open()
 		if err != nil {
-
-			log.Println("Image upload failed:", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload image"})
-			return
-
+			log.Printf("Failed to open image %d: %v\n", i, err)
+			continue
 		}
-
-		defer file.Close()
 
 		uploadParams := uploader.UploadParams{
 			PublicID:  fmt.Sprintf("product_img_%d_%d", time.Now().Unix(), i),
 			Folder:    "ecommerce/products",
 			Overwrite: true,
 		}
+
 		uploadResp, err := cld.Upload.Upload(ctx, file, uploadParams)
-		if err != nil || uploadResp.SecureURL == "" {
-			log.Printf("Image %d upload failed: %v\n", i, err)
+		file.Close() // Ensure it's closed right after upload
+
+		if err != nil {
+			log.Printf("Image %d upload error: %v\n", i, err)
+			continue
+		}
+		if uploadResp == nil || uploadResp.SecureURL == "" {
+			log.Printf("Image %d upload returned empty response\n", i)
 			continue
 		}
 
 		imageURLs = append(imageURLs, uploadResp.SecureURL)
 	}
 
-	if err != nil {
-		log.Println("Image upload failed:", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload image"})
-		return
-	}
-
-	// Build product
+	// Create and insert product
 	product := models.Product{
 		ID:           primitive.NewObjectID(),
 		Name:         name[0],
