@@ -127,6 +127,8 @@ type ProductInput struct {
 	Images      []string `json:"images"`
 	Quantity    int      `json:"quantity"`
 	Description string   `json:"description"`
+	Brand       string   `json:"brand"`
+	SKU         string   `json:"sku"`
 }
 
 func credentials() (*cloudinary.Cloudinary, context.Context, error) {
@@ -158,6 +160,8 @@ func CreateProduct(c *gin.Context) {
 	quantityStr := form.Value["quantity"]
 	description := form.Value["description"]
 	images := form.File["images"]
+	brand := form.Value["brand"]
+	sku := form.Value["sku"]
 
 	if len(name) == 0 || len(category) == 0 || len(priceStr) == 0 || len(quantityStr) == 0 || len(description) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing required fields"})
@@ -261,6 +265,8 @@ func CreateProduct(c *gin.Context) {
 		Quantity:     quantity,
 		Description:  description[0],
 		Images:       imageURLs,
+		Brand:        brand[0],
+		SKU:          sku[0],
 		CategoryID:   categoryIDs[0],
 		CategoryIDs:  categoryIDs,
 		CategoryPath: categoryPaths,

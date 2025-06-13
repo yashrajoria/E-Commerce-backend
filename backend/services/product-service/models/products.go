@@ -13,6 +13,8 @@ type Product struct {
 	Quantity     int                  `json:"quantity"`
 	Description  string               `json:"description"`
 	Images       []string             `json:"images"`
+	Brand        string               `json:"brand"`
+	SKU          string               `json:"sku"`
 	CategoryID   primitive.ObjectID   `bson:"category_id" json:"category_id"`
 	CategoryIDs  []primitive.ObjectID `bson:"category_ids,omitempty" json:"category_ids"`
 	CategoryPath []string             `bson:"category_path,omitempty" json:"category_path"`
