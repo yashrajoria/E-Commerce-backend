@@ -9,11 +9,14 @@ import (
 )
 
 type Order struct {
-	ID         uuid.UUID   `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
-	UserID     uuid.UUID   `json:"user_id" gorm:"type:uuid;not null"`
+	ID          uuid.UUID `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
+	OrderNumber string    `gorm:"uniqueIndex" json:"order_number"`
+	UserID      uuid.UUID `json:"user_id" gorm:"type:uuid;not null"`
+
 	Amount     int         `json:"amount"` // total amount in paisa
 	Status     string      `json:"status"` // pending, paid, failed, etc.
-	CreatedAt  time.Time   `json:"created_at" gorm:"autoCreateTime"`
+	CreatedAt  time.Time   `gorm:"autoCreateTime"`
+	UpdatedAt  time.Time   `gorm:"autoUpdateTime"`
 	OrderItems []OrderItem `json:"items" gorm:"foreignKey:OrderID;constraint:OnDelete:CASCADE"`
 }
 

@@ -10,5 +10,6 @@ func RegisterOrderRoutes(r *gin.Engine) {
 	{
 		orderRoutes.POST("/", controllers.CreateOrder)
 		orderRoutes.GET("/", controllers.GetOrders)
+		orderRoutes.GET("/:id", controllers.GetOrderByID)
 	}
 }
