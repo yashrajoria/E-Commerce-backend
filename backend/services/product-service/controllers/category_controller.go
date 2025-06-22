@@ -6,11 +6,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"go.mongodb.org/mongo-driver/bson"
-
+	"github.com/google/uuid"
 	"github.com/yashrajoria/product-service/database"
 	"github.com/yashrajoria/product-service/models"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 func CreateCategory(c *gin.Context) {
@@ -24,8 +23,8 @@ func CreateCategory(c *gin.Context) {
 		return
 	}
 
-	var parentIDs []primitive.ObjectID
-	var ancestorIDsSet = map[primitive.ObjectID]bool{}
+	var parentIDs []uuid.UUID
+	var ancestorIDsSet = map[uuid.UUID]bool{}
 
 	if len(requestBody.ParentNames) > 0 {
 		cursor, err := database.DB.Collection("categories").Find(c, bson.M{
@@ -56,13 +55,13 @@ func CreateCategory(c *gin.Context) {
 	}
 
 	// Convert map to slice
-	var ancestorIDs []primitive.ObjectID
+	var ancestorIDs []uuid.UUID
 	for id := range ancestorIDsSet {
 		ancestorIDs = append(ancestorIDs, id)
 	}
 
 	newCategory := models.Category{
-		ID:        primitive.NewObjectID(),
+		ID:        uuid.New(),
 		Name:      requestBody.Name,
 		ParentIDs: parentIDs,
 		Ancestors: ancestorIDs,
@@ -121,7 +120,7 @@ func GetCategories(c *gin.Context) {
 
 func GetCategoryByID(c *gin.Context) {
 	id := c.Param("id")
-	objectID, err := primitive.ObjectIDFromHex(id)
+	objectID, err := uuid.Parse(id)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category ID"})
 		return
@@ -139,7 +138,7 @@ func GetCategoryByID(c *gin.Context) {
 
 func UpdateCategory(c *gin.Context) {
 	id := c.Param("id")
-	objectID, err := primitive.ObjectIDFromHex(id)
+	objectID, err := uuid.Parse(id)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category ID"})
 		return
@@ -164,8 +163,8 @@ func UpdateCategory(c *gin.Context) {
 
 	// If parent names are provided, update parent relationships
 	if len(requestBody.ParentNames) > 0 {
-		var parentIDs []primitive.ObjectID
-		var ancestorIDsSet = map[primitive.ObjectID]bool{}
+		var parentIDs []uuid.UUID
+		var ancestorIDsSet = map[uuid.UUID]bool{}
 
 		cursor, err := database.DB.Collection("categories").Find(c, bson.M{
 			"name": bson.M{"$in": requestBody.ParentNames},
@@ -194,7 +193,7 @@ func UpdateCategory(c *gin.Context) {
 		}
 
 		// Convert map to slice
-		var ancestorIDs []primitive.ObjectID
+		var ancestorIDs []uuid.UUID
 		for id := range ancestorIDsSet {
 			ancestorIDs = append(ancestorIDs, id)
 		}
@@ -220,7 +219,7 @@ func UpdateCategory(c *gin.Context) {
 
 func DeleteCategory(c *gin.Context) {
 	id := c.Param("id")
-	objectID, err := primitive.ObjectIDFromHex(id)
+	objectID, err := uuid.Parse(id)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category ID"})
 		return
@@ -256,7 +255,7 @@ func DeleteCategory(c *gin.Context) {
 
 func GetCategoryProducts(c *gin.Context) {
 	id := c.Param("id")
-	objectID, err := primitive.ObjectIDFromHex(id)
+	objectID, err := uuid.Parse(id)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category ID"})
 		return

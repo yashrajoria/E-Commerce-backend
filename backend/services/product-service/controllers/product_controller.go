@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cloudinary/cloudinary-go/api/uploader"
+	"github.com/google/uuid"
 
 	"github.com/cloudinary/cloudinary-go"
 	"github.com/gin-gonic/gin"
@@ -20,7 +21,6 @@ import (
 	"github.com/yashrajoria/product-service/database"
 	"github.com/yashrajoria/product-service/models"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.uber.org/zap"
@@ -96,15 +96,17 @@ func GetProducts(c *gin.Context) {
 // GetProductByID retrieves a single product by ID.
 func GetProductByID(c *gin.Context) {
 	id := c.Param("id")
-	objectID, err := primitive.ObjectIDFromHex(id)
+	productID, err := uuid.Parse(id)
+	log.Println("Fetching product by ID", productID)
+
 	if err != nil {
-		log.Println(c, "Invalid product ID format", zap.String("id", id))
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid product ID format"})
+		log.Println("Invalid UUID format:", id)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid UUID format"})
 		return
 	}
 
 	var product models.Product
-	err = database.DB.Collection("products").FindOne(c, bson.M{"_id": objectID}).Decode(&product)
+	err = database.DB.Collection("products").FindOne(c, bson.M{"_id": productID}).Decode(&product)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			log.Println(c, "Product not found", zap.String("id", id))
@@ -118,6 +120,42 @@ func GetProductByID(c *gin.Context) {
 
 	log.Println(c, "Product fetched successfully", zap.String("id", id))
 	c.JSON(http.StatusOK, product)
+}
+
+func GetProductByIDInternal(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		log.Println(c, "Product ID is required")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Product ID is required"})
+		return
+	}
+	productID, err := uuid.Parse(id)
+	if err != nil {
+		log.Println("Invalid product ID format", zap.String("id", id))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid UUID format"})
+		return
+	}
+
+	var product models.Product
+	err = database.DB.Collection("products").FindOne(c, bson.M{"_id": productID}).Decode(&product)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			log.Println(c, "Product not found", zap.String("id", id))
+			c.JSON(http.StatusNotFound, gin.H{"message": "Product not found"})
+		} else {
+			log.Println(c, "Database error", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal Server Error"})
+		}
+		return
+	}
+
+	log.Println(c, "Product fetched successfully", zap.String("id", id))
+	c.JSON(http.StatusOK, gin.H{
+		"id":    product.ID,
+		"name":  product.Name,
+		"price": product.Price,
+		"stock": product.Quantity,
+	})
 }
 
 type ProductInput struct {
@@ -143,17 +181,18 @@ func credentials() (*cloudinary.Cloudinary, context.Context, error) {
 }
 
 func CreateProduct(c *gin.Context) {
-	// Parse the multipart form with 32MB memory limit
+	log.Println("[CreateProduct] --- Starting product creation ---")
+
 	if err := c.Request.ParseMultipartForm(32 << 20); err != nil {
-		log.Println("Failed to parse multipart form:", err)
+		log.Println("[CreateProduct] Failed to parse multipart form:", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid multipart form"})
 		return
 	}
+	log.Println("[CreateProduct] Multipart form parsed successfully")
 
 	ctx := c.Request.Context()
 	form := c.Request.MultipartForm
 
-	// Extract form values
 	name := form.Value["name"]
 	category := form.Value["category"]
 	priceStr := form.Value["price"]
@@ -163,19 +202,36 @@ func CreateProduct(c *gin.Context) {
 	brand := form.Value["brand"]
 	sku := form.Value["sku"]
 
-	if len(name) == 0 || len(category) == 0 || len(priceStr) == 0 || len(quantityStr) == 0 || len(description) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing required fields"})
-		return
+	log.Printf("[CreateProduct] Form fields received: name=%v, category=%v, price=%v, quantity=%v", name, category, priceStr, quantityStr)
+
+	requiredFields := map[string][]string{
+		"name":        name,
+		"category":    category,
+		"price":       priceStr,
+		"quantity":    quantityStr,
+		"description": description,
+		"brand":       brand,
+		"sku":         sku,
+	}
+
+	for field, value := range requiredFields {
+		if len(value) == 0 {
+			log.Printf("[CreateProduct] Missing field: %s\n", field)
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Missing required field: %s", field)})
+			return
+		}
 	}
 
 	price, err := strconv.ParseFloat(priceStr[0], 64)
 	if err != nil || price <= 0 {
+		log.Println("[CreateProduct] Invalid price:", priceStr[0])
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid price"})
 		return
 	}
 
 	quantity, err := strconv.Atoi(quantityStr[0])
 	if err != nil || quantity < 0 {
+		log.Println("[CreateProduct] Invalid quantity:", quantityStr[0])
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid quantity"})
 		return
 	}
@@ -183,22 +239,27 @@ func CreateProduct(c *gin.Context) {
 	// Parse categories
 	var categoryNames []string
 	if err := json.Unmarshal([]byte(category[0]), &categoryNames); err != nil || len(categoryNames) == 0 {
+		log.Println("[CreateProduct] Failed to parse category JSON:", category[0], "Error:", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or empty category format"})
 		return
 	}
+	log.Printf("[CreateProduct] Parsed category names: %v", categoryNames)
 
-	var categoryIDs []primitive.ObjectID
+	var categoryIDs []uuid.UUID
 	var categoryPaths []string
-	categorySet := make(map[primitive.ObjectID]bool)
+	categorySet := make(map[uuid.UUID]bool)
 	pathSet := make(map[string]bool)
 
 	for _, catName := range categoryNames {
+		log.Printf("[CreateProduct] Looking up category: %s", catName)
 		var cat models.Category
 		err := database.DB.Collection("categories").FindOne(ctx, bson.M{"name": catName}).Decode(&cat)
 		if err != nil {
+			log.Printf("[CreateProduct] Category not found: %s. Error: %v", catName, err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Category '%s' not found", catName)})
 			return
 		}
+
 		if !categorySet[cat.ID] {
 			categoryIDs = append(categoryIDs, cat.ID)
 			categorySet[cat.ID] = true
@@ -216,23 +277,26 @@ func CreateProduct(c *gin.Context) {
 			}
 		}
 	}
+	log.Printf("[CreateProduct] Final category IDs: %v", categoryIDs)
+	log.Printf("[CreateProduct] Final category paths: %v", categoryPaths)
 
-	// Initialize Cloudinary
+	// Cloudinary setup
 	cld, ctx, err := credentials()
 	if err != nil {
-		log.Println("Cloudinary init failed:", err)
+		log.Println("[CreateProduct] Cloudinary init failed:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Image upload service failed"})
 		return
 	}
+	log.Println("[CreateProduct] Cloudinary initialized successfully")
 
 	// Upload images
 	var imageURLs []string
 	for i, fileHeader := range images {
-		log.Printf("Uploading image %d: %s\n", i, fileHeader.Filename)
+		log.Printf("[CreateProduct] Uploading image %d: %s", i, fileHeader.Filename)
 
 		file, err := fileHeader.Open()
 		if err != nil {
-			log.Printf("Failed to open image %d: %v\n", i, err)
+			log.Printf("[CreateProduct] Failed to open image %d: %v", i, err)
 			continue
 		}
 
@@ -243,23 +307,25 @@ func CreateProduct(c *gin.Context) {
 		}
 
 		uploadResp, err := cld.Upload.Upload(ctx, file, uploadParams)
-		file.Close() // Ensure it's closed right after upload
+		file.Close()
 
 		if err != nil {
-			log.Printf("Image %d upload error: %v\n", i, err)
+			log.Printf("[CreateProduct] Image %d upload error: %v", i, err)
 			continue
 		}
 		if uploadResp == nil || uploadResp.SecureURL == "" {
-			log.Printf("Image %d upload returned empty response\n", i)
+			log.Printf("[CreateProduct] Image %d upload returned empty response", i)
 			continue
 		}
 
+		log.Printf("[CreateProduct] Image %d uploaded: %s", i, uploadResp.SecureURL)
 		imageURLs = append(imageURLs, uploadResp.SecureURL)
 	}
 
-	// Create and insert product
+	log.Printf("[CreateProduct] All image uploads completed. Total: %d", len(imageURLs))
+
 	product := models.Product{
-		ID:           primitive.NewObjectID(),
+		ID:           uuid.New(),
 		Name:         name[0],
 		Price:        price,
 		Quantity:     quantity,
@@ -274,27 +340,30 @@ func CreateProduct(c *gin.Context) {
 		UpdatedAt:    time.Now(),
 	}
 
+	log.Printf("[CreateProduct] Attempting to insert product: %+v", product)
+
 	_, err = database.DB.Collection("products").InsertOne(ctx, product)
 	if err != nil {
-		log.Println("Failed to insert product:", err)
+		log.Println("[CreateProduct] Failed to insert product:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save product"})
 		return
 	}
 
+	log.Println("[CreateProduct] Product inserted successfully:", product.ID)
 	c.JSON(http.StatusCreated, gin.H{"message": "Product created successfully", "product": product})
 }
 
 // DeleteProduct removes a product by ID.
 func DeleteProduct(c *gin.Context) {
 	id := c.Param("id")
-	objectID, err := primitive.ObjectIDFromHex(id)
+	productID, err := uuid.Parse(id)
 	if err != nil {
-		log.Println(c, "Invalid product ID format", zap.Error(err))
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid product ID format"})
+		log.Println("Invalid UUID format:", id)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid UUID format"})
 		return
 	}
 
-	result, err := database.DB.Collection("products").DeleteOne(c, bson.M{"_id": objectID})
+	result, err := database.DB.Collection("products").DeleteOne(c, bson.M{"_id": productID})
 	if err != nil {
 		log.Println(c, "Error deleting product", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete product"})
@@ -312,10 +381,10 @@ func DeleteProduct(c *gin.Context) {
 // UpdateProduct updates an existing product.
 func UpdateProduct(c *gin.Context) {
 	id := c.Param("id")
-	objectID, err := primitive.ObjectIDFromHex(id)
+	productID, err := uuid.Parse(id)
 	if err != nil {
-		log.Println(c, "Invalid product ID format", zap.Error(err))
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid product ID format"})
+		log.Println("Invalid UUID format:", id)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid UUID format"})
 		return
 	}
 
@@ -330,7 +399,7 @@ func UpdateProduct(c *gin.Context) {
 		return
 	}
 
-	result, err := database.DB.Collection("products").UpdateOne(c, bson.M{"_id": objectID}, bson.M{"$set": updates})
+	result, err := database.DB.Collection("products").UpdateOne(c, bson.M{"_id": productID}, bson.M{"$set": updates})
 	if err != nil {
 		log.Println(c, "Error updating product", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update product"})
@@ -401,9 +470,9 @@ func CreateBulkProducts(c *gin.Context) {
 		}
 		image := strings.TrimSpace(row[5])
 
-		var categoryIDs []primitive.ObjectID
+		var categoryIDs []uuid.UUID
 		var categoryPaths []string
-		categorySet := make(map[primitive.ObjectID]bool) // to dedupe ancestors
+		categorySet := make(map[uuid.UUID]bool) // to dedupe ancestors
 
 		for _, catNameRaw := range rawCategories {
 			catName := strings.TrimSpace(catNameRaw)
@@ -449,7 +518,7 @@ func CreateBulkProducts(c *gin.Context) {
 		}
 
 		product := models.Product{
-			ID:           primitive.NewObjectID(),
+			ID:           uuid.New(),
 			Name:         name,
 			Price:        price,
 			Quantity:     quantity,
@@ -482,7 +551,7 @@ func CreateBulkProducts(c *gin.Context) {
 // GetProductsByCategory retrieves all products belonging to a specific category
 func GetProductsByCategory(c *gin.Context) {
 	categoryID := c.Param("categoryId")
-	objectID, err := primitive.ObjectIDFromHex(categoryID)
+	categoryUUID, err := uuid.Parse(categoryID)
 	if err != nil {
 		log.Println(c, "Invalid category ID format", zap.String("id", categoryID))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category ID format"})
@@ -509,7 +578,7 @@ func GetProductsByCategory(c *gin.Context) {
 
 	// Find products that belong to this category
 	filter := bson.M{
-		"category_ids": objectID,
+		"category_ids": categoryUUID,
 	}
 
 	var products []models.Product
