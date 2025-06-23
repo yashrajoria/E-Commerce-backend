@@ -22,6 +22,8 @@ func RegisterProductRoutes(r *gin.Engine) {
 		productRoutes.DELETE("/:id", controllers.DeleteProduct)
 		// Get products by category
 		productRoutes.GET("/category/:categoryId", controllers.GetProductsByCategory)
+		//Get product by id for order service
+		productRoutes.GET("/internal/:id", controllers.GetProductByIDInternal)
 	}
 }
 
