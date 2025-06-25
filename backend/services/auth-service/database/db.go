@@ -65,7 +65,7 @@ func ConnectPostgres(autoMigrateModels ...interface{}) (*gorm.DB, error) {
 
 func Connect() error {
 	var err error
-	DB, err = ConnectPostgres(&models.User{}, &models.Address{})
+	DB, err = ConnectPostgres(&models.User{})
 	if err != nil {
 		log.Println("❌ Failed to connect to PostgreSQL:", err)
 		return err
