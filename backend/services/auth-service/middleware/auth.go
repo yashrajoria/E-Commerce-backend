@@ -9,7 +9,7 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 )
 
-// RequireRole checks if the user has the required role for the route
+// RequireRole checks if the JWT contains one of the allowed roles
 func RequireRole(allowedRoles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		claims, err := ExtractClaims(c)
@@ -38,6 +38,7 @@ func RequireRole(allowedRoles ...string) gin.HandlerFunc {
 	}
 }
 
+// ExtractClaims pulls JWT claims from a cookie
 func ExtractClaims(c *gin.Context) (jwt.MapClaims, error) {
 	tokenString, err := c.Cookie("token")
 	if err != nil {
@@ -50,6 +51,7 @@ func ExtractClaims(c *gin.Context) (jwt.MapClaims, error) {
 		}
 		return []byte(os.Getenv("JWT_SECRET")), nil
 	})
+
 	if err != nil || !token.Valid {
 		return nil, fmt.Errorf("invalid token")
 	}

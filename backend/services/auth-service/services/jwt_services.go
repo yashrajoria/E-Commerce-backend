@@ -75,3 +75,39 @@ func GetUserIDFromJWT(c *gin.Context) (string, error) {
 
 	return userID, nil
 }
+
+// func GetUserNameFromJWT(c *gin.Context) (string, error) {
+// 	// Get the token from the cookie
+// 	tokenStr, err := c.Cookie("token")
+// 	if err != nil {
+// 		return "", fmt.Errorf("no token found: %v", err)
+// 	}
+
+// 	// Parse and validate the JWT token
+// 	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
+// 		// Ensure the token method is HMAC-SHA256
+// 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+// 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+// 		}
+// 		return secretKey, nil
+// 	})
+
+// 	// If the token is invalid or expired
+// 	if err != nil || !token.Valid {
+// 		return "", fmt.Errorf("invalid or expired token: %v", err)
+// 	}
+
+// 	// Extract claims from the token
+// 	claims, ok := token.Claims.(jwt.MapClaims)
+// 	if !ok {
+// 		return "", fmt.Errorf("unable to parse claims from token")
+// 	}
+
+// 	// Extract name from claims
+// 	name, ok := claims["name"].(string)
+// 	if !ok {
+// 		return "", fmt.Errorf("name not found in token claims")
+// 	}
+
+// 	return name, nil
+// }

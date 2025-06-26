@@ -5,50 +5,59 @@ import (
 	"auth-service/database"
 	middlewares "auth-service/middleware"
 	"auth-service/models"
-	"log"
+	"context"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 func main() {
-	// Initialize logger
-	// 	logger.Initialize(os.Getenv("ENV"))
+	// Initialize structured logger
+	logger, _ := zap.NewProduction()
+	defer logger.Sync()
 
-	// Load configuration from environment variables
+	// Load configuration
 	cfg, err := LoadConfig()
 	if err != nil {
-		log.Println("Config error", err)
+		logger.Fatal("Failed to load config", zap.Error(err))
 	}
 
 	// Connect to the database
 	if err := database.Connect(); err != nil {
-		log.Println("Could not connect to PostgreSQL", err)
-		return
+		logger.Fatal("Database connection failed", zap.Error(err))
 	}
 
-	// Run migrations
-	if err := models.Migrate(database.DB); err != nil {
-		log.Println("Migration failed", err)
+	// Run migrations only if NOT in production
+	if os.Getenv("ENV") != "production" {
+		if err := models.Migrate(database.DB); err != nil {
+			logger.Fatal("Migration failed", zap.Error(err))
+		}
 	}
 
 	// Initialize Gin router
-	r := gin.Default()
+	r := gin.New()
 
-	// Apply security headers to all routes
-	r.Use(middlewares.SecurityHeaders())
+	// Global middlewares
+	r.Use(gin.Recovery())                    // ✅ panic protection
+	r.Use(middlewares.SecurityHeaders())     // ✅ security headers
+	r.Use(middlewares.RateLimitMiddleware()) // ✅ rate limiting
+	// r.Use(logger.RequestLogger())              // Add structured request logging if available
 
-	// Apply rate limiting to all routes
-	r.Use(middlewares.RateLimitMiddleware())
+	// CORS
+	allowedOrigins := map[string]bool{
+		"http://localhost:3000":  true,
+		"https://yourdomain.com": true,
+	}
 
-	// Apply request logging
-	//	r.Use(logger.RequestLogger())
-
-	// CORS configuration
 	r.Use(func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
-		if origin == "" {
-			origin = "http://localhost:3000" // Default origin
+		if !allowedOrigins[origin] {
+			origin = "http://localhost:3000"
 		}
 		c.Header("Access-Control-Allow-Origin", origin)
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -62,7 +71,7 @@ func main() {
 		c.Next()
 	})
 
-	// Health check route
+	// Health check
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "OK"})
 	})
@@ -70,23 +79,43 @@ func main() {
 	// Auth routes
 	authGroup := r.Group("/auth")
 	{
-		// Public routes
 		authGroup.POST("/register", controllers.Register)
 		authGroup.POST("/login", controllers.Login)
 		authGroup.POST("/verify-email", controllers.VerifyEmail)
+	}
 
-		// Protected routes
-		protected := authGroup.Group("")
-		protected.Use(middlewares.RefreshTokenMiddleware())
-		{
-			protected.POST("/address", controllers.CreateAddress)
-			// Add more protected routes here
+	// Port fallback
+	port := cfg.Port
+	if port == "" {
+		port = "8081"
+	}
+
+	// Create HTTP server with timeout
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: r,
+	}
+
+	// Graceful shutdown setup
+	go func() {
+		logger.Info("Auth Service started", zap.String("port", port))
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Fatal("Server error", zap.Error(err))
 		}
+	}()
+
+	// Wait for interrupt signal
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	logger.Info("Shutting down server...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		logger.Fatal("Server forced to shutdown", zap.Error(err))
 	}
 
-	//logger.Log.Info("Auth Service started", "port", cfg.Port)
-	// Start the server on configured port
-	if err := r.Run(":" + cfg.Port); err != nil {
-		log.Println("Error starting server", err)
-	}
+	logger.Info("Server exited cleanly")
 }

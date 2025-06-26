@@ -4,48 +4,21 @@ import (
 	"auth-service/database"
 	"auth-service/models"
 	"auth-service/services"
-	"context"
+	"auth-service/types"
 	"errors"
-	"fmt"
 	"log"
-	"math/rand"
 	"net/http"
-	"net/smtp"
-	"os"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/joho/godotenv"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
 // Struct to represent the login request body
-type LoginRequest struct {
-	Email    string `json:"email" binding:"required"`
-	Password string `json:"password" binding:"required"`
-	Role     string `json:"role" binding:"required,oneof=admin user"`
-}
-
-// Struct for user registration
-type RegisterRequest struct {
-	Email    string `json:"email" binding:"required"`
-	Password string `json:"password" binding:"required"`
-	Name     string `json:"full_name" binding:"required"`
-	Role     string `json:"role" binding:"required,oneof=admin user"`
-}
-
-type AddressRequest struct {
-	Type       string `json:"type" binding:"required,oneof=billing shipping"`
-	Street     string `json:"street" binding:"required"`
-	City       string `json:"city" binding:"required"`
-	State      string `json:"state" binding:"required"`
-	PostalCode string `json:"postal_code" binding:"required"`
-	Country    string `json:"country" binding:"required"`
-}
 
 func Login(c *gin.Context) {
-	var loginReq LoginRequest
+	var loginReq types.LoginRequest
 
 	// 1. Validate JSON body
 	if err := c.ShouldBindJSON(&loginReq); err != nil {
@@ -112,108 +85,62 @@ func Login(c *gin.Context) {
 
 // Register a new user
 func Register(c *gin.Context) {
-	var registerReq RegisterRequest
+	var registerReq types.RegisterRequest
 
-	// Bind JSON request
+	// 1. Bind JSON request
 	if err := c.ShouldBindJSON(&registerReq); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON body"})
 		return
 	}
 
-	// Check if email already exists
+	// 2. Validate password strength
+	validator := services.NewPasswordValidator()
+	if err := validator.ValidatePassword(registerReq.Password); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 3. Check if email already exists
 	var existingUser models.User
 	if err := database.DB.Where("email = ?", registerReq.Email).First(&existingUser).Error; err == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "Email already exists"})
 		return
 	}
 
-	// Hash the password
+	// 4. Hash the password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(registerReq.Password), bcrypt.DefaultCost)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
 		return
 	}
 
-	if err := godotenv.Load(); err != nil {
-		log.Println("Warning: No .env file found, using system environment variables")
-	}
-
-	// Create new user
+	// 5. Create new user
 	newUser := models.User{
 		ID:       uuid.New(),
 		Email:    registerReq.Email,
 		Password: string(hashedPassword),
-		Name:     registerReq.Name,
 		Role:     registerReq.Role,
 	}
-	newUser.VerificationCode = generateRandomCode(6)
+	newUser.VerificationCode = services.GenerateRandomCode(6)
 
-	// Send verification email
-	if err := sendVerificationEmail(newUser.Email, newUser.VerificationCode); err != nil {
+	// 6. Send verification email
+	if err := services.SendVerificationEmail(newUser.Email, newUser.VerificationCode); err != nil {
 		log.Println("Error sending verification email:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send verification email"})
 		return
 	}
 
-	// Insert into PostgreSQL
-	if err := database.DB.Create(&newUser).Error; err != nil { // ✅ Use database.DB
+	// 7. Insert into PostgreSQL
+	if err := database.DB.Create(&newUser).Error; err != nil {
 		log.Println("Error inserting user:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create account"})
 		return
 	}
-	// Return success response
+
+	// 8. Success response
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "Account created successfully",
-		"user": gin.H{
-			"id":    newUser.ID,
-			"email": newUser.Email,
-			"role":  newUser.Role,
-		},
 	})
-}
-
-//Helper functions for verification code generation and email sending
-
-func generateRandomCode(length int) string {
-	// logger.Debug(context.Background(), "Generating random code", "length", length)
-	code := ""
-
-	for i := 0; i < length; i++ {
-		code += fmt.Sprintf("%d", rand.Intn(10))
-	}
-
-	return code
-}
-
-// Helper function to send verification email
-func sendVerificationEmail(to string, code string) error {
-	log.Println(context.Background(), "Sending verification email", "to", to)
-
-	from := os.Getenv("SMTP_EMAIL")
-	password := os.Getenv("SMTP_PASSWORD")
-	smtpServer := "smtp.gmail.com"
-	port := "587"
-
-	if from == "" || password == "" {
-		log.Println(context.Background(), "SMTP configuration missing", nil)
-		return fmt.Errorf("SMTP configuration is missing")
-	}
-
-	// Set up email content
-	subject := "Email Verification"
-	body := fmt.Sprintf("Your verification code is: %s", code)
-	message := []byte("Subject: " + subject + "\r\n" + "To: " + to + "\r\n" + "\r\n" + body)
-
-	// Auth configuration for SMTP
-	auth := smtp.PlainAuth("", from, password, smtpServer)
-	err := smtp.SendMail(smtpServer+":"+port, auth, from, []string{to}, message)
-	if err != nil {
-		log.Println(context.Background(), "Failed to send verification email", err)
-		return err
-	}
-
-	log.Println(context.Background(), "Verification email sent successfully", "to", to)
-	return nil
 }
 
 // Verify email with the code

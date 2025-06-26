@@ -7,23 +7,23 @@ import (
 )
 
 var (
-	ErrPasswordTooShort      = errors.New("password must be at least 8 characters long")
-	ErrPasswordNoUpper       = errors.New("password must contain at least one uppercase letter")
-	ErrPasswordNoLower       = errors.New("password must contain at least one lowercase letter")
-	ErrPasswordNoNumber      = errors.New("password must contain at least one number")
-	ErrPasswordNoSpecial     = errors.New("password must contain at least one special character")
-	ErrPasswordCommon        = errors.New("password is too common")
-	ErrPasswordSequential    = errors.New("password contains sequential characters")
-	ErrPasswordRepeating     = errors.New("password contains repeating characters")
+	ErrPasswordTooShort   = errors.New("password must be at least 8 characters long")
+	ErrPasswordNoUpper    = errors.New("password must contain at least one uppercase letter")
+	ErrPasswordNoLower    = errors.New("password must contain at least one lowercase letter")
+	ErrPasswordNoNumber   = errors.New("password must contain at least one number")
+	ErrPasswordNoSpecial  = errors.New("password must contain at least one special character")
+	ErrPasswordCommon     = errors.New("password is too common")
+	ErrPasswordSequential = errors.New("password contains sequential characters")
+	ErrPasswordRepeating  = errors.New("password contains repeating characters")
 )
 
 // PasswordValidator validates passwords against security requirements
 type PasswordValidator struct {
-	minLength      int
-	requireUpper   bool
-	requireLower   bool
-	requireNumber  bool
-	requireSpecial bool
+	minLength       int
+	requireUpper    bool
+	requireLower    bool
+	requireNumber   bool
+	requireSpecial  bool
 	commonPasswords map[string]bool
 }
 
@@ -110,4 +110,4 @@ func (pv *PasswordValidator) ValidatePassword(password string) error {
 func IsPasswordStrong(password string) bool {
 	validator := NewPasswordValidator()
 	return validator.ValidatePassword(password) == nil
-} 
+}
