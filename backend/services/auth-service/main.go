@@ -77,7 +77,7 @@ func main() {
 	})
 
 	// Auth routes
-	authGroup := r.Group("/auth")
+	authGroup := r.Group("/")
 	{
 		authGroup.POST("/register", controllers.Register)
 		authGroup.POST("/login", controllers.Login)
