@@ -13,5 +13,6 @@ func RegisterUserRoutes(r *gin.Engine) {
 
 	userRoutes.GET("/profile", controllers.GetProfile)
 	userRoutes.PUT("/profile", controllers.UpdateProfile)
+	userRoutes.POST("/change-password", controllers.ChangePassword)
 
 }
