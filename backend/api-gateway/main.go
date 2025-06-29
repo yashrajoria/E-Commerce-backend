@@ -105,6 +105,9 @@ func main() {
 	protected.PUT("/users/*any", func(ctx *gin.Context) {
 		forwardRequest(ctx, "http://user-service:8085/users")
 	})
+	protected.POST("/users/*any", func(ctx *gin.Context) {
+		forwardRequest(ctx, "http://user-service:8085/users")
+	})
 
 	// Forward requests to Product Service (Protected)
 	protected.GET("/products/*any", func(c *gin.Context) {
