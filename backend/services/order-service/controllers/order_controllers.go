@@ -1,10 +1,12 @@
 package controllers
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	nanoid "github.com/matoous/go-nanoid/v2"
@@ -28,6 +30,13 @@ type CreateOrderRequest struct {
 type OrderItemInput struct {
 	ProductID uuid.UUID `json:"product_id" binding:"required"`
 	Quantity  int       `json:"quantity" binding:"required,min=1"`
+	Price     float64   `json:"price"`
+}
+
+type Product struct {
+	ID    uuid.UUID `json:"id"`
+	Price int       `json:"price"`
+	Stock int       `json:"stock"`
 }
 
 func GenerateOrderNumber() (string, error) {
@@ -37,6 +46,29 @@ func GenerateOrderNumber() (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("ORD-%d-%s", year, id), nil
+}
+
+func FetchProductByID(productID uuid.UUID) (*Product, error) {
+	productServiceURL := fmt.Sprintf("http://product-service:8082/products/internal/%s", productID.String())
+
+	resp, err := http.Get(productServiceURL)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("product service returned %d", resp.StatusCode)
+	}
+
+	var product Product
+	if err := json.NewDecoder(resp.Body).Decode(&product); err != nil {
+		return nil, err
+	}
+
+	return &product, nil
 }
 
 func CreateOrder(c *gin.Context) {
@@ -66,19 +98,29 @@ func CreateOrder(c *gin.Context) {
 
 	// Use transaction for atomic operation
 	err = database.DB.Transaction(func(tx *gorm.DB) error {
-		// Save order
+		// First create the order to get the generated ID
 		if err := tx.Create(&order).Error; err != nil {
 			return err
 		}
 
-		// Prepare and insert order items
+		// Now that order.ID is populated, proceed with items
 		var orderItems []models.OrderItem
 		for _, item := range req.Items {
+			product, err := FetchProductByID(item.ProductID)
+			if err != nil {
+				return fmt.Errorf("product fetch error: %w", err)
+			}
+
+			if product.Stock < item.Quantity {
+				return fmt.Errorf("product out of stock: %s", item.ProductID.String())
+			}
+
 			orderItems = append(orderItems, models.OrderItem{
 				ID:        uuid.New(),
-				OrderID:   order.ID,
+				OrderID:   order.ID, // ✅ Now order.ID is valid
 				ProductID: item.ProductID,
 				Quantity:  item.Quantity,
+				Price:     int(item.Price),
 			})
 		}
 
@@ -90,10 +132,19 @@ func CreateOrder(c *gin.Context) {
 	})
 
 	if err != nil {
-		log.Println("Failed to create order:", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create order"})
+		log.Println("❌ Failed to create order:", err)
+
+		// Handle known errors
+		if err.Error() == "product fetch error" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid product"})
+		} else if strings.Contains(err.Error(), "out of stock") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create order"})
+		}
 		return
 	}
+
 	c.JSON(http.StatusCreated, gin.H{"message": "Order created successfully", "order_id": order.ID})
 
 }
