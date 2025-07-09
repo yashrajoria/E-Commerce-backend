@@ -70,8 +70,8 @@ func main() {
 	})
 
 	// Forward requests to Auth Service (No authentication needed for login/signup)
-	userGroup := r.Group("/user")
-	userGroup.OPTIONS("/*any", func(c *gin.Context) {
+	authGroup := r.Group("/auth")
+	authGroup.OPTIONS("/*any", func(c *gin.Context) {
 		log.Println("Handling OPTIONS request for:", c.Request.URL.Path)
 		origin := c.Request.Header.Get("Origin")
 		if origin == "" {
@@ -83,10 +83,14 @@ func main() {
 		c.Header("Access-Control-Allow-Credentials", "true")
 		c.Status(http.StatusOK)
 	})
-	userGroup.GET("/*any", func(c *gin.Context) {
+	authGroup.GET("/*any", func(c *gin.Context) {
 		forwardRequest(c, "http://auth-service:8081"+c.Param("any"))
 	})
-	userGroup.POST("/*any", func(c *gin.Context) {
+	authGroup.POST("/*any", func(c *gin.Context) {
+		forwardRequest(c, "http://auth-service:8081")
+
+	})
+	authGroup.PUT("/*any", func(c *gin.Context) {
 		forwardRequest(c, "http://auth-service:8081")
 
 	})
@@ -94,6 +98,16 @@ func main() {
 	// Protected routes (Require JWT authentication)
 	protected := r.Group("/")
 	protected.Use(middlewares.JWTMiddleware())
+
+	protected.GET("/users/*any", func(ctx *gin.Context) {
+		forwardRequest(ctx, "http://user-service:8085/users")
+	})
+	protected.PUT("/users/*any", func(ctx *gin.Context) {
+		forwardRequest(ctx, "http://user-service:8085/users")
+	})
+	protected.POST("/users/*any", func(ctx *gin.Context) {
+		forwardRequest(ctx, "http://user-service:8085/users")
+	})
 
 	// Forward requests to Product Service (Protected)
 	protected.GET("/products/*any", func(c *gin.Context) {
@@ -133,19 +147,11 @@ func main() {
 	})
 
 	protected.POST("/orders/*any", func(c *gin.Context) {
-		path := c.Param("any")
-		if path == "/" || path == "" {
-			path = ""
-		}
-		// forwardRequest(c, "http://order-service:8083/orders"+path)
 		forwardRequest(c, "http://order-service:8083/orders")
 	})
+
 	protected.GET("/orders/*any", func(c *gin.Context) {
-		path := c.Param("any")
-		if path == "/" || path == "" {
-			path = ""
-		}
-		forwardRequest(c, "http://order-service:8083/orders"+path)
+		forwardRequest(c, "http://order-service:8083/orders")
 	})
 
 	r.Run(":8080") // API Gateway runs on port 8080
