@@ -11,14 +11,6 @@ import (
 )
 
 func main() {
-	// Initialize logger
-	// 	logger.Initialize(os.Getenv("ENV"))
-
-	// // Load configuration from environment variables
-	// cfg, err := LoadConfig()
-	// if err != nil {
-	// 	log.Println("Config error", zap.Error(err))
-	// }
 
 	// Connect to database
 	err := database.Connect()
@@ -32,9 +24,6 @@ func main() {
 	}
 
 	r := gin.Default()
-
-	// Apply request logging
-	//	r.Use(logger.RequestLogger())
 
 	// Register order routes
 	routes.RegisterOrderRoutes(r)
