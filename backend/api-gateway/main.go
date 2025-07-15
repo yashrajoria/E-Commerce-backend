@@ -153,6 +153,18 @@ func main() {
 	protected.GET("/orders/*any", func(c *gin.Context) {
 		forwardRequest(c, "http://order-service:8083/orders")
 	})
+	protected.GET("/cart/*any", func(c *gin.Context) {
+		forwardRequest(c, "http://cart-service:8086/cart")
+	})
+	protected.POST("/cart/*any", func(c *gin.Context) {
+		forwardRequest(c, "http://cart-service:8086/cart")
+	})
+	protected.GET("/cart/*any", func(c *gin.Context) {
+		forwardRequest(c, "http://cart-service:8086/cart")
+	})
+	protected.DELETE("/cart/*any", func(c *gin.Context) {
+		forwardRequest(c, "http://cart-service:8086/cart")
+	})
 
 	r.Run(":8080") // API Gateway runs on port 8080
 }
