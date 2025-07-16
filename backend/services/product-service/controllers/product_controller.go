@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cloudinary/cloudinary-go/api/uploader"
+	"github.com/cloudinary/cloudinary-go/logger"
 	"github.com/google/uuid"
 
 	"github.com/cloudinary/cloudinary-go"
@@ -55,13 +56,13 @@ func GetProducts(c *gin.Context) {
 	var products []models.Product
 	cursor, err := collection.Find(c, bson.M{}, findOptions)
 	if err != nil {
-		log.Println(c, "Error finding products", zap.Error(err))
+		logger.New().Error("Error finding products", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch products"})
 		return
 	}
 	defer cursor.Close(c)
 	if err := cursor.All(c, &products); err != nil {
-		log.Println(c, "Error decoding products", zap.Error(err))
+		logger.New().Error("Error decoding products", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode products"})
 		return
 	}
@@ -325,15 +326,15 @@ func CreateProduct(c *gin.Context) {
 	log.Printf("[CreateProduct] All image uploads completed. Total: %d", len(imageURLs))
 
 	product := models.Product{
-		ID:           uuid.New(),
-		Name:         name[0],
-		Price:        price,
-		Quantity:     quantity,
-		Description:  description[0],
-		Images:       imageURLs,
-		Brand:        brand[0],
-		SKU:          sku[0],
-		CategoryID:   categoryIDs[0],
+		ID:          uuid.New(),
+		Name:        name[0],
+		Price:       price,
+		Quantity:    quantity,
+		Description: description[0],
+		Images:      imageURLs,
+		Brand:       brand[0],
+		SKU:         sku[0],
+		// CategoryID:   categoryIDs[0],
 		CategoryIDs:  categoryIDs,
 		CategoryPath: categoryPaths,
 		CreatedAt:    time.Now(),
@@ -518,13 +519,13 @@ func CreateBulkProducts(c *gin.Context) {
 		}
 
 		product := models.Product{
-			ID:           uuid.New(),
-			Name:         name,
-			Price:        price,
-			Quantity:     quantity,
-			Description:  description,
-			Images:       []string{image},
-			CategoryID:   categoryIDs[0], // use the first as primary
+			ID:          uuid.New(),
+			Name:        name,
+			Price:       price,
+			Quantity:    quantity,
+			Description: description,
+			Images:      []string{image},
+			// CategoryID:   categoryIDs[0], // use the first as primary
 			CategoryIDs:  categoryIDs,
 			CategoryPath: dedupedPaths,
 			CreatedAt:    time.Now(),
