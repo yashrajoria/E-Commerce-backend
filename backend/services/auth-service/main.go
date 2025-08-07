@@ -82,6 +82,7 @@ func main() {
 		authGroup.POST("/register", controllers.Register)
 		authGroup.POST("/login", controllers.Login)
 		authGroup.POST("/verify-email", controllers.VerifyEmail)
+		authGroup.POST("/logout", controllers.Logout)
 	}
 
 	// Port fallback

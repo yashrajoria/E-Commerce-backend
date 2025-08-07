@@ -34,7 +34,6 @@ func Login(c *gin.Context) {
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			// Avoid leaking user existence
-			log.Println(c, "Login attempt with non-existent email", "email", loginReq.Email)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
 		} else {
 			log.Println(c, "Database error during login", err)
@@ -118,6 +117,7 @@ func Register(c *gin.Context) {
 	newUser := models.User{
 		ID:       uuid.New(),
 		Email:    registerReq.Email,
+		Name:     registerReq.Name,
 		Password: string(hashedPassword),
 		Role:     registerReq.Role,
 	}
@@ -177,4 +177,12 @@ func VerifyEmail(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Email verified successfully"})
+}
+
+func Logout(c *gin.Context) {
+	// Clear the token
+	c.SetCookie("token", "", -1, "/", "localhost", false, true)
+
+	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
+	log.Println(c, "User logged out successfully")
 }
