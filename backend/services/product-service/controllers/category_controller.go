@@ -10,6 +10,7 @@ import (
 	"github.com/yashrajoria/product-service/database"
 	"github.com/yashrajoria/product-service/models"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 func CreateCategory(c *gin.Context) {
@@ -20,6 +21,17 @@ func CreateCategory(c *gin.Context) {
 
 	if err := c.ShouldBindJSON(&requestBody); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON body"})
+		return
+	}
+
+	var existingCategory models.Category
+	err := database.DB.Collection("categories").FindOne(c, bson.M{"name": requestBody.Name}).Decode(&existingCategory)
+
+	if err == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "Category with this name already exists"})
+		return
+	} else if err != mongo.ErrNoDocuments {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 		return
 	}
 
@@ -69,7 +81,7 @@ func CreateCategory(c *gin.Context) {
 		UpdatedAt: time.Now(),
 	}
 
-	_, err := database.DB.Collection("categories").InsertOne(c, newCategory)
+	_, err = database.DB.Collection("categories").InsertOne(c, newCategory)
 	if err != nil {
 		log.Println("Error inserting category:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to insert category"})
