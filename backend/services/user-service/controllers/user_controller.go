@@ -3,6 +3,7 @@ package controllers
 import (
 
 	// "user-service/middleware"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 func GetUserClaimsFromHeader(c *gin.Context) (string, error) {
@@ -41,48 +43,69 @@ func GetProfile(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"id":    user.ID,
-		"name":  user.Name,
-		"email": user.Email,
-		"role":  user.Role,
+		"id":           user.ID,
+		"name":         user.Name,
+		"email":        user.Email,
+		"phone_number": user.PhoneNumber,
+		"created_at":   user.CreatedAt,
+		"role":         user.Role,
 	})
 }
 
 func UpdateProfile(c *gin.Context) {
 	userID := c.GetHeader("X-User-ID")
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing X-User-ID header"})
 		return
 	}
 
 	var req struct {
-		Name  *string `json:"name"`
-		Email *string `json:"email"` // Uncomment if you want to allow email updates
-
-		// Email is ignored completely
+		Name        *string `json:"name"`
+		PhoneNumber *string `json:"phone_number"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid JSON payload",
+			"details": err.Error(),
+		})
 		return
 	}
 
 	var user models.User
 	if err := database.DB.First(&user, "id = ?", userID).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		}
 		return
 	}
 
 	if req.Name != nil {
 		user.Name = *req.Name
 	}
+	if req.PhoneNumber != nil {
+		user.PhoneNumber = req.PhoneNumber
+	}
 
 	if err := database.DB.Save(&user).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user"})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to update user",
+			"details": err.Error(),
+		})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Profile updated successfully"})
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Profile updated successfully",
+		"user": gin.H{
+			"id":           user.ID,
+			"name":         user.Name,
+			"phone_number": user.PhoneNumber,
+			// add email or other fields if needed
+		},
+	})
 }
 
 func ChangePassword(c *gin.Context) {
