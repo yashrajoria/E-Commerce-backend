@@ -7,7 +7,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// User model
 type User struct {
 	ID                uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
 	Email             string    `gorm:"unique;not null"`
