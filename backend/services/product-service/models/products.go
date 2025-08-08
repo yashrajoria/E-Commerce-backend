@@ -17,6 +17,7 @@ type Product struct {
 	SKU          string      `bson:"sku" json:"sku"`
 	CategoryIDs  []uuid.UUID `bson:"category_ids,omitempty" json:"category_ids,omitempty"`
 	CategoryPath []string    `bson:"category_path,omitempty" json:"category_path,omitempty"`
+	IsFeatured   bool        `bson:"is_featured" json:"is_featured"`
 	CreatedAt    time.Time   `bson:"created_at" json:"created_at"`
 	UpdatedAt    time.Time   `bson:"updated_at" json:"updated_at"`
 	DeletedAt    *time.Time  `bson:"deleted_at,omitempty" json:"deleted_at,omitempty"`
