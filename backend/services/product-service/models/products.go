@@ -7,17 +7,17 @@ import (
 )
 
 type Product struct {
-	ID          uuid.UUID `bson:"_id" json:"_id"`
-	Name        string    `json:"name"`
-	Price       float64   `json:"price"`
-	Quantity    int       `json:"quantity"`
-	Description string    `json:"description"`
-	Images      []string  `json:"images"`
-	Brand       string    `json:"brand"`
-	SKU         string    `json:"sku"`
-	// CategoryID   uuid.UUID   `bson:"category_id" json:"category_id"`
-	CategoryIDs  []uuid.UUID `bson:"category_ids,omitempty" json:"category_ids"`
-	CategoryPath []string    `bson:"category_path,omitempty" json:"category_path"`
-	CreatedAt    time.Time   `json:"createdAt" bson:"createdAt"`
-	UpdatedAt    time.Time   `json:"updatedAt" bson:"updatedAt"`
+	ID           uuid.UUID   `bson:"_id" json:"_id"`
+	Name         string      `bson:"name" json:"name"`
+	Price        float64     `bson:"price" json:"price"`
+	Quantity     int         `bson:"quantity" json:"quantity"`
+	Description  string      `bson:"description,omitempty" json:"description,omitempty"`
+	Images       []string    `bson:"images,omitempty" json:"images,omitempty"`
+	Brand        string      `bson:"brand,omitempty" json:"brand,omitempty"`
+	SKU          string      `bson:"sku" json:"sku"`
+	CategoryIDs  []uuid.UUID `bson:"category_ids,omitempty" json:"category_ids,omitempty"`
+	CategoryPath []string    `bson:"category_path,omitempty" json:"category_path,omitempty"`
+	CreatedAt    time.Time   `bson:"created_at" json:"created_at"`
+	UpdatedAt    time.Time   `bson:"updated_at" json:"updated_at"`
+	DeletedAt    *time.Time  `bson:"deleted_at,omitempty" json:"deleted_at,omitempty"`
 }
