@@ -185,6 +185,7 @@ func CreateProduct(c *gin.Context) {
 	images := form.File["images"]
 	brand := form.Value["brand"]
 	sku := form.Value["sku"]
+	is_featured := form.Value["is_featured"]
 
 	requiredFields := map[string][]string{
 		"name":        name,
@@ -194,6 +195,7 @@ func CreateProduct(c *gin.Context) {
 		"description": description,
 		"brand":       brand,
 		"sku":         sku,
+		"is_featured": is_featured,
 	}
 
 	for field, value := range requiredFields {
@@ -213,6 +215,12 @@ func CreateProduct(c *gin.Context) {
 	quantity, err := strconv.Atoi(quantityStr[0])
 	if err != nil || quantity < 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid quantity"})
+		return
+	}
+
+	isFeaturedBool, err := strconv.ParseBool(is_featured[0])
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid is_featured value"})
 		return
 	}
 
@@ -299,6 +307,7 @@ func CreateProduct(c *gin.Context) {
 		SKU:          sku[0],
 		CategoryIDs:  categoryIDs,
 		CategoryPath: categoryPaths,
+		IsFeatured:   isFeaturedBool,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
@@ -484,6 +493,12 @@ func CreateBulkProducts(c *gin.Context) {
 			}
 		}
 
+		isFeaturedBool, err := strconv.ParseBool(row[6])
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid is_featured value"})
+			return
+		}
+
 		now := time.Now().UTC()
 		product := models.Product{
 			ID:           uuid.New(),
@@ -494,6 +509,7 @@ func CreateBulkProducts(c *gin.Context) {
 			Images:       []string{image},
 			CategoryIDs:  categoryIDs,
 			CategoryPath: dedupedPaths,
+			IsFeatured:   isFeaturedBool,
 			CreatedAt:    now,
 			UpdatedAt:    now,
 		}
