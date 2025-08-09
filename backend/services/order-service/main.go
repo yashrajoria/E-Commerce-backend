@@ -1,35 +1,59 @@
 package main
 
 import (
-	"log"
+	"context"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"order-service/database"
+	"order-service/middleware"
+	"order-service/models"
+	"order-service/routes"
 
 	"github.com/gin-gonic/gin"
-	"github.com/yashrajoria/order-service/database"
-	"github.com/yashrajoria/order-service/models"
-	"github.com/yashrajoria/order-service/routes"
 	"go.uber.org/zap"
 )
 
 func main() {
+	logger, _ := zap.NewProduction()
+	defer logger.Sync()
 
-	// Connect to database
-	err := database.Connect()
+	cfg, err := LoadConfig()
 	if err != nil {
-		log.Println("Error connecting to database", zap.Error(err))
+		logger.Fatal("Config load failed", zap.Error(err))
 	}
 
-	// Run migrations
-	if err := database.DB.AutoMigrate(&models.Order{}, &models.OrderItem{}); err != nil {
-		log.Println("Migration failed", zap.Error(err))
+	if err := database.Connect(); err != nil {
+		logger.Fatal("DB connection failed", zap.Error(err))
 	}
 
-	r := gin.Default()
+	database.DB.AutoMigrate(&models.Order{}, &models.OrderItem{})
 
-	// Register order routes
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.Use(middleware.ConfigMiddleware(cfg.ProductServiceURL))
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "OK"})
+	})
 	routes.RegisterOrderRoutes(r)
 
-	// Start server on configured port
-	if err := r.Run(":" + "8083"); err != nil {
-		log.Println("Error starting server", zap.Error(err))
-	}
+	srv := &http.Server{Addr: ":" + cfg.Port, Handler: r}
+
+	go func() {
+		logger.Info("Order Service started", zap.String("port", cfg.Port))
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Fatal("server failed", zap.Error(err))
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	srv.Shutdown(ctx)
 }
