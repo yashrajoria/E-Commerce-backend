@@ -6,8 +6,9 @@ import (
 	"os"
 	"time"
 
+	"order-service/models"
+
 	"github.com/joho/godotenv"
-	"github.com/yashrajoria/order-service/models"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
