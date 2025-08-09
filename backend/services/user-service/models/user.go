@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 )
 
+// User model with soft delete (DeletedAt)
 type User struct {
 	ID                uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
 	Email             string    `gorm:"unique;not null"`
@@ -16,27 +17,28 @@ type User struct {
 	PhoneNumber       *string   `gorm:"unique"`
 	BillingAddressID  *uuid.UUID
 	ShippingAddressID *uuid.UUID
-	BillingAddress    Address   `gorm:"foreignKey:BillingAddressID"`
-	ShippingAddress   Address   `gorm:"foreignKey:ShippingAddressID"`
-	CreatedAt         time.Time `gorm:"autoCreateTime"`
-	UpdatedAt         time.Time `gorm:"autoUpdateTime"`
+	BillingAddress    Address        `gorm:"foreignKey:BillingAddressID"`
+	ShippingAddress   Address        `gorm:"foreignKey:ShippingAddressID"`
+	CreatedAt         time.Time      `gorm:"autoCreateTime"`
+	UpdatedAt         time.Time      `gorm:"autoUpdateTime"`
+	DeletedAt         gorm.DeletedAt `gorm:"index"`
 }
 
-// Address model
 type Address struct {
-	ID         uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
-	UserID     uuid.UUID `gorm:"type:uuid;not null"`
-	Type       string    `gorm:"type:varchar(20);check:type IN ('billing', 'shipping')"`
-	Street     string    `gorm:"not null"`
-	City       string    `gorm:"not null"`
-	State      string    `gorm:"not null"`
-	PostalCode string    `gorm:"not null"`
-	Country    string    `gorm:"not null"`
-	CreatedAt  time.Time `gorm:"autoCreateTime"`
-	UpdatedAt  time.Time `gorm:"autoUpdateTime"`
+	ID         uuid.UUID      `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	UserID     uuid.UUID      `gorm:"type:uuid;not null;index"`
+	Type       string         `gorm:"type:varchar(20);check:type IN ('billing', 'shipping')"`
+	Street     string         `gorm:"not null"`
+	City       string         `gorm:"not null"`
+	State      string         `gorm:"not null"`
+	PostalCode string         `gorm:"not null"`
+	Country    string         `gorm:"not null"`
+	CreatedAt  time.Time      `gorm:"autoCreateTime"`
+	UpdatedAt  time.Time      `gorm:"autoUpdateTime"`
+	DeletedAt  gorm.DeletedAt `gorm:"index"`
 }
 
-// Migrate function for auto migration
+// Migrate function, now migrates soft deletes too
 func Migrate(db *gorm.DB) error {
 	return db.AutoMigrate(&User{}, &Address{})
 }
