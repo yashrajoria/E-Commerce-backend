@@ -71,7 +71,6 @@ func RegisterAllRoutes(r *gin.Engine) {
 	auth.POST("/*any", func(c *gin.Context) {
 		utils.ForwardRequest(c, utils.ForwardOptions{TargetBase: "http://auth-service:8081"})
 	})
-	// etc.
 	// Order routes (protected)
 
 	protected.GET("/orders/*any", func(c *gin.Context) {
