@@ -90,6 +90,7 @@ func CreateOrder(c *gin.Context) {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Resource not found"})
 		} else {
+
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create order"})
 		}
 		return
@@ -131,6 +132,7 @@ func GetOrders(c *gin.Context) {
 		Model(&models.Order{}).
 		Where("user_id = ?", userID).
 		Count(&totalOrders).Error; err != nil {
+
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count orders"})
 		return
 	}
@@ -143,6 +145,7 @@ func GetOrders(c *gin.Context) {
 		Limit(limit).
 		Order("created_at DESC").
 		Find(&orders).Error; err != nil {
+		// TODO: Add structured logging here.
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch orders"})
 		return
 	}
@@ -179,7 +182,11 @@ func GetOrderByID(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID format"})
+		return
+	}
 	orderID := c.Param("id")
 
 	// Validate UUID format for orderID
@@ -198,6 +205,7 @@ func GetOrderByID(c *gin.Context) {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Order not found"})
 		} else {
+			// TODO: Add structured logging here.
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch order"})
 		}
 		return
