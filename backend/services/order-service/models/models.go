@@ -1,29 +1,30 @@
-// models/order.go
-
 package models
 
 import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type Order struct {
-	ID          uuid.UUID `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
-	OrderNumber string    `gorm:"uniqueIndex" json:"order_number"`
-	UserID      uuid.UUID `json:"user_id" gorm:"type:uuid;not null"`
-
-	Amount     int         `json:"amount"` // total amount in paisa
-	Status     string      `json:"status"` // pending, paid, failed, etc.
-	CreatedAt  time.Time   `gorm:"autoCreateTime"`
-	UpdatedAt  time.Time   `gorm:"autoUpdateTime"`
-	OrderItems []OrderItem `json:"items" gorm:"foreignKey:OrderID;constraint:OnDelete:CASCADE"`
+	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	OrderNumber string    `gorm:"uniqueIndex;not null"`
+	UserID      uuid.UUID `gorm:"type:uuid;not null;index"`
+	Amount      int       `gorm:"not null"`
+	Status      string    `gorm:"type:varchar(20);not null;default:'pending'"`
+	CanceledAt  *time.Time
+	CompletedAt *time.Time
+	CreatedAt   time.Time      `gorm:"autoCreateTime"`
+	UpdatedAt   time.Time      `gorm:"autoUpdateTime"`
+	DeletedAt   gorm.DeletedAt `gorm:"index"`
+	OrderItems  []OrderItem    `gorm:"foreignKey:OrderID;constraint:OnDelete:CASCADE"`
 }
 
 type OrderItem struct {
-	ID        uuid.UUID `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
-	OrderID   uuid.UUID `json:"order_id" gorm:"type:uuid;not null"`
-	ProductID uuid.UUID `json:"product_id" gorm:"type:uuid;not null"`
-	Quantity  int       `json:"quantity"`
-	Price     int       `json:"price"` // price per item at time of order (in paisa)
+	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	OrderID   uuid.UUID `gorm:"type:uuid;not null;index"`
+	ProductID uuid.UUID `gorm:"type:uuid;not null"`
+	Quantity  int       `gorm:"not null"`
+	Price     int       `gorm:"not null"`
 }
