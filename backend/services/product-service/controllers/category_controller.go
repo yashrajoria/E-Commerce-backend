@@ -15,8 +15,9 @@ import (
 
 func CreateCategory(c *gin.Context) {
 	var requestBody struct {
-		Name        string   `json:"name"`
-		ParentNames []string `json:"parent_names"`
+		Name        string   `json:"name" binding:"required"`
+		ParentNames []string `json:"parent_names,omitempty"`
+		Image       string   `json:"image,omitempty"`
 	}
 
 	if err := c.ShouldBindJSON(&requestBody); err != nil {
@@ -36,7 +37,7 @@ func CreateCategory(c *gin.Context) {
 	}
 
 	var parentIDs []uuid.UUID
-	var ancestorIDsSet = map[uuid.UUID]bool{}
+	ancestorIDsSet := map[uuid.UUID]bool{}
 
 	if len(requestBody.ParentNames) > 0 {
 		cursor, err := database.DB.Collection("categories").Find(c, bson.M{
@@ -66,19 +67,20 @@ func CreateCategory(c *gin.Context) {
 		}
 	}
 
-	// Convert map to slice
-	var ancestorIDs []uuid.UUID
+	ancestorIDs := make([]uuid.UUID, 0, len(ancestorIDsSet))
 	for id := range ancestorIDsSet {
 		ancestorIDs = append(ancestorIDs, id)
 	}
 
+	now := time.Now().UTC()
 	newCategory := models.Category{
 		ID:        uuid.New(),
 		Name:      requestBody.Name,
 		ParentIDs: parentIDs,
 		Ancestors: ancestorIDs,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		Image:     requestBody.Image,
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 
 	_, err = database.DB.Collection("categories").InsertOne(c, newCategory)
@@ -95,39 +97,26 @@ func CreateCategory(c *gin.Context) {
 }
 
 func GetCategories(c *gin.Context) {
-
 	collection := database.DB.Collection("categories")
 
-	var categories []models.Category
+	filter := bson.M{"deleted_at": bson.M{"$exists": false}}
 
-	cursor, err := collection.Find(c, bson.M{})
-
+	cursor, err := collection.Find(c, filter)
 	if err != nil {
 		log.Println("Error finding categories:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch categories"})
 		return
 	}
-
 	defer cursor.Close(c)
 
-	for cursor.Next(c) {
-		var category models.Category
-		if err := cursor.Decode(&category); err != nil {
-			log.Println("Error decoding category:", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode category"})
-			return
-		}
-		categories = append(categories, category)
-	}
-
-	if err := cursor.Err(); err != nil {
-		log.Println("Cursor error:", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Cursor error"})
+	var categories []models.Category
+	if err := cursor.All(c, &categories); err != nil {
+		log.Println("Error decoding categories:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode categories"})
 		return
 	}
 
 	c.JSON(http.StatusOK, categories)
-
 }
 
 func GetCategoryByID(c *gin.Context) {
@@ -138,8 +127,10 @@ func GetCategoryByID(c *gin.Context) {
 		return
 	}
 
+	filter := bson.M{"_id": objectID, "deleted_at": bson.M{"$exists": false}}
+
 	var category models.Category
-	err = database.DB.Collection("categories").FindOne(c, bson.M{"_id": objectID}).Decode(&category)
+	err = database.DB.Collection("categories").FindOne(c, filter).Decode(&category)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Category not found"})
 		return
@@ -158,7 +149,8 @@ func UpdateCategory(c *gin.Context) {
 
 	var requestBody struct {
 		Name        string   `json:"name"`
-		ParentNames []string `json:"parent_names"`
+		ParentNames []string `json:"parent_names,omitempty"`
+		Image       string   `json:"image,omitempty"`
 	}
 
 	if err := c.ShouldBindJSON(&requestBody); err != nil {
@@ -169,14 +161,14 @@ func UpdateCategory(c *gin.Context) {
 	update := bson.M{
 		"$set": bson.M{
 			"name":       requestBody.Name,
-			"updated_at": time.Now(),
+			"image":      requestBody.Image,
+			"updated_at": time.Now().UTC(),
 		},
 	}
 
-	// If parent names are provided, update parent relationships
 	if len(requestBody.ParentNames) > 0 {
 		var parentIDs []uuid.UUID
-		var ancestorIDsSet = map[uuid.UUID]bool{}
+		ancestorIDsSet := map[uuid.UUID]bool{}
 
 		cursor, err := database.DB.Collection("categories").Find(c, bson.M{
 			"name": bson.M{"$in": requestBody.ParentNames},
@@ -204,8 +196,7 @@ func UpdateCategory(c *gin.Context) {
 			return
 		}
 
-		// Convert map to slice
-		var ancestorIDs []uuid.UUID
+		ancestorIDs := make([]uuid.UUID, 0, len(ancestorIDsSet))
 		for id := range ancestorIDsSet {
 			ancestorIDs = append(ancestorIDs, id)
 		}
@@ -214,13 +205,15 @@ func UpdateCategory(c *gin.Context) {
 		update["$set"].(bson.M)["ancestors"] = ancestorIDs
 	}
 
-	result, err := database.DB.Collection("categories").UpdateOne(c, bson.M{"_id": objectID}, update)
+	result, err := database.DB.Collection("categories").UpdateOne(c,
+		bson.M{"_id": objectID, "deleted_at": bson.M{"$exists": false}},
+		update,
+	)
 	if err != nil {
 		log.Println("Error updating category:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update category"})
 		return
 	}
-
 	if result.MatchedCount == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Category not found"})
 		return
@@ -237,28 +230,32 @@ func DeleteCategory(c *gin.Context) {
 		return
 	}
 
-	// Check if category has any products
-	count, err := database.DB.Collection("products").CountDocuments(c, bson.M{"category_id": objectID})
+	count, err := database.DB.Collection("products").CountDocuments(c, bson.M{
+		"category_ids": objectID,
+		"deleted_at":   bson.M{"$exists": false},
+	})
 	if err != nil {
-		log.Println("Error checking products:", err)
+		log.Println("Error checking products in category:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check category products"})
 		return
 	}
-
 	if count > 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot delete category with associated products"})
 		return
 	}
 
-	result, err := database.DB.Collection("categories").DeleteOne(c, bson.M{"_id": objectID})
+	result, err := database.DB.Collection("categories").UpdateOne(
+		c,
+		bson.M{"_id": objectID, "deleted_at": bson.M{"$exists": false}},
+		bson.M{"$set": bson.M{"deleted_at": time.Now().UTC()}},
+	)
 	if err != nil {
 		log.Println("Error deleting category:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete category"})
 		return
 	}
-
-	if result.DeletedCount == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Category not found"})
+	if result.ModifiedCount == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Category not found or already deleted"})
 		return
 	}
 
@@ -273,9 +270,14 @@ func GetCategoryProducts(c *gin.Context) {
 		return
 	}
 
-	cursor, err := database.DB.Collection("products").Find(c, bson.M{"category_id": objectID})
+	filter := bson.M{
+		"category_ids": objectID,
+		"deleted_at":   bson.M{"$exists": false},
+	}
+
+	cursor, err := database.DB.Collection("products").Find(c, filter)
 	if err != nil {
-		log.Println("Error finding products:", err)
+		log.Println("Error finding products for category:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch products"})
 		return
 	}

@@ -5,89 +5,72 @@ import (
 	"auth-service/models"
 	"auth-service/services"
 	"auth-service/types"
-	"errors"
-	"log"
 	"net/http"
+	"os"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/gorm"
 )
 
-// Struct to represent the login request body
-
+// --- LOGIN HANDLER --- //
 func Login(c *gin.Context) {
 	var loginReq types.LoginRequest
 
-	// 1. Validate JSON body
+	// 1. Validate JSON input
 	if err := c.ShouldBindJSON(&loginReq); err != nil {
-		log.Println(c, "Invalid login request body", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 		return
 	}
 
+	// 2. Find user by email
 	var user models.User
-
-	// 2. Fetch user by email
 	err := database.DB.Where("email = ?", loginReq.Email).First(&user).Error
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			// Avoid leaking user existence
-			log.Println(c, "Login attempt with non-existent email", "email", loginReq.Email)
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
-		} else {
-			log.Println(c, "Database error during login", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
-		}
+		// Always give generic error (avoid leaking which field failed)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
 		return
 	}
 
-	// 3. Check role match
-	if user.Role != loginReq.Role {
-		log.Println(c, "Login attempt with wrong role",
-			"email", loginReq.Email,
-			"attempted_role", loginReq.Role,
-			"actual_role", user.Role)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "You are not authorized to access this resource"})
-		return
-	}
-
-	// Check if email is verified
+	// 3. Check email verification
 	if !user.EmailVerified {
-		log.Println(c, "Login attempt with unverified email", "email", loginReq.Email)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Email not verified"})
 		return
 	}
 
 	// 4. Validate password
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(loginReq.Password)); err != nil {
-		log.Println(c, "Invalid password attempt", "email", loginReq.Email)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
 		return
 	}
 
-	// 5. Generate JWT token
-	token, err := services.GenerateJWT(user.ID.String(), user.Email, user.Role)
+	// 5. Generate access and refresh JWT tokens
+	accessToken, err := services.GenerateTokenPair(user.ID.String(), user.Email, user.Role)
 	if err != nil {
-		log.Println(c, "Failed to generate JWT token", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
 		return
 	}
+	refreshToken, err := services.RefreshTokens(accessToken.RefreshToken)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate refresh token"})
+		return
+	}
 
-	// 6. Set token in HTTP-only cookie (adjust domain in production)
-	c.SetCookie("token", token, 86400, "/", "localhost", false, true)
+	// 6. Set cookies (domain and secure flag controlled by environment)
+	domain := os.Getenv("COOKIE_DOMAIN")
+	isSecure := os.Getenv("ENV") == "production"
+	c.SetCookie("token", accessToken.AccessToken, 900, "/", domain, isSecure, true)              // 15min access token
+	c.SetCookie("refresh_token", refreshToken.RefreshToken, 604800, "/", domain, isSecure, true) // 7d refresh token
 
-	log.Println(c, "User logged in successfully", "email", user.Email, "role", user.Role)
-	// 7. Respond with success (omit token in response for security)
+	// 7. Success response (do not leak tokens or sensitive info)
 	c.JSON(http.StatusOK, gin.H{"message": "Logged in successfully"})
 }
 
-// Register a new user
+// --- REGISTER HANDLER --- //
 func Register(c *gin.Context) {
 	var registerReq types.RegisterRequest
 
-	// 1. Bind JSON request
+	// 1. Validate JSON input
 	if err := c.ShouldBindJSON(&registerReq); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON body"})
 		return
@@ -107,43 +90,40 @@ func Register(c *gin.Context) {
 		return
 	}
 
-	// 4. Hash the password
+	// 4. Hash password securely
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(registerReq.Password), bcrypt.DefaultCost)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
 		return
 	}
 
-	// 5. Create new user
+	// 5. Create new user (default: email not verified until code entered)
 	newUser := models.User{
-		ID:       uuid.New(),
-		Email:    registerReq.Email,
-		Password: string(hashedPassword),
-		Role:     registerReq.Role,
+		ID:               uuid.New(),
+		Email:            registerReq.Email,
+		Name:             registerReq.Name,
+		Password:         string(hashedPassword),
+		Role:             registerReq.Role, // Or default, if you don't let client choose
+		EmailVerified:    false,
+		VerificationCode: services.GenerateRandomCode(6),
 	}
-	newUser.VerificationCode = services.GenerateRandomCode(6)
 
-	// 6. Send verification email
+	// 6. Send verification email (do not halt registration on email failure in some business cases)
 	if err := services.SendVerificationEmail(newUser.Email, newUser.VerificationCode); err != nil {
-		log.Println("Error sending verification email:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send verification email"})
 		return
 	}
 
-	// 7. Insert into PostgreSQL
+	// 7. Persist user to DB
 	if err := database.DB.Create(&newUser).Error; err != nil {
-		log.Println("Error inserting user:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create account"})
 		return
 	}
 
-	// 8. Success response
-	c.JSON(http.StatusCreated, gin.H{
-		"message": "Account created successfully",
-	})
+	c.JSON(http.StatusCreated, gin.H{"message": "Account created successfully"})
 }
 
-// Verify email with the code
+// --- EMAIL VERIFICATION HANDLER --- //
 func VerifyEmail(c *gin.Context) {
 	type VerifyRequest struct {
 		Email string `json:"email"`
@@ -162,19 +142,28 @@ func VerifyEmail(c *gin.Context) {
 		return
 	}
 
-	// Check if the verification code matches
 	if user.VerificationCode != req.Code {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid verification code"})
 		return
 	}
 
-	// Mark email as verified
 	user.EmailVerified = true
-	user.VerificationCode = "" // Clear the verification code after success
+	user.VerificationCode = ""
+
 	if err := database.DB.Save(&user).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Email verified successfully"})
+}
+
+// --- LOGOUT HANDLER --- //
+func Logout(c *gin.Context) {
+	domain := os.Getenv("COOKIE_DOMAIN")
+	isSecure := os.Getenv("ENV") == "production"
+	// Clear both tokens (access + refresh)
+	c.SetCookie("token", "", -1, "/", domain, isSecure, true)
+	c.SetCookie("refresh_token", "", -1, "/", domain, isSecure, true)
+	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
 }

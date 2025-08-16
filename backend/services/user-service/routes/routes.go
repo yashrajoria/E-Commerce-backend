@@ -1,18 +1,15 @@
 package routes
 
 import (
-	"log"
-	"user-service/controllers"
-
-	"github.com/gin-gonic/gin"
+    "log"
+    "user-service/controllers"
+    "github.com/gin-gonic/gin"
 )
 
-func RegisterUserRoutes(r *gin.Engine) {
-	log.Println("Registering user routes...")
-	userRoutes := r.Group("/users")
-
-	userRoutes.GET("/profile", controllers.GetProfile)
-	userRoutes.PUT("/profile", controllers.UpdateProfile)
-	userRoutes.POST("/change-password", controllers.ChangePassword)
-
+// Accepts a RouterGroup which already applies auth middleware
+func RegisterUserRoutes(rg *gin.RouterGroup) {
+    log.Println("Registering user routes...")
+    rg.GET("/profile", controllers.GetProfile)
+    rg.PUT("/profile", controllers.UpdateProfile)
+    rg.POST("/change-password", controllers.ChangePassword)
 }

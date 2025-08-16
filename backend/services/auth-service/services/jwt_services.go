@@ -2,112 +2,94 @@ package services
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"log"
+
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/joho/godotenv"
 )
 
-var secretKey = []byte(os.Getenv("JWT_SECRET"))
+var secretKey []byte
 
 func init() {
 	if err := godotenv.Load(); err != nil {
 		log.Println("Warning: No .env file found, using system environment variables")
 	}
+	secretKey = []byte(os.Getenv("JWT_SECRET"))
 	if len(secretKey) == 0 {
 		log.Println("Missing JWT_SECRET in environment variables")
 	}
 }
 
-// GenerateJWT generates a token with user ID, username, and role
-func GenerateJWT(userID, username, role string) (string, error) {
-	// Define claims (payload)
+// TokenPair holds access and refresh tokens
+type TokenPair struct {
+	AccessToken  string
+	RefreshToken string
+}
+
+// GenerateTokenPair creates a short-lived access token and a long-lived refresh token
+func GenerateTokenPair(userID, username, role string) (*TokenPair, error) {
+	accessToken, err := generateToken(userID, username, role, 15*time.Minute) // Access token 15 mins
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate access token: %w", err)
+	}
+
+	refreshToken, err := generateToken(userID, username, role, 7*24*time.Hour) // Refresh token 7 days
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate refresh token: %w", err)
+	}
+
+	return &TokenPair{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+	}, nil
+}
+
+// generateToken is a helper to create a JWT token with given expiry duration
+func generateToken(userID, username, role string, duration time.Duration) (string, error) {
 	claims := jwt.MapClaims{
 		"user_id":  userID,
 		"username": username,
 		"role":     role,
-		"exp":      time.Now().Add(time.Hour * 24).Unix(), // Can add buffer as needed
+		"exp":      time.Now().Add(duration).Unix(),
+		"iat":      time.Now().Unix(),
 	}
 
-	// Create the token
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-
-	// Sign and return the token
 	return token.SignedString(secretKey)
 }
 
-// GetUserIDFromJWT extracts and returns the user ID from the JWT token in the request cookie
-func GetUserIDFromJWT(c *gin.Context) (string, error) {
-	// Get the token from the cookie
-	tokenStr, err := c.Cookie("token")
-	if err != nil {
-		return "", fmt.Errorf("no token found: %v", err)
-	}
-
-	// Parse and validate the JWT token
+// ValidateRefreshToken parses and validates a refresh token string, returning claims if valid
+func ValidateRefreshToken(tokenStr string) (jwt.MapClaims, error) {
 	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
-		// Ensure the token method is HMAC-SHA256
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 		return secretKey, nil
 	})
 
-	// If the token is invalid or expired
-	if err != nil || !token.Valid {
-		return "", fmt.Errorf("invalid or expired token: %v", err)
+	if err != nil || token == nil || !token.Valid {
+		return nil, fmt.Errorf("invalid or expired refresh token")
 	}
 
-	// Extract claims from the token
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		return "", fmt.Errorf("unable to parse claims from token")
+		return nil, fmt.Errorf("invalid token claims")
 	}
 
-	// Extract user_id from claims
-	userID, ok := claims["user_id"].(string)
-	if !ok {
-		return "", fmt.Errorf("user_id not found in token claims")
-	}
-
-	return userID, nil
+	return claims, nil
 }
+func RefreshTokens(refreshToken string) (*TokenPair, error) {
+	claims, err := ValidateRefreshToken(refreshToken)
+	if err != nil {
+		return nil, err
+	}
 
-// func GetUserNameFromJWT(c *gin.Context) (string, error) {
-// 	// Get the token from the cookie
-// 	tokenStr, err := c.Cookie("token")
-// 	if err != nil {
-// 		return "", fmt.Errorf("no token found: %v", err)
-// 	}
+	userID, _ := claims["user_id"].(string)
+	username, _ := claims["username"].(string)
+	role, _ := claims["role"].(string)
 
-// 	// Parse and validate the JWT token
-// 	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
-// 		// Ensure the token method is HMAC-SHA256
-// 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-// 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-// 		}
-// 		return secretKey, nil
-// 	})
-
-// 	// If the token is invalid or expired
-// 	if err != nil || !token.Valid {
-// 		return "", fmt.Errorf("invalid or expired token: %v", err)
-// 	}
-
-// 	// Extract claims from the token
-// 	claims, ok := token.Claims.(jwt.MapClaims)
-// 	if !ok {
-// 		return "", fmt.Errorf("unable to parse claims from token")
-// 	}
-
-// 	// Extract name from claims
-// 	name, ok := claims["name"].(string)
-// 	if !ok {
-// 		return "", fmt.Errorf("name not found in token claims")
-// 	}
-
-// 	return name, nil
-// }
+	return GenerateTokenPair(userID, username, role)
+}

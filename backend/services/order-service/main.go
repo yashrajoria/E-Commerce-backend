@@ -1,35 +1,100 @@
 package main
 
 import (
+	"context"
 	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"order-service/database"
+	"order-service/kafka"
+	"order-service/middleware"
+	"order-service/models"
+	"order-service/routes"
+	"order-service/services"
 
 	"github.com/gin-gonic/gin"
-	"github.com/yashrajoria/order-service/database"
-	"github.com/yashrajoria/order-service/models"
-	"github.com/yashrajoria/order-service/routes"
 	"go.uber.org/zap"
 )
 
 func main() {
+	logger, _ := zap.NewProduction()
+	defer logger.Sync()
 
-	// Connect to database
-	err := database.Connect()
+	cfg, err := LoadConfig()
 	if err != nil {
-		log.Println("Error connecting to database", zap.Error(err))
+		logger.Fatal("Config load failed", zap.Error(err))
 	}
 
-	// Run migrations
+	if err := database.Connect(); err != nil {
+		logger.Fatal("DB connection failed", zap.Error(err))
+	}
 	if err := database.DB.AutoMigrate(&models.Order{}, &models.OrderItem{}); err != nil {
-		log.Println("Migration failed", zap.Error(err))
+		logger.Fatal("Migration failed", zap.Error(err))
 	}
 
-	r := gin.Default()
-
-	// Register order routes
+	// --- HTTP router ---
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.Use(middleware.ConfigMiddleware(cfg.ProductServiceURL))
+	r.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "OK"}) })
 	routes.RegisterOrderRoutes(r)
+	srv := &http.Server{Addr: ":" + cfg.Port, Handler: r}
 
-	// Start server on configured port
-	if err := r.Run(":" + "8083"); err != nil {
-		log.Println("Error starting server", zap.Error(err))
+	// --- Kafka config (env w/ sensible defaults for Docker) ---
+	brokersEnv := os.Getenv("KAFKA_BROKERS")
+	log.Println("KAFKA_BROKERS:", brokersEnv)
+	if brokersEnv == "" {
+		brokersEnv = "kafka:9092" // works inside docker-compose network
 	}
+	// Allow both "kafka:9092" or "kafka:9092,another:9092"
+	brokers := strings.Split(brokersEnv, ",")
+
+	checkoutTopic := os.Getenv("CHECKOUT_TOPIC")
+	if checkoutTopic == "" {
+		checkoutTopic = "checkout-events"
+	}
+	paymentEventsTopic := os.Getenv("PAYMENT_TOPIC")
+	if paymentEventsTopic == "" {
+		paymentEventsTopic = "payment-events"
+	}
+	paymentRequestsTopic := os.Getenv("PAYMENT_REQUEST_TOPIC")
+	if paymentRequestsTopic == "" {
+		paymentRequestsTopic = "payment-requests"
+	}
+	groupID := "order-service-group"
+
+	// --- Producer: payment-requests (Order → Payment) ---
+	paymentProducer := kafka.NewProducer(brokers, paymentRequestsTopic)
+	defer paymentProducer.Close()
+
+	// --- Consumer: checkout-events (Cart → Order) ---
+	go services.StartCheckoutConsumer(brokers, checkoutTopic, groupID, database.DB, paymentProducer)
+
+	// --- Consumer: payment-events (Payment → Order) ---
+	paymentConsumer := services.NewPaymentConsumer(brokers, paymentEventsTopic, groupID, database.DB)
+	go paymentConsumer.Start()
+	defer paymentConsumer.Close()
+
+	// --- HTTP server ---
+	go func() {
+		logger.Info("Order Service started", zap.String("port", cfg.Port))
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Fatal("server failed", zap.Error(err))
+		}
+	}()
+
+	// --- Graceful shutdown ---
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = srv.Shutdown(ctx)
+	logger.Info("Order Service stopped gracefully")
 }
