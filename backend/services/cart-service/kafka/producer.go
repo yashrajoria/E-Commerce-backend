@@ -11,7 +11,6 @@ import (
 
 type Producer struct {
 	writer *kafka.Writer
-	topic  string
 }
 
 func NewProducer(brokers []string, topic string) (*Producer, error) {
@@ -21,10 +20,7 @@ func NewProducer(brokers []string, topic string) (*Producer, error) {
 		Balancer: &kafka.LeastBytes{},
 	}
 
-	return &Producer{
-		writer: writer,
-		topic:  topic,
-	}, nil
+	return &Producer{writer: writer}, nil
 }
 
 func (p *Producer) SendCheckoutEvent(event models.CheckoutEvent) error {
@@ -38,11 +34,13 @@ func (p *Producer) SendCheckoutEvent(event models.CheckoutEvent) error {
 		Value: data,
 	}
 
-	err = p.writer.WriteMessages(context.Background(), msg)
-	if err != nil {
-		log.Printf("failed to send Kafka message: %v", err)
+	if err := p.writer.WriteMessages(context.Background(), msg); err != nil {
+		log.Printf("❌ Failed to send Kafka checkout event: %v", err)
+		return err
 	}
-	return err
+
+	log.Printf("✅ Checkout event published for user=%s", event.UserID)
+	return nil
 }
 
 func (p *Producer) Close() {

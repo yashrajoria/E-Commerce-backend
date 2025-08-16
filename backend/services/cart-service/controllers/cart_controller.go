@@ -31,6 +31,10 @@ func NewCartController(repo *database.CartRepository, producer *kafka.Producer, 
 // GetCart returns the current cart for a user
 func (cc *CartController) GetCart(c *gin.Context) {
 	userID := c.GetHeader("X-User-ID")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authorized"})
+		return
+	}
 
 	ctx := context.Background()
 
@@ -54,6 +58,11 @@ func (cc *CartController) GetCart(c *gin.Context) {
 // AddItem adds or updates an item in the cart
 func (cc *CartController) AddItem(c *gin.Context) {
 	userID := c.GetHeader("X-User-ID")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authorized"})
+		return
+	}
+
 	var item models.CartItem
 
 	if err := c.ShouldBindJSON(&item); err != nil {
@@ -97,6 +106,11 @@ func (cc *CartController) AddItem(c *gin.Context) {
 func (cc *CartController) RemoveItem(c *gin.Context) {
 	userID := c.GetHeader("X-User-ID")
 	productID := c.Param("product_id")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authorized"})
+		return
+	}
+
 	ctx := context.Background()
 
 	cart, _ := cc.Repo.GetCart(ctx, userID)
@@ -128,6 +142,11 @@ func (cc *CartController) RemoveItem(c *gin.Context) {
 // ClearCart removes all items from the cart
 func (cc *CartController) ClearCart(c *gin.Context) {
 	userID := c.GetHeader("X-User-ID")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authorized"})
+		return
+	}
+
 	ctx := context.Background()
 
 	err := cc.Repo.DeleteCart(ctx, userID)
@@ -144,6 +163,11 @@ func (cc *CartController) ClearCart(c *gin.Context) {
 // Checkout publishes the cart to Kafka and clears it
 func (cc *CartController) Checkout(c *gin.Context) {
 	userID := c.GetHeader("X-User-ID")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authorized"})
+		return
+	}
+
 	if userID == "" {
 		log.Println("❌ [Checkout] Unauthorized: missing or empty user ID header")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
