@@ -1,14 +1,14 @@
 package controllers
 
 import (
+	"encoding/json"
 	"errors"
-	"fmt"
-	"math"
+	"log"
 	"net/http"
 	"order-service/database"
+	"order-service/kafka"
 	"order-service/middleware"
 	"order-service/models"
-	"order-service/services"
 	"strconv"
 	"time"
 
@@ -25,142 +25,165 @@ type CreateOrderRequest struct {
 	} `json:"items" binding:"required,dive"`
 }
 
-func CreateOrder(c *gin.Context) {
-	userIDStr, err := middleware.GetUserID(c)
+type OrderController struct {
+	KafkaProducer *kafka.Producer // Add your Kafka producer here
+}
+
+// func CreateOrder(c *gin.Context) {
+// 	userIDStr, err := middleware.GetUserID(c)
+// 	if err != nil {
+// 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+// 		return
+// 	}
+// 	userID, _ := uuid.Parse(userIDStr)
+
+// 	var req CreateOrderRequest
+// 	if err := c.ShouldBindJSON(&req); err != nil {
+// 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request", "details": err.Error()})
+// 		return
+// 	}
+
+// 	// Generate order number
+// 	orderNumber := fmt.Sprintf("ORD-%d-%s", time.Now().Year(), uuid.New().String()[:6])
+
+// 	var totalAmount int
+// 	var orderItems []models.OrderItem
+// 	productServiceURL := c.GetString("product_service_url")
+
+// 	// Fetch and validate products
+// 	for _, item := range req.Items {
+// 		product, err := services.FetchProductByID(c.Request.Context(), productServiceURL, item.ProductID)
+// 		if err != nil {
+// 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Product fetch error: %v", err)})
+// 			return
+// 		}
+// 		if product.Stock < item.Quantity {
+// 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Product out of stock: %s", item.ProductID)})
+// 			return
+// 		}
+
+// 		price := product.Price // already a float64!
+// 		totalAmount += int(math.Round(price*100)) * item.Quantity
+// 		orderItems = append(orderItems, models.OrderItem{
+// 			ID:        uuid.New(),
+// 			ProductID: item.ProductID,
+// 			Quantity:  item.Quantity,
+// 			Price:     int(math.Round(price * 100)), // store in minor units
+// 		})
+// 	}
+
+// 	// Create transaction
+// 	order := models.Order{
+// 		UserID:      userID,
+// 		Amount:      totalAmount,
+// 		Status:      "pending_payment",
+// 		OrderNumber: orderNumber,
+// 		CreatedAt:   time.Now(),
+// 		UpdatedAt:   time.Now(),
+// 	}
+
+// 	if err := database.DB.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+// 		if err := tx.Create(&order).Error; err != nil {
+// 			return err
+// 		}
+// 		for i := range orderItems {
+// 			orderItems[i].OrderID = order.ID
+// 		}
+// 		return tx.Create(&orderItems).Error
+// 	}); err != nil {
+// 		if errors.Is(err, gorm.ErrRecordNotFound) {
+// 			c.JSON(http.StatusNotFound, gin.H{"error": "Resource not found"})
+// 		} else {
+
+// 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create order"})
+// 		}
+// 		return
+// 	}
+
+// 	c.JSON(http.StatusCreated, gin.H{"message": "Order created", "order_id": order.ID})
+// }
+
+func (c *OrderController) CreateOrder(ctx *gin.Context) {
+	userIDStr, err := middleware.GetUserID(ctx)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
 
 	var req CreateOrderRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request", "details": err.Error()})
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request", "details": err.Error()})
 		return
 	}
 
-	// Generate order number
-	orderNumber := fmt.Sprintf("ORD-%d-%s", time.Now().Year(), uuid.New().String()[:6])
+	// Validate products & quantities same way you do currently (fetch product & check stock)
 
-	var totalAmount int
-	var orderItems []models.OrderItem
-	productServiceURL := c.GetString("product_service_url")
-
-	// Fetch and validate products
+	// Build event items in the required event format:
+	eventItems := make([]models.CheckoutItem, 0, len(req.Items))
 	for _, item := range req.Items {
-		product, err := services.FetchProductByID(c.Request.Context(), productServiceURL, item.ProductID)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Product fetch error: %v", err)})
-			return
-		}
-		if product.Stock < item.Quantity {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Product out of stock: %s", item.ProductID)})
-			return
-		}
-
-		price := product.Price // already a float64!
-		totalAmount += int(math.Round(price*100)) * item.Quantity
-		orderItems = append(orderItems, models.OrderItem{
-			ID:        uuid.New(),
-			ProductID: item.ProductID,
+		eventItems = append(eventItems, models.CheckoutItem{
+			ProductID: item.ProductID.String(),
 			Quantity:  item.Quantity,
-			Price:     int(math.Round(price * 100)), // store in minor units
 		})
 	}
 
-	// Create transaction
-	order := models.Order{
-		UserID:      userID,
-		Amount:      totalAmount,
-		Status:      "pending",
-		OrderNumber: orderNumber,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+	// Create the checkout event
+	checkoutEvent := models.CheckoutEvent{
+		UserID:    userIDStr,
+		Items:     eventItems,
+		Timestamp: time.Now(),
 	}
 
-	if err := database.DB.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&order).Error; err != nil {
-			return err
-		}
-		for i := range orderItems {
-			orderItems[i].OrderID = order.ID
-		}
-		return tx.Create(&orderItems).Error
-	}); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Resource not found"})
-		} else {
-
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create order"})
-		}
+	eventBytes, err := json.Marshal(checkoutEvent)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to encode checkout event"})
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"message": "Order created", "order_id": order.ID})
+	// Publish the event to Kafka topic "checkout.requested"
+	if err := c.KafkaProducer.Publish("checkout.requested", eventBytes); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to publish checkout event"})
+		return
+	}
+
+	ctx.JSON(http.StatusAccepted, gin.H{"message": "Order creation started"})
 }
 
 // MaxLimit caps the number of orders per page to prevent abuse
 const MaxLimit = 100
 
+// For regular users: GetOrders returns paginated orders only for the authenticated user
 func GetOrders(c *gin.Context) {
-	userIDStr, err := middleware.GetUserID(c)
-	if err != nil {
+	// userIDStr, err := middleware.GetUserID(c)
+	userID := c.GetHeader("X-User-ID")
+
+	log.Println("[GetOrders] User ID:", userID)
+	if userID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
+	// userID, _ := uuid.Parse(userIDStr)
 
-	// Parse and sanitize pagination parameters
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
-	if page < 1 {
-		page = 1
-	}
-	if limit < 1 {
-		limit = 10
-	}
-	if limit > MaxLimit {
-		limit = MaxLimit
-	}
-	offset := (page - 1) * limit
+	page, limit := parsePaginationParams(c)
 
 	var orders []models.Order
 	var totalOrders int64
 
-	// Count total for this user
-	if err := database.DB.WithContext(c.Request.Context()).
+	query := database.DB.WithContext(c.Request.Context()).
 		Model(&models.Order{}).
-		Where("user_id = ?", userID).
-		Count(&totalOrders).Error; err != nil {
+		Where("user_id = ?", userID)
 
+	if err := query.Count(&totalOrders).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count orders"})
 		return
 	}
 
-	// Fetch paginated orders with preloaded items
-	if err := database.DB.WithContext(c.Request.Context()).
-		Preload("OrderItems").
-		Where("user_id = ?", userID).
-		Offset(offset).
+	if err := query.Preload("OrderItems").
+		Offset((page - 1) * limit).
 		Limit(limit).
 		Order("created_at DESC").
 		Find(&orders).Error; err != nil {
-		// TODO: Add structured logging here.
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch orders"})
-		return
-	}
-
-	if len(orders) == 0 {
-		c.JSON(http.StatusOK, gin.H{
-			"orders": []models.Order{},
-			"meta": gin.H{
-				"page":         page,
-				"limit":        limit,
-				"total_orders": totalOrders,
-				"total_pages":  0,
-				"has_more":     false,
-			},
-		})
 		return
 	}
 
@@ -176,17 +199,77 @@ func GetOrders(c *gin.Context) {
 	})
 }
 
+// Admin-only: GetAllOrders returns paginated orders for all users
+func GetAllOrders(c *gin.Context) {
+	// role := middleware.GetUserRole(c)
+	// if role != "admin" {
+	//     c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden"})
+	//     return
+	// }
+
+	page, limit := parsePaginationParams(c)
+
+	var orders []models.Order
+	var totalOrders int64
+
+	query := database.DB.WithContext(c.Request.Context()).Model(&models.Order{})
+
+	if err := query.Count(&totalOrders).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count orders"})
+		return
+	}
+
+	if err := query.Preload("OrderItems").
+		Offset((page - 1) * limit).
+		Limit(limit).
+		Order("created_at DESC").
+		Find(&orders).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch orders"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"orders": orders,
+		"meta": gin.H{
+			"page":         page,
+			"limit":        limit,
+			"total_orders": totalOrders,
+			"total_pages":  (totalOrders + int64(limit) - 1) / int64(limit),
+			"has_more":     totalOrders > int64(page*limit),
+		},
+	})
+}
+
+// Helper function to parse and sanitize pagination parameters
+func parsePaginationParams(c *gin.Context) (int, int) {
+	const MaxLimit = 100
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 10
+	}
+	if limit > MaxLimit {
+		limit = MaxLimit
+	}
+	return page, limit
+}
+
 func GetOrderByID(c *gin.Context) {
-	userIDStr, err := middleware.GetUserID(c)
-	if err != nil {
+	// userIDStr, err := middleware.GetUserID(c)
+	userID := c.GetHeader("X-User-ID")
+
+	if userID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID format"})
-		return
-	}
+	// userID, err := uuid.Parse(userIDStr)
+	// if err != nil {
+	// 	c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID format"})
+	// 	return
+	// }
 	orderID := c.Param("id")
 
 	// Validate UUID format for orderID

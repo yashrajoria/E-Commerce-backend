@@ -12,7 +12,7 @@ type Order struct {
 	OrderNumber string    `gorm:"uniqueIndex;not null"`
 	UserID      uuid.UUID `gorm:"type:uuid;not null;index"`
 	Amount      int       `gorm:"not null"`
-	Status      string    `gorm:"type:varchar(20);not null;default:'pending'"`
+	Status      string    `gorm:"type:varchar(20);not null;default:'pending_payment'"`
 	CanceledAt  *time.Time
 	CompletedAt *time.Time
 	CreatedAt   time.Time      `gorm:"autoCreateTime"`
