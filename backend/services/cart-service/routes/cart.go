@@ -23,7 +23,7 @@ func RegisterCartRoutes(
 	api := r.Group("/cart")
 	{
 		api.GET("/", controller.GetCart)
-		api.POST("/add", controller.AddItem)
+		api.POST("/add", controller.AddItems)
 		api.DELETE("/remove/:product_id", controller.RemoveItem)
 		api.DELETE("/clear", controller.ClearCart)
 		api.POST("/checkout", controller.Checkout)

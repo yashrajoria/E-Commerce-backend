@@ -56,24 +56,34 @@ func (cc *CartController) GetCart(c *gin.Context) {
 }
 
 // AddItem adds or updates an item in the cart
-func (cc *CartController) AddItem(c *gin.Context) {
+type AddItemsRequest struct {
+	Items []struct {
+		ProductID string `json:"product_id" binding:"required,uuid"`
+		Quantity  int    `json:"quantity" binding:"required,min=1"`
+	} `json:"items" binding:"required,dive"`
+}
+
+func (cc *CartController) AddItems(c *gin.Context) {
 	userID := c.GetHeader("X-User-ID")
 	if userID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authorized"})
 		return
 	}
 
-	var item models.CartItem
-
-	if err := c.ShouldBindJSON(&item); err != nil {
-		log.Printf("[AddItem] Invalid payload: %v", err)
-
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+	var req AddItemsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request", "details": err.Error()})
 		return
 	}
 
 	ctx := context.Background()
-	cart, _ := cc.Repo.GetCart(ctx, userID)
+
+	cart, err := cc.Repo.GetCart(ctx, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get cart"})
+		return
+	}
+
 	if cart == nil {
 		cart = &models.Cart{
 			UserID: userID,
@@ -81,20 +91,25 @@ func (cc *CartController) AddItem(c *gin.Context) {
 		}
 	}
 
-	found := false
-	for i, existing := range cart.Items {
-		if existing.ProductID == item.ProductID {
-			cart.Items[i].Quantity += item.Quantity
-			found = true
-			break
+	// Update cart items: increment quantities if product exists, else add new
+	for _, newItem := range req.Items {
+		found := false
+		for i, existing := range cart.Items {
+			if existing.ProductID == newItem.ProductID {
+				cart.Items[i].Quantity += newItem.Quantity
+				found = true
+				break
+			}
 		}
-	}
-	if !found {
-		cart.Items = append(cart.Items, item)
+		if !found {
+			cart.Items = append(cart.Items, models.CartItem{
+				ProductID: newItem.ProductID,
+				Quantity:  newItem.Quantity,
+			})
+		}
 	}
 
 	if err := cc.Repo.SaveCart(ctx, cart); err != nil {
-		log.Printf("❌ [AddItem] Failed to save cart: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save cart"})
 		return
 	}
