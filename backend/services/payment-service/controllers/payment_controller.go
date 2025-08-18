@@ -12,6 +12,8 @@ import (
 	"payment-service/models"
 	"payment-service/services"
 
+	"go.uber.org/zap"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stripe/stripe-go/v80"
@@ -20,6 +22,7 @@ import (
 type PaymentController struct {
 	Stripe *services.StripeService
 	Kafka  *kafka.PaymentEventProducer
+	Logger *zap.Logger
 }
 
 // Initiates a payment via Stripe and stores it in DB
@@ -85,26 +88,44 @@ func (pc *PaymentController) StripeWebhook(c *gin.Context) {
 func (pc *PaymentController) handlePaymentStatus(event stripe.Event, status string, payload []byte) {
 	var pi stripe.PaymentIntent
 	if err := json.Unmarshal(event.Data.Raw, &pi); err != nil {
+		pc.Logger.Warn("Payment not found for PaymentIntent", zap.String("payment_intent_id", pi.ID), zap.Error(err))
+
 		return
 	}
 
 	var payment models.Payment
 	if err := database.DB.Where("stripe_payment_id = ?", pi.ID).First(&payment).Error; err != nil {
-		return // not found
+		pc.Logger.Warn("Payment not found for PaymentIntent", zap.String("payment_intent_id", pi.ID), zap.Error(err))
+
+		return
 	}
 
 	if payment.Status == "succeeded" || payment.Status == "failed" {
-		return // already final
+
+		pc.Logger.Info("Duplicate payment webhook notification", zap.String("payment_id", payment.ID.String()), zap.String("status", payment.Status))
+
+		return
 	}
 
-	// Update DB
-	database.DB.Model(&payment).Updates(map[string]interface{}{
+	updates := map[string]interface{}{
 		"status":               status,
 		"stripe_event_payload": string(payload),
 		"updated_at":           time.Now(),
-	})
+	}
 
-	// Build and send Kafka event
+	now := time.Now()
+	switch status {
+	case "succeeded":
+		updates["succeeded_at"] = &now
+	case "failed":
+		updates["failed_at"] = &now
+	}
+
+	if err := database.DB.Model(&payment).Updates(updates).Error; err != nil {
+		pc.Logger.Warn("Failed to update payment status", zap.String("payment_id", payment.ID.String()), zap.Error(err))
+		return
+	}
+
 	eventMsg := models.PaymentEvent{
 		Type:      "payment_" + status,
 		OrderID:   payment.OrderID.String(),
@@ -116,6 +137,6 @@ func (pc *PaymentController) handlePaymentStatus(event stripe.Event, status stri
 	}
 
 	if err := pc.Kafka.SendPaymentEvent(eventMsg); err != nil {
-		// logging only, avoid crashing webhook
+		pc.Logger.Warn("Failed to publish Kafka payment event", zap.String("payment_id", payment.ID.String()), zap.Error(err))
 	}
 }
