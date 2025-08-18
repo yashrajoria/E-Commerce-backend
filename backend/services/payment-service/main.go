@@ -36,6 +36,7 @@ func main() {
 		strings.Split(cfg.KafkaBrokers, ","),
 		groupID,
 		paymentProducer,
+		stripeSvc,
 	)
 	// Start consuming payment requests in the background
 	go paymentRequestConsumer.Start()
