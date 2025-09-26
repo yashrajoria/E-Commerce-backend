@@ -30,13 +30,13 @@ type TokenPair struct {
 }
 
 // GenerateTokenPair creates a short-lived access token and a long-lived refresh token
-func GenerateTokenPair(userID, username, role string) (*TokenPair, error) {
-	accessToken, err := generateToken(userID, username, role, 15*time.Minute) // Access token 15 mins
+func GenerateTokenPair(userID, email, role string) (*TokenPair, error) {
+	accessToken, err := generateToken(userID, email, role, 15*time.Minute) // Access token: 15 mins
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate access token: %w", err)
 	}
 
-	refreshToken, err := generateToken(userID, username, role, 7*24*time.Hour) // Refresh token 7 days
+	refreshToken, err := generateToken(userID, email, role, 7*24*time.Hour) // Refresh token: 7 days
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate refresh token: %w", err)
 	}
@@ -48,13 +48,13 @@ func GenerateTokenPair(userID, username, role string) (*TokenPair, error) {
 }
 
 // generateToken is a helper to create a JWT token with given expiry duration
-func generateToken(userID, username, role string, duration time.Duration) (string, error) {
+func generateToken(userID, email, role string, duration time.Duration) (string, error) {
 	claims := jwt.MapClaims{
-		"user_id":  userID,
-		"username": username,
-		"role":     role,
-		"exp":      time.Now().Add(duration).Unix(),
-		"iat":      time.Now().Unix(),
+		"sub":   userID,
+		"email": email,
+		"role":  role,
+		"exp":   time.Now().Add(duration).Unix(),
+		"iat":   time.Now().Unix(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -81,15 +81,17 @@ func ValidateRefreshToken(tokenStr string) (jwt.MapClaims, error) {
 
 	return claims, nil
 }
+
+// RefreshTokens generates a new pair using a valid refresh token
 func RefreshTokens(refreshToken string) (*TokenPair, error) {
 	claims, err := ValidateRefreshToken(refreshToken)
 	if err != nil {
 		return nil, err
 	}
 
-	userID, _ := claims["user_id"].(string)
-	username, _ := claims["username"].(string)
+	userID, _ := claims["sub"].(string)
+	email, _ := claims["email"].(string)
 	role, _ := claims["role"].(string)
 
-	return GenerateTokenPair(userID, username, role)
+	return GenerateTokenPair(userID, email, role)
 }

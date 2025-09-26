@@ -10,7 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	// "github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/gin-gonic/gin"
 
 	"cart-service/config"
@@ -21,7 +20,6 @@ import (
 )
 
 func main() {
-	go kafka.StartCheckoutConsumer("kafka:9092", "checkout", "order-service-group")
 
 	// Load environment configuration
 	cfg := config.Load()

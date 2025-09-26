@@ -71,18 +71,16 @@ func RegisterAllRoutes(r *gin.Engine) {
 	auth.POST("/*any", func(c *gin.Context) {
 		utils.ForwardRequest(c, utils.ForwardOptions{TargetBase: "http://auth-service:8081"})
 	})
-	// Order routes (protected)
 
+	// Order routes (protected)
 	protected.GET("/orders/*any", func(c *gin.Context) {
 		utils.ForwardRequest(c, utils.ForwardOptions{TargetBase: "http://order-service:8083/orders"})
 	})
-	protected.POST("/orders/*any", func(c *gin.Context) {
+	admin.PUT("/orders/*any", func(c *gin.Context) {
 		utils.ForwardRequest(c, utils.ForwardOptions{TargetBase: "http://order-service:8083/orders"})
 	})
-	protected.PUT("/orders/*any", func(c *gin.Context) {
+	admin.DELETE("/orders/*any", func(c *gin.Context) {
 		utils.ForwardRequest(c, utils.ForwardOptions{TargetBase: "http://order-service:8083/orders"})
 	})
-	protected.DELETE("/orders/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{TargetBase: "http://order-service:8083/orders"})
-	})
+
 }
