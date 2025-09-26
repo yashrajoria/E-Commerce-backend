@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"order-service/models"
+	"payment-service/models"
 
 	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
@@ -65,7 +65,7 @@ func ConnectPostgres(autoMigrateModels ...interface{}) (*gorm.DB, error) {
 
 func Connect() error {
 	var err error
-	DB, err = ConnectPostgres(&models.Order{}, &models.OrderItem{})
+	DB, err = ConnectPostgres(&models.Payment{})
 	if err != nil {
 		log.Println("❌ Failed to connect to PostgreSQL:", err)
 		return err

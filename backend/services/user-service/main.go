@@ -1,118 +1,103 @@
 package main
 
 import (
-	"log"
-	"user-service/database"
-	"user-service/routes"
+    "context"
+    "log"
+    "net/http"
+    "os"
+    "os/signal"
+    "syscall"
+    "time"
 
-	// middlewares "user-service/middleware"
-	"context"
-	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
-	"user-service/models"
+    "user-service/database"
+    "user-service/middleware"
+    "user-service/models"
+    "user-service/routes"
 
-	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
+    "github.com/gin-gonic/gin"
+    "go.uber.org/zap"
 )
 
 func main() {
-	log.Println("Starting User Service...")
-	// Initialize structured logger
-	logger, _ := zap.NewProduction()
-	defer logger.Sync()
+    logger, _ := zap.NewProduction()
+    defer logger.Sync()
 
-	// Load configuration
-	cfg, err := LoadConfig()
-	if err != nil {
-		logger.Fatal("Failed to load config", zap.Error(err))
-	}
+    log.Println("Starting User Service...")
 
-	// Connect to the database
-	if err := database.Connect(); err != nil {
-		logger.Fatal("Database connection failed", zap.Error(err))
-	}
+    cfg, err := LoadConfig()
+    if err != nil {
+        logger.Fatal("Failed to load config", zap.Error(err))
+    }
 
-	// Run migrations only if NOT in production
-	if os.Getenv("ENV") != "production" {
-		if err := models.Migrate(database.DB); err != nil {
-			logger.Fatal("Migration failed", zap.Error(err))
-		}
-	}
+    if err := database.Connect(); err != nil {
+        logger.Fatal("Database connection failed", zap.Error(err))
+    }
 
-	// Initialize Gin router
-	r := gin.New()
+    if os.Getenv("ENV") != "production" {
+        if err := models.Migrate(database.DB); err != nil {
+            logger.Fatal("Migration failed", zap.Error(err))
+        }
+    }
 
-	// Global middlewares
-	r.Use(gin.Recovery()) // ✅ panic protection
-	// r.Use(middlewares.SecurityHeaders())     // ✅ security headers
-	// r.Use(middlewares.RateLimitMiddleware()) // ✅ rate limiting
-	// r.Use(logger.RequestLogger())              // Add structured request logging if available
+    r := gin.New()
+    r.Use(gin.Recovery())
 
-	// CORS
-	allowedOrigins := map[string]bool{
-		"http://localhost:3000":  true,
-		"https://yourdomain.com": true,
-	}
+    // CORS setup (could move allowedOrigins to config)
+    allowedOrigins := map[string]bool{
+        "http://localhost:3000":  true,
+        "https://yourdomain.com": true,
+    }
+    r.Use(func(c *gin.Context) {
+        origin := c.Request.Header.Get("Origin")
+        if !allowedOrigins[origin] {
+            origin = "http://localhost:3000"
+        }
+        c.Header("Access-Control-Allow-Origin", origin)
+        c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
+        c.Header("Access-Control-Allow-Credentials", "true")
+        if c.Request.Method == "OPTIONS" {
+            c.AbortWithStatus(http.StatusOK)
+            return
+        }
+        c.Next()
+    })
 
-	r.Use(func(c *gin.Context) {
-		origin := c.Request.Header.Get("Origin")
-		if !allowedOrigins[origin] {
-			origin = "http://localhost:3000"
-		}
-		c.Header("Access-Control-Allow-Origin", origin)
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
-		c.Header("Access-Control-Allow-Credentials", "true")
+    r.GET("/health", func(c *gin.Context) {
+        c.JSON(http.StatusOK, gin.H{"status": "OK"})
+    })
 
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(http.StatusOK)
-			return
-		}
-		c.Next()
-	})
+    // User routes with authentication middleware
+    userRoutes := r.Group("/users")
+    userRoutes.Use(middleware.AuthMiddleware())
+    routes.RegisterUserRoutes(userRoutes)
 
-	// Health check
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "OK"})
-	})
+    port := cfg.Port
+    if port == "" {
+        port = "8085"
+    }
 
-	routes.RegisterUserRoutes(r)
+    srv := &http.Server{
+        Addr:    ":" + port,
+        Handler: r,
+    }
 
-	// Port fallback
-	port := cfg.Port
-	if port == "" {
-		port = "8085"
-	}
+    go func() {
+        logger.Info("User Service started", zap.String("port", port))
+        if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+            logger.Fatal("Server error", zap.Error(err))
+        }
+    }()
 
-	// Create HTTP server with timeout
-	srv := &http.Server{
-		Addr:    ":" + port,
-		Handler: r,
-	}
+    quit := make(chan os.Signal, 1)
+    signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+    <-quit
 
-	// Graceful shutdown setup
-	go func() {
-		logger.Info("User Service started", zap.String("port", port))
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Fatal("Server error", zap.Error(err))
-		}
-	}()
-
-	// Wait for interrupt signal
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
-	logger.Info("Shutting down server...")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		logger.Fatal("Server forced to shutdown", zap.Error(err))
-	}
-
-	logger.Info("Server exited cleanly")
+    logger.Info("Shutting down server...")
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+    if err := srv.Shutdown(ctx); err != nil {
+        logger.Fatal("Server forced to shutdown", zap.Error(err))
+    }
+    logger.Info("Server exited cleanly")
 }
