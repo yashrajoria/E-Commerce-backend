@@ -29,80 +29,6 @@ type OrderController struct {
 	KafkaProducer *kafka.Producer // Add your Kafka producer here
 }
 
-// func CreateOrder(c *gin.Context) {
-// 	userIDStr, err := middleware.GetUserID(c)
-// 	if err != nil {
-// 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-// 		return
-// 	}
-// 	userID, _ := uuid.Parse(userIDStr)
-
-// 	var req CreateOrderRequest
-// 	if err := c.ShouldBindJSON(&req); err != nil {
-// 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request", "details": err.Error()})
-// 		return
-// 	}
-
-// 	// Generate order number
-// 	orderNumber := fmt.Sprintf("ORD-%d-%s", time.Now().Year(), uuid.New().String()[:6])
-
-// 	var totalAmount int
-// 	var orderItems []models.OrderItem
-// 	productServiceURL := c.GetString("product_service_url")
-
-// 	// Fetch and validate products
-// 	for _, item := range req.Items {
-// 		product, err := services.FetchProductByID(c.Request.Context(), productServiceURL, item.ProductID)
-// 		if err != nil {
-// 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Product fetch error: %v", err)})
-// 			return
-// 		}
-// 		if product.Stock < item.Quantity {
-// 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Product out of stock: %s", item.ProductID)})
-// 			return
-// 		}
-
-// 		price := product.Price // already a float64!
-// 		totalAmount += int(math.Round(price*100)) * item.Quantity
-// 		orderItems = append(orderItems, models.OrderItem{
-// 			ID:        uuid.New(),
-// 			ProductID: item.ProductID,
-// 			Quantity:  item.Quantity,
-// 			Price:     int(math.Round(price * 100)), // store in minor units
-// 		})
-// 	}
-
-// 	// Create transaction
-// 	order := models.Order{
-// 		UserID:      userID,
-// 		Amount:      totalAmount,
-// 		Status:      "pending_payment",
-// 		OrderNumber: orderNumber,
-// 		CreatedAt:   time.Now(),
-// 		UpdatedAt:   time.Now(),
-// 	}
-
-// 	if err := database.DB.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-// 		if err := tx.Create(&order).Error; err != nil {
-// 			return err
-// 		}
-// 		for i := range orderItems {
-// 			orderItems[i].OrderID = order.ID
-// 		}
-// 		return tx.Create(&orderItems).Error
-// 	}); err != nil {
-// 		if errors.Is(err, gorm.ErrRecordNotFound) {
-// 			c.JSON(http.StatusNotFound, gin.H{"error": "Resource not found"})
-// 		} else {
-
-// 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create order"})
-// 		}
-// 		return
-// 	}
-
-// 	c.JSON(http.StatusCreated, gin.H{"message": "Order created", "order_id": order.ID})
-// }
-
 func (c *OrderController) CreateOrder(ctx *gin.Context) {
 	userIDStr, err := middleware.GetUserID(ctx)
 	if err != nil {
@@ -201,12 +127,8 @@ func GetOrders(c *gin.Context) {
 
 // Admin-only: GetAllOrders returns paginated orders for all users
 func GetAllOrders(c *gin.Context) {
-	// role := middleware.GetUserRole(c)
-	// if role != "admin" {
-	//     c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden"})
-	//     return
-	// }
-
+	role, _ := c.Get("role")
+	log.Println("[GetAllOrders] User Role:", role)
 	page, limit := parsePaginationParams(c)
 
 	var orders []models.Order
