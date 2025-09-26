@@ -36,6 +36,9 @@ func RegisterCategoryRoutes(r *gin.Engine) {
 		categoryRoutes.GET("/:id", controllers.GetCategoryByID)
 		// Create a new category
 		categoryRoutes.POST("/", controllers.CreateCategory)
+		// POST /categories/bulk
+		categoryRoutes.POST("/bulk", controllers.BulkCreateCategories)
+
 		// Update a category
 		categoryRoutes.PUT("/:id", controllers.UpdateCategory)
 		// Delete a category
