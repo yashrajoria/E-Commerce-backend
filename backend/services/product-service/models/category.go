@@ -15,7 +15,10 @@ type Category struct {
 	Slug      string      `bson:"slug" json:"slug"`
 	Path      []string    `bson:"path,omitempty" json:"path,omitempty"`
 	Level     int         `bson:"level,omitempty" json:"level,omitempty"`
+	IsActive  bool        `bson:"is_active" json:"is_active"`
 	CreatedAt time.Time   `bson:"created_at" json:"created_at"`
 	UpdatedAt time.Time   `bson:"updated_at" json:"updated_at"`
 	DeletedAt *time.Time  `bson:"deleted_at,omitempty" json:"deleted_at,omitempty"`
+
+	Children []*Category `bson:"-" json:"children,omitempty"` // transient field for frontend
 }
