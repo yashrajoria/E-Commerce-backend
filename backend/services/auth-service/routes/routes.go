@@ -6,8 +6,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func RegisterUserRoutes(r *gin.Engine) {
-	r.POST("/register", controllers.Register)
-	r.POST("/login", controllers.Login)
-	r.POST("/verify-email", controllers.VerifyEmail)
+func RegisterAuthRoutes(r *gin.Engine, authController *controllers.AuthController) {
+	authRoutes := r.Group("/auth")
+	{
+		authRoutes.POST("/register", authController.Register)
+		authRoutes.POST("/login", authController.Login)
+		authRoutes.POST("/verify-email", authController.VerifyEmail)
+		authRoutes.POST("/logout", authController.Logout)
+		authRoutes.POST("/refresh", authController.Refresh)
+	}
 }

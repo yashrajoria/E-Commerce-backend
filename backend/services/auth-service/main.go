@@ -1,10 +1,6 @@
 package main
 
 import (
-	"auth-service/controllers"
-	"auth-service/database"
-	middlewares "auth-service/middleware"
-	"auth-service/models"
 	"context"
 	"net/http"
 	"os"
@@ -12,96 +8,86 @@ import (
 	"syscall"
 	"time"
 
+	"auth-service/controllers"
+	"auth-service/database"
+	"auth-service/repository"
+	"auth-service/services"
+
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 	"go.uber.org/zap"
 )
 
 func main() {
+	// --- 1. Initialization ---
+
 	// Initialize structured logger
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
+	zap.ReplaceGlobals(logger)
 
-	// Load configuration
-	cfg, err := LoadConfig()
-	if err != nil {
-		logger.Fatal("Failed to load config", zap.Error(err))
-	}
+	// Load .env file
+	_ = godotenv.Load()
 
 	// Connect to the database
-	if err := database.Connect(); err != nil {
-		logger.Fatal("Database connection failed", zap.Error(err))
+	if err := database.Connect(); err != nil { // Assuming you have a Connect function
+		zap.L().Fatal("Database connection failed", zap.Error(err))
 	}
+	// Run migrations if needed (your logic for this is fine)
 
-	// Run migrations only if NOT in production
-	if os.Getenv("ENV") != "production" {
-		if err := models.Migrate(database.DB); err != nil {
-			logger.Fatal("Migration failed", zap.Error(err))
-		}
-	}
+	// --- 2. Dependency Injection (Wiring the layers) ---
 
-	// Initialize Gin router
+	// Initialize Repositories
+	userRepo := repository.NewUserRepository(database.DB)
+
+	// Initialize Services
+	tokenService := services.NewTokenService()
+	emailService := services.NewEmailService()
+	authService := services.NewAuthService(userRepo, tokenService, emailService, database.DB)
+
+	// Initialize Controllers
+	authController := controllers.NewAuthController(authService)
+
+	// --- 3. HTTP Server & Middleware ---
+
 	r := gin.New()
+	r.Use(gin.Recovery()) // Panic protection
+	// r.Use(middlewares.SecurityHeaders()) // Good to have
+	// r.Use(middlewares.RateLimitMiddleware()) // Good to have
 
-	// Global middlewares
-	r.Use(gin.Recovery())                    // ✅ panic protection
-	r.Use(middlewares.SecurityHeaders())     // ✅ security headers
-	r.Use(middlewares.RateLimitMiddleware()) // ✅ rate limiting
-	// r.Use(logger.RequestLogger())              // Add structured request logging if available
-
-	// CORS
-	allowedOrigins := map[string]bool{
-		"http://localhost:3000":  true,
-		"https://yourdomain.com": true,
-	}
-
-	r.Use(func(c *gin.Context) {
-		origin := c.Request.Header.Get("Origin")
-		if !allowedOrigins[origin] {
-			origin = "http://localhost:3000"
-		}
-		c.Header("Access-Control-Allow-Origin", origin)
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
-		c.Header("Access-Control-Allow-Credentials", "true")
-
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(http.StatusOK)
-			return
-		}
-		c.Next()
-	})
+	// --- 4. Route Registration ---
 
 	// Health check
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "OK"})
 	})
 
-	// Auth routes
-	authGroup := r.Group("/")
+	// Auth routes, now using the controller methods
+	authRoutes := r.Group("/auth")
 	{
-		authGroup.POST("/register", controllers.Register)
-		authGroup.POST("/login", controllers.Login)
-		authGroup.POST("/verify-email", controllers.VerifyEmail)
-		authGroup.POST("/logout", controllers.Logout)
+		authRoutes.POST("/register", authController.Register)
+		authRoutes.POST("/login", authController.Login)
+		authRoutes.POST("/verify-email", authController.VerifyEmail)
+		authRoutes.POST("/logout", authController.Logout)
+		authRoutes.POST("/refresh", authController.Refresh) // Added the refresh route
 	}
 
-	// Port fallback
-	port := cfg.Port
+	// --- 5. Graceful Shutdown ---
+
+	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8081"
+		port = "8081" // Default port for auth-service
 	}
 
-	// Create HTTP server with timeout
 	srv := &http.Server{
 		Addr:    ":" + port,
 		Handler: r,
 	}
 
-	// Graceful shutdown setup
 	go func() {
-		logger.Info("Auth Service started", zap.String("port", port))
+		zap.L().Info("Auth Service started", zap.String("port", port))
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Fatal("Server error", zap.Error(err))
+			zap.L().Fatal("Server error", zap.Error(err))
 		}
 	}()
 
@@ -109,14 +95,13 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-
-	logger.Info("Shutting down server...")
+	zap.L().Info("Shutting down server...")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
-		logger.Fatal("Server forced to shutdown", zap.Error(err))
+		zap.L().Fatal("Server forced to shutdown", zap.Error(err))
 	}
 
-	logger.Info("Server exited cleanly")
+	zap.L().Info("Server exited gracefully")
 }
