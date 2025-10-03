@@ -47,6 +47,17 @@ func GetProducts(c *gin.Context) {
 
 	filter := bson.M{"deleted_at": bson.M{"$exists": false}}
 
+	// Check for the optional 'is_featured' query parameter
+	if isFeaturedStr := c.Query("is_featured"); isFeaturedStr != "" {
+		isFeatured, err := strconv.ParseBool(isFeaturedStr)
+		if err != nil {
+			// If the value is invalid (e.g., "abc"), return a bad request
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid boolean value for 'is_featured'"})
+			return
+		}
+		// Add the condition to our filter
+		filter["is_featured"] = isFeatured
+	}
 	findOptions := options.Find().
 		SetLimit(int64(perPage)).
 		SetSkip(int64(skip))
