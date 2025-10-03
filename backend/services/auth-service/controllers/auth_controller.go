@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"strings"
@@ -10,11 +11,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type AuthController struct {
-	service *services.AuthService
+type IAuthService interface {
+	Login(ctx context.Context, email, password string) (*services.TokenPair, error)
+	Register(ctx context.Context, name, email, password, role string) error
+	VerifyEmail(ctx context.Context, email, code string) error
+	RefreshTokens(ctx context.Context, refreshToken string) (*services.TokenPair, error)
 }
 
-func NewAuthController(s *services.AuthService) *AuthController {
+type AuthController struct {
+	service IAuthService
+}
+
+func NewAuthController(s IAuthService) *AuthController {
 	return &AuthController{service: s}
 }
 
@@ -53,7 +61,7 @@ func (ctrl *AuthController) Register(c *gin.Context) {
 		return
 	}
 
-	err := ctrl.service.Register(c.Request.Context(), req.Name, req.Email, req.Password)
+	err := ctrl.service.Register(c.Request.Context(), req.Name, req.Email, req.Password, "user")
 	if err != nil {
 		if strings.Contains(err.Error(), "already exists") {
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
@@ -101,7 +109,6 @@ func (ctrl *AuthController) Logout(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
 }
 
-// === NEWLY ADDED REFRESH METHOD ===
 func (ctrl *AuthController) Refresh(c *gin.Context) {
 	refreshToken, err := c.Cookie("refresh_token")
 	if err != nil {
@@ -111,8 +118,6 @@ func (ctrl *AuthController) Refresh(c *gin.Context) {
 
 	newTokenPair, err := ctrl.service.RefreshTokens(c.Request.Context(), refreshToken)
 	if err != nil {
-		// If refresh fails for any reason, it's a security-sensitive event.
-		// The best practice is to log the user out completely by clearing the invalid cookies.
 		ctrl.Logout(c)
 		return
 	}
