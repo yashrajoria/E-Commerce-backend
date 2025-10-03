@@ -27,7 +27,9 @@ func RegisterAllRoutes(r *gin.Engine) {
 	protected.POST("/users/*any", func(c *gin.Context) {
 		utils.ForwardRequest(c, utils.ForwardOptions{TargetBase: "http://user-service:8085/users"})
 	})
-	// similarly PUT, DELETE if needed...
+	protected.PUT("/users/*any", func(c *gin.Context) {
+		utils.ForwardRequest(c, utils.ForwardOptions{TargetBase: "http://user-service:8085/users"})
+	})
 
 	// Cart routes (protected)
 	protected.GET("/cart/*any", func(c *gin.Context) {
