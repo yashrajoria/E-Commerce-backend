@@ -17,6 +17,17 @@ type ForwardOptions struct {
 }
 
 func ForwardRequest(c *gin.Context, opts ForwardOptions) {
+	// Handle preflight OPTIONS requests immediately
+	if c.Request.Method == "OPTIONS" {
+		c.Header("Access-Control-Allow-Origin", "http://localhost:3000")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
+		c.Header("Access-Control-Allow-Credentials", "true")
+		c.Header("Access-Control-Max-Age", "43200")
+		c.AbortWithStatus(http.StatusNoContent)
+		return
+	}
+
 	targetPath := c.Param("any")
 	if opts.StripPrefix != "" && strings.HasPrefix(targetPath, opts.StripPrefix) {
 		targetPath = strings.TrimPrefix(targetPath, opts.StripPrefix)
@@ -61,6 +72,12 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 	}
 	defer resp.Body.Close()
 
+	// Set CORS headers FIRST, before copying other headers
+	c.Header("Access-Control-Allow-Origin", "http://localhost:3000")
+	c.Header("Access-Control-Allow-Credentials", "true")
+	c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
+
+	// Copy response headers (skip CORS from downstream)
 	for k, v := range resp.Header {
 		if strings.HasPrefix(strings.ToLower(k), "access-control-") {
 			continue // Skip CORS headers, handled by gateway
@@ -68,7 +85,9 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 		c.Header(k, strings.Join(v, ","))
 	}
 
+	// Set status AFTER all headers are set
 	c.Status(resp.StatusCode)
+
 	if _, err := io.Copy(c.Writer, resp.Body); err != nil {
 		logger.Log.Error("❌ Failed to copy response body", zap.Error(err))
 	}
