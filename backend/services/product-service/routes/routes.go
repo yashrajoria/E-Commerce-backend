@@ -5,45 +5,41 @@ import (
 	"github.com/yashrajoria/product-service/controllers"
 )
 
-func RegisterProductRoutes(r *gin.Engine) {
+func RegisterRoutes(r *gin.Engine, productController *controllers.ProductController, categoryController *controllers.CategoryController) {
 	productRoutes := r.Group("/products")
 	{
 		// List products with filtering, pagination, and sorting
-		productRoutes.GET("/", controllers.GetProducts)
+		productRoutes.GET("/", productController.GetProducts)
 		// Get a specific product
-		productRoutes.GET("/:id", controllers.GetProductByID)
+		productRoutes.GET("/:id", productController.GetProductByID)
 		// Create a new product
-		productRoutes.POST("/", controllers.CreateProduct)
+		productRoutes.POST("/", productController.CreateProduct)
 		// Bulk create products
-		productRoutes.POST("/bulk", controllers.CreateBulkProducts)
+		productRoutes.POST("/bulk", productController.CreateBulkProducts)
 		// Update a product
-		productRoutes.PUT("/:id", controllers.UpdateProduct)
+		productRoutes.PUT("/:id", productController.UpdateProduct)
 		// Delete a product
-		productRoutes.DELETE("/:id", controllers.DeleteProduct)
+		productRoutes.DELETE("/:id", productController.DeleteProduct)
 		// Get products by category
-		productRoutes.GET("/category/:categoryId", controllers.GetProductsByCategory)
 		//Get product by id for order service
-		productRoutes.GET("/internal/:id", controllers.GetProductByIDInternal)
+		productRoutes.GET("/internal/:id", productController.GetProductByIDInternal)
 	}
-}
-
-func RegisterCategoryRoutes(r *gin.Engine) {
 	categoryRoutes := r.Group("/categories")
 	{
 		// List all categories
-		categoryRoutes.GET("/", controllers.GetCategories)
+		categoryRoutes.GET("/", categoryController.GetCategories)
 		// Get a specific category
-		categoryRoutes.GET("/:id", controllers.GetCategoryByID)
+		// categoryRoutes.GET("/:id", categoryController.GetCategoryByID)
 		// Create a new category
-		categoryRoutes.POST("/", controllers.CreateCategory)
+		categoryRoutes.POST("/", categoryController.CreateCategory)
 		// POST /categories/bulk
-		categoryRoutes.POST("/bulk", controllers.BulkCreateCategories)
+		// categoryRoutes.POST("/bulk", categoryController.BulkCreateCategories)
 
 		// Update a category
-		categoryRoutes.PUT("/:id", controllers.UpdateCategory)
+		categoryRoutes.PUT("/:id", categoryController.UpdateCategory)
 		// Delete a category
-		categoryRoutes.DELETE("/:id", controllers.DeleteCategory)
+		categoryRoutes.DELETE("/:id", categoryController.DeleteCategory)
 		// Get all products in a category
-		categoryRoutes.GET("/:id/products", controllers.GetCategoryProducts)
+		// categoryRoutes.GET("/:id/products", categoryController.GetCategoryProducts)
 	}
 }
