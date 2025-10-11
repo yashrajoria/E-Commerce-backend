@@ -71,7 +71,9 @@ func (ctrl *AuthController) Register(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"message": "Account created. Please check your email to verify your account."})
+	code := services.GenerateRandomCode(6)
+	services.SendVerificationEmail(req.Email, code)
+	c.JSON(http.StatusCreated, gin.H{"message": "OTP Sent!! Please check your email to verify your account."})
 }
 
 func (ctrl *AuthController) VerifyEmail(c *gin.Context) {

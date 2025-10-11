@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gin-gonic/gin"
-	"github.com/yashrajoria/api-gateway/logger"
+	"api-gateway/logger"
 
+	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
 
@@ -17,18 +17,12 @@ type ForwardOptions struct {
 }
 
 func ForwardRequest(c *gin.Context, opts ForwardOptions) {
-	// Handle preflight OPTIONS requests immediately
-	if c.Request.Method == "OPTIONS" {
-		c.Header("Access-Control-Allow-Origin", "http://localhost:3000")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
-		c.Header("Access-Control-Allow-Credentials", "true")
-		c.Header("Access-Control-Max-Age", "43200")
-		c.AbortWithStatus(http.StatusNoContent)
-		return
+	// Get the path - handle case where there's no wildcard parameter
+	targetPath := ""
+	if any := c.Param("any"); any != "" {
+		targetPath = any
 	}
 
-	targetPath := c.Param("any")
 	if opts.StripPrefix != "" && strings.HasPrefix(targetPath, opts.StripPrefix) {
 		targetPath = strings.TrimPrefix(targetPath, opts.StripPrefix)
 	}
@@ -38,7 +32,11 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 		targetURL += "?" + c.Request.URL.RawQuery
 	}
 
-	logger.Log.Info("🔁 Forwarding request", zap.String("method", c.Request.Method), zap.String("url", targetURL))
+	logger.Log.Info("🔁 Forwarding request",
+		zap.String("method", c.Request.Method),
+		zap.String("url", targetURL),
+		zap.String("path", targetPath),
+	)
 
 	req, err := http.NewRequest(c.Request.Method, targetURL, c.Request.Body)
 	if err != nil {
@@ -52,15 +50,21 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 		req.Header[k] = v
 	}
 
-	// Inject user claims headers for downstream
+	// Inject user claims headers for downstream services
 	if userID, exists := c.Get("user_id"); exists {
-		req.Header.Set("X-User-ID", userID.(string))
+		if uid, ok := userID.(string); ok {
+			req.Header.Set("X-User-ID", uid)
+		}
 	}
 	if email, exists := c.Get("email"); exists {
-		req.Header.Set("X-User-Email", email.(string))
+		if e, ok := email.(string); ok {
+			req.Header.Set("X-User-Email", e)
+		}
 	}
 	if role, exists := c.Get("role"); exists {
-		req.Header.Set("X-User-Role", role.(string))
+		if r, ok := role.(string); ok {
+			req.Header.Set("X-User-Role", r)
+		}
 	}
 
 	client := http.DefaultClient
@@ -72,22 +76,30 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 	}
 	defer resp.Body.Close()
 
-	// Set CORS headers FIRST, before copying other headers
-	c.Header("Access-Control-Allow-Origin", "http://localhost:3000")
-	c.Header("Access-Control-Allow-Credentials", "true")
-	c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
-
-	// Copy response headers (skip CORS from downstream)
+	// Copy response headers (skip CORS and hop-by-hop headers from downstream)
 	for k, v := range resp.Header {
-		if strings.HasPrefix(strings.ToLower(k), "access-control-") {
-			continue // Skip CORS headers, handled by gateway
+		lowerKey := strings.ToLower(k)
+
+		// Skip CORS headers (handled by gateway middleware)
+		if strings.HasPrefix(lowerKey, "access-control-") {
+			continue
 		}
+
+		// Skip hop-by-hop headers (these are not meant to be forwarded)
+		if lowerKey == "connection" || lowerKey == "keep-alive" ||
+			lowerKey == "proxy-authenticate" || lowerKey == "proxy-authorization" ||
+			lowerKey == "te" || lowerKey == "trailers" ||
+			lowerKey == "transfer-encoding" || lowerKey == "upgrade" {
+			continue
+		}
+
 		c.Header(k, strings.Join(v, ","))
 	}
 
 	// Set status AFTER all headers are set
 	c.Status(resp.StatusCode)
 
+	// Copy response body
 	if _, err := io.Copy(c.Writer, resp.Body); err != nil {
 		logger.Log.Error("❌ Failed to copy response body", zap.Error(err))
 	}

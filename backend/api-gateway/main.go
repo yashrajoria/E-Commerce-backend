@@ -1,58 +1,101 @@
 package main
 
 import (
+	"api-gateway/logger"
+	"api-gateway/routes"
 	"context"
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
 
-	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"github.com/yashrajoria/api-gateway/logger"
-	"github.com/yashrajoria/api-gateway/routes"
 	"go.uber.org/zap"
 )
 
+// CORS Middleware - Apply this globally
+func CORSMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "http://localhost:3000")
+		c.Header("Access-Control-Allow-Credentials", "true")
+		c.Header("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+		c.Header("Access-Control-Allow-Methods", "POST, HEAD, PATCH, OPTIONS, GET, PUT, DELETE")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+
+		c.Next()
+	}
+}
+
+// CustomRecovery recovers from panics and logs them
+func CustomRecovery(logger *zap.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		defer func() {
+			if err := recover(); err != nil {
+				stack := debug.Stack()
+				logger.Error("Panic recovered", zap.Any("error", err), zap.ByteString("stack", stack))
+				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+			}
+		}()
+		c.Next()
+	}
+}
+
 func main() {
+	// Initialize logger
 	logger.InitLogger()
 	defer logger.Sync()
-
 	logger.Log.Info("Starting API Gateway...")
 
 	r := gin.New()
 
-	// Global middleware
+	// Configure Gin to handle trailing slashes
+	r.RedirectTrailingSlash = true
+
 	r.Use(gin.Logger())
-	r.Use(gin.Recovery())
+	r.Use(CustomRecovery(logger.Log))
 
-	// CORS middleware
-	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
-		ExposeHeaders:    []string{"Content-Length"},
-		AllowCredentials: true,
-		MaxAge:           12 * time.Hour,
-	}))
+	r.Use(CORSMiddleware())
 
-	// Register routes from modular route packages
+	// Health check / Test route for CORS
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "message": "API Gateway is running"})
+	})
+
+	r.GET("/test-cors", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"message": "CORS is working!"})
+	})
+	// Add this debug middleware
+	r.Use(func(c *gin.Context) {
+		logger.Log.Info("🔍 DEBUG: Request received",
+			zap.String("method", c.Request.Method),
+			zap.String("path", c.Request.URL.Path),
+			zap.String("full_url", c.Request.URL.String()),
+		)
+		c.Next()
+		logger.Log.Info("🔍 DEBUG: Response sent",
+			zap.Int("status", c.Writer.Status()),
+		)
+	})
+
 	routes.RegisterAllRoutes(r)
 
-	// Read port from env or default
+	// Server setup
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
-
-	// --- Graceful server shutdown setup ---
 	srv := &http.Server{
 		Addr:    ":" + port,
 		Handler: r,
 	}
 
-	// Start the server in a goroutine so it doesn't block.
+	// Start server
 	go func() {
 		logger.Log.Info("API Gateway listening on port", zap.String("port", port))
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -60,20 +103,17 @@ func main() {
 		}
 	}()
 
-	// Wait for an interrupt signal to gracefully shut down the server.
+	// Graceful shutdown
 	quit := make(chan os.Signal, 1)
-	// signal.Notify listens for the specified signals and sends them to the channel.
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit // This blocks until a signal is received.
+	<-quit
 	logger.Log.Info("Shutting down API Gateway...")
 
-	// Create a context with a 5-second timeout to allow existing connections to finish.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Log.Fatal("API Gateway forced to shutdown:", zap.Error(err))
 	}
 
-	logger.Log.Info("API Gateway exiting gracefully")
+	logger.Log.Info("API Gateway exited gracefully")
 }
