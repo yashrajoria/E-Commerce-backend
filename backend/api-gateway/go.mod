@@ -1,4 +1,4 @@
-module github.com/yashrajoria/api-gateway
+module api-gateway
 
 go 1.23.0
 

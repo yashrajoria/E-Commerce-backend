@@ -6,9 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"product-service/models"
+	"product-service/repository"
+
 	"github.com/google/uuid"
-	"github.com/yashrajoria/product-service/models"
-	"github.com/yashrajoria/product-service/repository"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 )

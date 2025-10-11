@@ -8,14 +8,15 @@ import (
 	"syscall"
 	"time"
 
+	"product-service/controllers"
+	"product-service/database"
+	"product-service/repository"
+	"product-service/routes"
+	"product-service/services"
+
 	"github.com/cloudinary/cloudinary-go"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
-	"github.com/yashrajoria/product-service/controllers"
-	"github.com/yashrajoria/product-service/database"
-	"github.com/yashrajoria/product-service/repository"
-	"github.com/yashrajoria/product-service/routes"
-	"github.com/yashrajoria/product-service/services"
 	"go.uber.org/zap"
 )
 
