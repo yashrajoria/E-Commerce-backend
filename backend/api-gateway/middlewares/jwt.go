@@ -7,10 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"api-gateway/logger"
+
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/joho/godotenv"
-	"github.com/yashrajoria/api-gateway/logger"
 )
 
 var secretKey []byte

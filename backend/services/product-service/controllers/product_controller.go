@@ -6,10 +6,11 @@ import (
 	"net/http"
 	"strconv"
 
+	"product-service/services"
+
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
-	"github.com/yashrajoria/product-service/services"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.uber.org/zap"

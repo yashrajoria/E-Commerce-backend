@@ -4,9 +4,10 @@ import (
 	"net/http"
 	"strings"
 
+	"product-service/services"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/yashrajoria/product-service/services"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.uber.org/zap"
 )

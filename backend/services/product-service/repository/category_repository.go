@@ -4,8 +4,9 @@ import (
 	"context"
 	"time"
 
+	"product-service/models"
+
 	"github.com/google/uuid"
-	"github.com/yashrajoria/product-service/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 )

@@ -1,8 +1,9 @@
 package routes
 
 import (
+	"product-service/controllers"
+
 	"github.com/gin-gonic/gin"
-	"github.com/yashrajoria/product-service/controllers"
 )
 
 func RegisterRoutes(r *gin.Engine, productController *controllers.ProductController, categoryController *controllers.CategoryController) {
