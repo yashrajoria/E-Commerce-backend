@@ -15,6 +15,8 @@ type Config struct {
 	PostgresSSLMode   string
 	PostgresTimeZone  string
 	ProductServiceURL string
+	KafkaBrokers      string
+	KafkaTopic        string
 }
 
 func LoadConfig() (*Config, error) {
@@ -28,6 +30,8 @@ func LoadConfig() (*Config, error) {
 		PostgresSSLMode:   getEnv("POSTGRES_SSLMODE", "disable"),
 		PostgresTimeZone:  getEnv("POSTGRES_TIMEZONE", "Asia/Kolkata"),
 		ProductServiceURL: getEnv("PRODUCT_SERVICE_URL", "http://product-service:8082"),
+		KafkaBrokers:      os.Getenv("KAFKA_BROKERS"),
+		KafkaTopic:        os.Getenv("CART_KAFKA_TOPIC"),
 	}
 
 	if cfg.PostgresUser == "" || cfg.PostgresPassword == "" || cfg.PostgresDB == "" || cfg.PostgresHost == "" {
