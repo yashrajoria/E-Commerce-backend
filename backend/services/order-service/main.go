@@ -10,10 +10,12 @@ import (
 	"syscall"
 	"time"
 
+	"order-service/controllers"
 	"order-service/database"
 	"order-service/kafka"
 	"order-service/middleware"
 	"order-service/models"
+	repositories "order-service/repository"
 	"order-service/routes"
 	"order-service/services"
 
@@ -36,13 +38,17 @@ func main() {
 	if err := database.DB.AutoMigrate(&models.Order{}, &models.OrderItem{}); err != nil {
 		logger.Fatal("Migration failed", zap.Error(err))
 	}
-
 	// --- HTTP router ---
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(middleware.ConfigMiddleware(cfg.ProductServiceURL))
+
+	orderRepository := repositories.NewGormOrderRepository(database.DB)
+	orderService := services.NewOrderService(orderRepository, kafka.NewProducer(strings.Split(cfg.KafkaBrokers, ","), cfg.KafkaTopic))
+	orderController := controllers.NewOrderController(orderService)
+	routes.RegisterOrderRoutes(r, orderController)
+
 	r.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "OK"}) })
-	routes.RegisterOrderRoutes(r)
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: r}
 
 	// --- Kafka config (env w/ sensible defaults for Docker) ---
