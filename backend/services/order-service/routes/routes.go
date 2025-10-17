@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func RegisterOrderRoutes(r *gin.Engine) {
+func RegisterOrderRoutes(r *gin.Engine, controllers *controllers.OrderController) {
 	orderRoutes := r.Group("/orders")
 	orderRoutes.Use(middleware.AuthMiddleware())
 
