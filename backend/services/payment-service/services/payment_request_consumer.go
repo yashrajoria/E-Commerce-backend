@@ -48,8 +48,9 @@ func (c *PaymentRequestConsumer) Start() {
 
 		// Simulate payment processing (fake delay)
 		time.Sleep(2 * time.Second)
+		amountForStripe := int64(req.Amount) * 100
 
-		paymentID, err := c.stripeSvc.CreatePaymentIntent(int64(req.Amount), "INR") // 👈 implement this in StripeService
+		paymentID, err := c.stripeSvc.CreatePaymentIntent(amountForStripe, "INR")
 		var eventType string
 		if err != nil {
 			c.logger.Warn("Stripe charge failed", zap.String("order_id", req.OrderID), zap.Error(err))
