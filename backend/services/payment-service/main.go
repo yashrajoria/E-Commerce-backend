@@ -8,10 +8,13 @@ import (
 	"payment-service/controllers"
 	"payment-service/database"
 	"payment-service/kafka"
+	"payment-service/models"
+	"payment-service/repository"
 	"payment-service/routes"
 	"payment-service/services"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 func main() {
@@ -26,8 +29,19 @@ func main() {
 		log.Fatal("[PaymentService] ❌ Failed to connect to DB:", err)
 	}
 
+	if err := database.DB.AutoMigrate(&models.Payment{}); err != nil {
+		log.Fatal("[PaymentService] ❌ Failed to migrate Payment model:", err)
+	}
+
 	log.Println(cfg)
 
+	// Initialize logger
+	logger, err := zap.NewProduction()
+	if err != nil {
+		log.Fatal("[PaymentService] ❌ Failed to initialize logger:", err)
+	}
+	defer logger.Sync()
+	paymentRepo := repository.NewGormPaymentRepo(database.DB)
 	// Stripe + Kafka setup
 	stripeSvc := services.NewStripeService(cfg.StripeSecretKey, cfg.StripeWebhookKey)
 	groupID := "payment-service-group" // use a unique group name
@@ -37,6 +51,8 @@ func main() {
 		groupID,
 		paymentProducer,
 		stripeSvc,
+		paymentRepo,
+		logger,
 	)
 	// Start consuming payment requests in the background
 	go paymentRequestConsumer.Start()
@@ -50,6 +66,8 @@ func main() {
 	pc := &controllers.PaymentController{
 		Stripe: stripeSvc,
 		Kafka:  paymentProducer,
+		Repo:   paymentRepo,
+		Logger: logger,
 	}
 	routes.RegisterPaymentRoutes(r, pc)
 
