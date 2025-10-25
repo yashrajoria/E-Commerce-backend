@@ -8,9 +8,12 @@ import (
 )
 
 func RegisterPaymentRoutes(r *gin.Engine, pc *controllers.PaymentController) {
-	payments := r.Group("/payments")
+	payments := r.Group("/payment")
 	payments.Use(middleware.AuthMiddleware())
-	// payments.POST("/initiate", pc.InitiatePayment)
+	{
+		payments.GET("/status/by-order/:order_id", pc.GetPaymentStatusByOrderID)
+		payments.POST("/verify-payment", pc.VerifyPayment)
+	}
 
 	// Stripe webhook (no auth)
 	r.POST("/stripe/webhook", pc.StripeWebhook)

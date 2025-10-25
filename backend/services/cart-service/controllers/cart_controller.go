@@ -12,6 +12,7 @@ import (
 	"cart-service/models"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 type CartController struct {
@@ -197,13 +198,14 @@ func (cc *CartController) Checkout(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "cart not found"})
 		return
 	}
-
+	orderID := uuid.New().String()
 	// Build Kafka payload
 	event := models.CheckoutEvent{
 		Event:     "checkout.requested",
 		UserID:    userID,
 		Items:     cart.Items,
 		Timestamp: time.Now(),
+		OrderID:   orderID,
 	}
 
 	if err := cc.Producer.SendCheckoutEvent(event); err != nil {
@@ -214,7 +216,7 @@ func (cc *CartController) Checkout(c *gin.Context) {
 	}
 
 	// Clear cart after sending
-	_ = cc.Repo.DeleteCart(ctx, userID)
+	// _ = cc.Repo.DeleteCart(ctx, userID)
 
-	c.JSON(http.StatusOK, gin.H{"message": "checkout initiated"})
+	c.JSON(http.StatusOK, gin.H{"order_id": orderID, "status": "PENDING"})
 }

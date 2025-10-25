@@ -7,4 +7,5 @@ type CheckoutEvent struct {
 	UserID    string     `json:"user_id"`
 	Items     []CartItem `json:"items"`
 	Timestamp time.Time  `json:"timestamp"`
+	OrderID   string     `json:"order_id"`
 }

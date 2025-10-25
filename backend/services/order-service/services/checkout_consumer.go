@@ -48,6 +48,16 @@ func StartCheckoutConsumer(brokers []string, topic, groupID string, db *gorm.DB,
 			continue
 		}
 
+		if evt.OrderID == "" {
+			log.Printf("❌ missing OrderID in CheckoutEvent, skipping")
+			continue
+		}
+		orderID_uuid, err := uuid.Parse(evt.OrderID)
+		if err != nil {
+			log.Printf("❌ invalid OrderID UUID format: %s", evt.OrderID)
+			continue
+		}
+
 		orderItems := make([]models.OrderItem, 0, len(evt.Items))
 		totalAmount := 0
 		validItems := 0
@@ -105,8 +115,9 @@ func StartCheckoutConsumer(brokers []string, topic, groupID string, db *gorm.DB,
 		// Create the order
 		order := models.Order{
 			UserID:      userUUID,
+			ID:          orderID_uuid,
 			Amount:      totalAmount,
-			Status:      "pending_payment",
+			Status:      "PENDING_PAYMENT",
 			OrderNumber: "ORD-" + time.Now().Format("20060102-150405") + "-" + uuid.New().String()[:8],
 			CreatedAt:   time.Now(),
 			UpdatedAt:   time.Now(),
