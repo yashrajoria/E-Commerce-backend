@@ -42,8 +42,8 @@ func main() {
 
 	// Initialize Services
 	tokenService := services.NewTokenService()
-	emailService := services.NewEmailService()
-	authService := services.NewAuthService(userRepo, tokenService, emailService, database.DB)
+	// emailService := services.NewEmailService()
+	authService := services.NewAuthService(userRepo, tokenService, database.DB)
 
 	// Initialize Controllers
 	authController := controllers.NewAuthController(authService)
