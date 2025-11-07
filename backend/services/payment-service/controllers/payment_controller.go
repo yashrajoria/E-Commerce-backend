@@ -263,28 +263,6 @@ func (pc *PaymentController) VerifyPayment(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	// payment, err := pc.Repo.GetPaymentByID(c.Request.Context(), req.PaymentID)
-	// if err != nil {
-	// 	pc.Logger.Error("Error fetching payment by ID", zap.String("payment_id", req.PaymentID), zap.Error(err))
-	// 	c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
-	// 	return
-	// }
-	// stripeSession, err := pc.Stripe.GetCheckoutSession(req.SessionID)
-	// if err != nil {
-	// 	pc.Logger.Error("Error fetching Stripe session", zap.String("session_id", req.SessionID), zap.Error(err))
-	// 	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch Stripe session"})
-	// 	return
-	// }
-	// if stripeSession.PaymentStatus == "paid" && payment.Status != "succeeded" {
-	// 	// Update payment status to succeeded
-	// 	err := pc.Repo.UpdatePaymentStatus(c.Request.Context(), payment.Payment_ID.String(), "succeeded")
-	// 	if err != nil {
-	// 		pc.Logger.Error("Error updating payment status", zap.String("payment_id", payment.Payment_ID.String()), zap.Error(err))
-	// 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update payment status"})
-	// 		return
-	// 	}
-	// }
-
 	sess, err := session.Get(req.SessionID, nil)
 	if err != nil {
 		pc.Logger.Error("Error fetching Stripe session", zap.String("session_id", req.SessionID), zap.Error(err))
