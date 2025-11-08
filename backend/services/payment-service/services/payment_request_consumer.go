@@ -62,11 +62,12 @@ func (c *PaymentRequestConsumer) Start() {
 		amountForStripe := int64(req.Amount) * 100
 
 		payment := &models.Payment{
-			OrderID:  orderID,
-			UserID:   userID,
-			Amount:   int(amountForStripe),
-			Currency: "inr",
-			Status:   "PROCESSING",
+			Payment_ID: uuid.New(),
+			OrderID:    orderID,
+			UserID:     userID,
+			Amount:     int(amountForStripe),
+			Currency:   "inr",
+			Status:     "PROCESSING",
 		}
 		if err := c.repo.CreatePayment(ctx, payment); err != nil {
 			c.logger.Error("Failed to create initial payment record", zap.String("order_id", req.OrderID), zap.Error(err))
