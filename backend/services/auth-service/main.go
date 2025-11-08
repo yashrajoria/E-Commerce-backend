@@ -69,7 +69,8 @@ func main() {
 		authRoutes.POST("/login", authController.Login)
 		authRoutes.POST("/verify-email", authController.VerifyEmail)
 		authRoutes.POST("/logout", authController.Logout)
-		authRoutes.POST("/refresh", authController.Refresh) // Added the refresh route
+		authRoutes.POST("/refresh", authController.Refresh)     // Added the refresh route
+		authRoutes.GET("/status", authController.GetAuthStatus) // Added the status route
 	}
 
 	// --- 5. Graceful Shutdown ---
