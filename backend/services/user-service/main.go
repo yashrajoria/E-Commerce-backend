@@ -45,12 +45,16 @@ func main() {
 	// CORS setup (could move allowedOrigins to config)
 	allowedOrigins := map[string]bool{
 		"http://localhost:3000":  true,
+		"http://localhost:3001":  true,
 		"https://yourdomain.com": true,
 	}
 	r.Use(func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
 		if !allowedOrigins[origin] {
 			origin = "http://localhost:3000"
+		}
+		if !allowedOrigins[origin] {
+			origin = "http://localhost:3001"
 		}
 		c.Header("Access-Control-Allow-Origin", origin)
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
