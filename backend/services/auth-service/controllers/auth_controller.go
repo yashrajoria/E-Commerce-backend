@@ -55,13 +55,14 @@ func (ctrl *AuthController) Register(c *gin.Context) {
 		Name     string `json:"name" binding:"required"`
 		Email    string `json:"email" binding:"required,email"`
 		Password string `json:"password" binding:"required,min=8"`
+		Role     string `json:"role" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body", "details": err.Error()})
 		return
 	}
 
-	err := ctrl.service.Register(c.Request.Context(), req.Name, req.Email, req.Password, "user")
+	err := ctrl.service.Register(c.Request.Context(), req.Name, req.Email, req.Password, req.Role)
 	if err != nil {
 		if strings.Contains(err.Error(), "already exists") {
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
@@ -71,9 +72,7 @@ func (ctrl *AuthController) Register(c *gin.Context) {
 		return
 	}
 
-	code := services.GenerateRandomCode(6)
-	services.SendVerificationEmail(req.Email, code)
-	c.JSON(http.StatusCreated, gin.H{"message": "OTP Sent!! Please check your email to verify your account."})
+	c.JSON(http.StatusCreated, gin.H{"message": "Account created successfully. Please verify your email."})
 }
 
 func (ctrl *AuthController) VerifyEmail(c *gin.Context) {
