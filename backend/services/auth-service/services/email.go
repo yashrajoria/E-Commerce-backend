@@ -25,7 +25,6 @@ func GenerateRandomCode(length int) string {
 // Helper function to send verification email
 func SendVerificationEmail(to string, code string) error {
 	log.Println(context.Background(), "Sending verification email", "to", to)
-
 	from := os.Getenv("SMTP_EMAIL")
 	password := os.Getenv("SMTP_PASSWORD")
 	smtpServer := "smtp.gmail.com"

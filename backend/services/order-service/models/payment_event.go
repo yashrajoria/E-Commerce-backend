@@ -25,10 +25,9 @@ type PaymentRequest struct {
 
 // payment-service → order-service
 type PaymentEvent struct {
-	Type    string `json:"type"` // "payment_succeeded" | "payment_failed"
-	OrderID string `json:"order_id"`
-	UserID  string `json:"user_id"` // <-- Add this line
-
+	Type      string    `json:"type"` // "payment_succeeded" | "payment_failed"
+	OrderID   string    `json:"order_id"`
+	UserID    string    `json:"user_id"` // <-- Add this line
 	PaymentID string    `json:"payment_id,omitempty"`
 	Amount    int       `json:"amount,omitempty"`
 	Currency  string    `json:"currency,omitempty"`

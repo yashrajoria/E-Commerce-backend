@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -25,7 +27,7 @@ type ListProductsParams struct {
 	Page       int
 	PerPage    int
 	IsFeatured *bool // Use a pointer to distinguish between false and not set
-	CategoryID uuid.UUID
+	CategoryID []uuid.UUID
 }
 
 type ProductCreateRequest struct {
@@ -68,8 +70,8 @@ func (s *ProductService) ListProducts(ctx context.Context, params ListProductsPa
 	if params.IsFeatured != nil {
 		filter["is_featured"] = *params.IsFeatured
 	}
-	if params.CategoryID != uuid.Nil {
-		filter["category_ids"] = params.CategoryID
+	if len(params.CategoryID) > 0 {
+		filter["category_ids"] = bson.M{"$in": params.CategoryID}
 	}
 
 	findOptions := options.Find().
@@ -198,36 +200,227 @@ func (s *ProductService) GetProductInternal(ctx context.Context, id uuid.UUID) (
 	return dto, nil
 }
 
-func (s *ProductService) CreateBulkProducts(ctx context.Context, file multipart.File) (int, []map[string]interface{}, error) {
+func (s *ProductService) ValidateBulkImport(ctx context.Context, file multipart.File) (*models.BulkImportValidation, error) {
 	r := csv.NewReader(file)
 	headers, err := r.Read()
 	if err != nil {
-		return 0, nil, fmt.Errorf("CSV must include a header row")
+		return nil, fmt.Errorf("CSV must include a header row")
 	}
 
-	// Create a map for header indexes for flexible column order.
 	index := make(map[string]int)
 	for i, h := range headers {
 		index[strings.ToLower(strings.TrimSpace(h))] = i
 	}
 
-	// --- 1. Single Pass: Read file, collect data and all unique category names ---
 	type pendingProduct struct {
 		Row           []string
 		RowNum        int
 		CategoryNames []string
+		SKU           string
 	}
+
 	var pendingProducts []pendingProduct
 	categoryNamesSet := make(map[string]bool)
+	skuSet := make(map[string]int) // Track SKUs and their row numbers
 	var errorsList []map[string]interface{}
-	rowNum := 2 // Start after header
+	var warningsList []map[string]interface{}
+	rowNum := 2
+
 	for {
 		row, err := r.Read()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			errorsList = append(errorsList, map[string]interface{}{"row": rowNum, "error": "Failed to parse CSV row"})
+			errorsList = append(errorsList, map[string]interface{}{
+				"row":   rowNum,
+				"error": "Failed to parse CSV row",
+			})
+			rowNum++
+			continue
+		}
+
+		// Validate required fields
+		name := strings.TrimSpace(row[index["name"]])
+		sku := strings.TrimSpace(row[index["sku"]])
+		priceStr := strings.TrimSpace(row[index["price"]])
+		quantityStr := strings.TrimSpace(row[index["quantity"]])
+		isFeaturedStr := strings.TrimSpace(row[index["is_featured"]])
+
+		hasError := false
+
+		if name == "" {
+			errorsList = append(errorsList, map[string]interface{}{
+				"row":   rowNum,
+				"error": "Product name is required",
+			})
+			hasError = true
+		}
+
+		if sku == "" {
+			errorsList = append(errorsList, map[string]interface{}{
+				"row":   rowNum,
+				"error": "SKU is required",
+			})
+			hasError = true
+		} else {
+			// Check for duplicate SKUs in CSV
+			if existingRow, exists := skuSet[sku]; exists {
+				errorsList = append(errorsList, map[string]interface{}{
+					"row":   rowNum,
+					"error": fmt.Sprintf("Duplicate SKU '%s' found (also in row %d)", sku, existingRow),
+				})
+				hasError = true
+			} else {
+				skuSet[sku] = rowNum
+			}
+		}
+
+		if _, err := strconv.ParseFloat(priceStr, 64); err != nil {
+			errorsList = append(errorsList, map[string]interface{}{
+				"row":   rowNum,
+				"error": "Invalid price format",
+			})
+			hasError = true
+		}
+
+		if _, err := strconv.Atoi(quantityStr); err != nil {
+			errorsList = append(errorsList, map[string]interface{}{
+				"row":   rowNum,
+				"error": "Invalid quantity format",
+			})
+			hasError = true
+		}
+
+		if _, err := strconv.ParseBool(isFeaturedStr); err != nil {
+			errorsList = append(errorsList, map[string]interface{}{
+				"row":   rowNum,
+				"error": "Invalid is_featured format (must be TRUE or FALSE)",
+			})
+			hasError = true
+		}
+
+		// Validate image URL
+		imageURL := strings.TrimSpace(row[index["imageurl"]])
+		if imageURL != "" {
+			if u, err := url.Parse(imageURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+				warningsList = append(warningsList, map[string]interface{}{
+					"row":     rowNum,
+					"warning": "Invalid image URL - product will be created without image",
+				})
+			}
+		}
+
+		// Parse categories
+		rawCategories := strings.Split(row[index["categories"]], ",")
+		var currentCatNames []string
+		for _, cName := range rawCategories {
+			trimmed := strings.TrimSpace(cName)
+			if trimmed != "" {
+				categoryNamesSet[trimmed] = true
+				currentCatNames = append(currentCatNames, trimmed)
+			}
+		}
+
+		if !hasError {
+			pendingProducts = append(pendingProducts, pendingProduct{
+				Row:           row,
+				RowNum:        rowNum,
+				CategoryNames: currentCatNames,
+				SKU:           sku,
+			})
+		}
+
+		rowNum++
+	}
+
+	// Check which categories exist in database
+	var catNames []string
+	for name := range categoryNamesSet {
+		catNames = append(catNames, name)
+	}
+
+	existingCategories, err := s.categoryRepo.FindByNames(ctx, catNames)
+	if err != nil {
+		return nil, err
+	}
+
+	existingCatMap := make(map[string]bool)
+	for _, cat := range existingCategories {
+		existingCatMap[cat.Name] = true
+	}
+
+	var missingCategories []string
+	for _, name := range catNames {
+		if !existingCatMap[name] {
+			missingCategories = append(missingCategories, name)
+		}
+	}
+
+	// Check for duplicate SKUs in database
+	var skusToCheck []string
+	for sku := range skuSet {
+		skusToCheck = append(skusToCheck, sku)
+	}
+
+	existingSKUs, err := s.productRepo.FindBySKUs(ctx, skusToCheck)
+	if err != nil {
+		return nil, err
+	}
+
+	var duplicateSKUs []string
+	for _, existingProduct := range existingSKUs {
+		duplicateSKUs = append(duplicateSKUs, existingProduct.SKU)
+		warningsList = append(warningsList, map[string]interface{}{
+			"row":     skuSet[existingProduct.SKU],
+			"warning": fmt.Sprintf("SKU '%s' already exists in database - will be skipped", existingProduct.SKU),
+		})
+	}
+
+	return &models.BulkImportValidation{
+		TotalProducts:     len(pendingProducts) + len(errorsList),
+		ValidProducts:     len(pendingProducts),
+		InvalidProducts:   len(errorsList),
+		MissingCategories: missingCategories,
+		DuplicateSKUs:     duplicateSKUs,
+		Errors:            errorsList,
+		Warnings:          warningsList,
+	}, nil
+}
+
+func (s *ProductService) CreateBulkProducts(ctx context.Context, file multipart.File, autoCreateCategories bool) (*models.BulkImportResult, error) {
+	r := csv.NewReader(file)
+	headers, err := r.Read()
+	if err != nil {
+		return nil, fmt.Errorf("CSV must include a header row")
+	}
+
+	index := make(map[string]int)
+	for i, h := range headers {
+		index[strings.ToLower(strings.TrimSpace(h))] = i
+	}
+
+	type pendingProduct struct {
+		Row           []string
+		RowNum        int
+		CategoryNames []string
+	}
+
+	var pendingProducts []pendingProduct
+	categoryNamesSet := make(map[string]bool)
+	var errorsList []map[string]interface{}
+	rowNum := 2
+
+	for {
+		row, err := r.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			errorsList = append(errorsList, map[string]interface{}{
+				"row":   rowNum,
+				"error": "Failed to parse CSV row",
+			})
 			rowNum++
 			continue
 		}
@@ -241,50 +434,116 @@ func (s *ProductService) CreateBulkProducts(ctx context.Context, file multipart.
 				currentCatNames = append(currentCatNames, trimmed)
 			}
 		}
-		pendingProducts = append(pendingProducts, pendingProduct{Row: row, RowNum: rowNum, CategoryNames: currentCatNames})
+		pendingProducts = append(pendingProducts, pendingProduct{
+			Row:           row,
+			RowNum:        rowNum,
+			CategoryNames: currentCatNames,
+		})
 		rowNum++
 	}
 
-	// --- 2. Prefetch all required categories in a single DB query ---
+	// Fetch existing categories
 	var catNames []string
 	for name := range categoryNamesSet {
 		catNames = append(catNames, name)
 	}
+
 	categories, err := s.categoryRepo.FindByNames(ctx, catNames)
 	if err != nil {
-		return 0, errorsList, err
+		return nil, err
 	}
+
 	categoryCache := make(map[string]models.Category)
 	for _, cat := range categories {
 		categoryCache[cat.Name] = cat
 	}
 
-	// --- 3. Process in-memory data to build final product list for insertion ---
+	// Auto-create missing categories if enabled
+	if autoCreateCategories {
+		for _, name := range catNames {
+			if _, exists := categoryCache[name]; !exists {
+				newCategory := &models.Category{
+					ID:        uuid.New(),
+					Name:      name,
+					Slug:      strings.ToLower(strings.ReplaceAll(name, " ", "-")),
+					Ancestors: []uuid.UUID{},
+					CreatedAt: time.Now().UTC(),
+					UpdatedAt: time.Now().UTC(),
+				}
+
+				_, err := s.categoryRepo.Create(ctx, newCategory)
+				if err != nil {
+					return nil, fmt.Errorf("failed to create category '%s': %w", name, err)
+				}
+				categoryCache[name] = *newCategory
+			}
+		}
+	}
+
+	// Get existing SKUs to avoid duplicates
+	var skusToCheck []string
+	for _, pp := range pendingProducts {
+		sku := strings.TrimSpace(pp.Row[index["sku"]])
+		if sku != "" {
+			skusToCheck = append(skusToCheck, sku)
+		}
+	}
+
+	existingSKUs := make(map[string]bool)
+	if len(skusToCheck) > 0 {
+		existingProducts, err := s.productRepo.FindBySKUs(ctx, skusToCheck)
+		if err == nil {
+			for _, product := range existingProducts {
+				existingSKUs[product.SKU] = true
+			}
+		}
+	}
+
+	// Process products
 	var productsToInsert []interface{}
 	for _, pp := range pendingProducts {
-		// Parse and validate data from pp.Row
 		name := strings.TrimSpace(pp.Row[index["name"]])
+		sku := strings.TrimSpace(pp.Row[index["sku"]])
 		price, err1 := strconv.ParseFloat(strings.TrimSpace(pp.Row[index["price"]]), 64)
 		quantity, err2 := strconv.Atoi(strings.TrimSpace(pp.Row[index["quantity"]]))
 		isFeatured, err3 := strconv.ParseBool(strings.TrimSpace(pp.Row[index["is_featured"]]))
 
-		if name == "" || err1 != nil || err2 != nil || err3 != nil {
-			errorsList = append(errorsList, map[string]interface{}{"row": pp.RowNum, "error": "Invalid data format (name, price, quantity, or is_featured)"})
+		if name == "" || sku == "" || err1 != nil || err2 != nil || err3 != nil {
+			errorsList = append(errorsList, map[string]interface{}{
+				"row":   pp.RowNum,
+				"error": "Invalid data format (name, sku, price, quantity, or is_featured)",
+			})
 			continue
 		}
 
-		// Map categories using the pre-fetched cache
+		// Skip if SKU already exists
+		if existingSKUs[sku] {
+			errorsList = append(errorsList, map[string]interface{}{
+				"row":   pp.RowNum,
+				"error": fmt.Sprintf("SKU '%s' already exists in database", sku),
+			})
+			continue
+		}
+
+		// Map categories
 		var categoryIDs []uuid.UUID
 		categorySet := make(map[uuid.UUID]bool)
 		allCatsFound := true
-		for _, name := range pp.CategoryNames {
-			cat, ok := categoryCache[name]
+
+		for _, catName := range pp.CategoryNames {
+			cat, ok := categoryCache[catName]
 			if !ok {
-				errorsList = append(errorsList, map[string]interface{}{"row": pp.RowNum, "error": fmt.Sprintf("Category '%s' not found", name)})
-				allCatsFound = false
-				break // Stop processing categories for this row
+				if !autoCreateCategories {
+					errorsList = append(errorsList, map[string]interface{}{
+						"row":   pp.RowNum,
+						"error": fmt.Sprintf("Category '%s' not found", catName),
+					})
+					allCatsFound = false
+					break
+				}
 			}
-			if !categorySet[cat.ID] { // Handle ancestors and duplicates
+
+			if !categorySet[cat.ID] {
 				categoryIDs = append(categoryIDs, cat.ID)
 				categorySet[cat.ID] = true
 				for _, ancestor := range cat.Ancestors {
@@ -295,8 +554,25 @@ func (s *ProductService) CreateBulkProducts(ctx context.Context, file multipart.
 				}
 			}
 		}
+
 		if !allCatsFound {
-			continue // Skip this product and move to the next
+			continue
+		}
+
+		// Upload image to Cloudinary
+		imageURL := strings.TrimSpace(pp.Row[index["imageurl"]])
+		var imageURLs []string
+
+		if imageURL != "" {
+			uploadedURL, err := s.uploadImageFromURL(ctx, imageURL, sku, 0)
+			if err != nil {
+				errorsList = append(errorsList, map[string]interface{}{
+					"row":     pp.RowNum,
+					"warning": fmt.Sprintf("Failed to upload image, product created without image: %v", err),
+				})
+			} else {
+				imageURLs = append(imageURLs, uploadedURL)
+			}
 		}
 
 		now := time.Now().UTC()
@@ -306,9 +582,9 @@ func (s *ProductService) CreateBulkProducts(ctx context.Context, file multipart.
 			Price:       price,
 			Quantity:    quantity,
 			Description: strings.TrimSpace(pp.Row[index["description"]]),
-			Images:      []string{strings.TrimSpace(pp.Row[index["imageurl"]])},
+			Images:      imageURLs,
 			Brand:       strings.TrimSpace(pp.Row[index["brand"]]),
-			SKU:         strings.TrimSpace(pp.Row[index["sku"]]),
+			SKU:         sku,
 			IsFeatured:  isFeatured,
 			CategoryIDs: categoryIDs,
 			CreatedAt:   now,
@@ -317,14 +593,41 @@ func (s *ProductService) CreateBulkProducts(ctx context.Context, file multipart.
 		productsToInsert = append(productsToInsert, product)
 	}
 
-	// --- 4. Perform a single bulk insert operation ---
 	if len(productsToInsert) > 0 {
 		_, err := s.productRepo.CreateMany(ctx, productsToInsert)
 		if err != nil {
-			// You could try to parse the bulk write error to find which documents failed
-			return 0, errorsList, err
+			return nil, err
 		}
 	}
 
-	return len(productsToInsert), errorsList, nil
+	return &models.BulkImportResult{
+		InsertedCount: len(productsToInsert),
+		ErrorsCount:   len(errorsList),
+		Errors:        errorsList,
+		Message:       "Bulk import process completed",
+	}, nil
+}
+
+func (s *ProductService) uploadImageFromURL(ctx context.Context, imageURL, sku string, index int) (string, error) {
+	resp, err := http.Get(imageURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to download image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to download image: status %d", resp.StatusCode)
+	}
+
+	uploadParams := uploader.UploadParams{
+		PublicID: fmt.Sprintf("product_img_%s_%d", sku, index),
+		Folder:   "ecommerce/products",
+	}
+
+	uploadResp, err := s.cld.Upload.Upload(ctx, resp.Body, uploadParams)
+	if err != nil {
+		return "", fmt.Errorf("failed to upload to cloudinary: %w", err)
+	}
+
+	return uploadResp.SecureURL, nil
 }
