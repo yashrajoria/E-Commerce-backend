@@ -101,6 +101,9 @@ func CORSMiddleware() gin.HandlerFunc {
 		if origin == "" {
 			origin = "http://localhost:3000" // Default origin
 		}
+		if origin == "" {
+			origin = "http://localhost:3001" // Default origin
+		}
 		c.Header("Access-Control-Allow-Origin", origin)
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
