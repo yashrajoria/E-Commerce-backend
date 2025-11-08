@@ -92,10 +92,11 @@ func (ctrl *ProductController) GetProducts(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category ID format"})
 			return
 		}
-		params.CategoryID = categoryUUID
+		params.CategoryID = []uuid.UUID{categoryUUID}
 	}
 
 	products, total, err := ctrl.productService.ListProducts(c.Request.Context(), params)
+	zap.L().Info("Listed products", zap.Any("products", products))
 	if err != nil {
 		zap.L().Error("Service failed to list products", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch products"})
@@ -216,38 +217,66 @@ func (ctrl *ProductController) DeleteProduct(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Product deleted successfully"})
 }
 
+// ValidateBulkImport validates CSV before import
+func (ctrl *ProductController) ValidateBulkImport(c *gin.Context) {
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "File is required",
+		})
+		return
+	}
+
+	fileHandle, err := file.Open()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to open file",
+		})
+		return
+	}
+	defer fileHandle.Close()
+
+	validation, err := ctrl.productService.ValidateBulkImport(c.Request.Context(), fileHandle)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, validation)
+}
+
+// CreateBulkProducts imports products from CSV
 func (ctrl *ProductController) CreateBulkProducts(c *gin.Context) {
 	file, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "File upload required in 'file' field"})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "File is required",
+		})
 		return
 	}
 
-	src, err := file.Open()
+	autoCreate := c.DefaultQuery("auto_create_categories", "false") == "true"
+
+	fileHandle, err := file.Open()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open uploaded file"})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to open file",
+		})
 		return
 	}
-	defer src.Close()
+	defer fileHandle.Close()
 
-	inserted, errorsList, err := ctrl.productService.CreateBulkProducts(c.Request.Context(), src)
+	result, err := ctrl.productService.CreateBulkProducts(c.Request.Context(), fileHandle, autoCreate)
 	if err != nil {
-		zap.L().Error("Service failed during bulk create", zap.Error(err))
-		// Check for duplicate key errors specifically
-		if mongo.IsDuplicateKeyError(err) {
-			c.JSON(http.StatusConflict, gin.H{"error": "Bulk insert failed due to duplicate SKU. Please ensure all SKUs are unique."})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "An unexpected error occurred during bulk import"})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message":        "Bulk import process completed.",
-		"inserted_count": inserted,
-		"errors_count":   len(errorsList),
-		"errors":         errorsList,
-	})
+	c.JSON(http.StatusOK, result)
 }
 
 func (ctrl *ProductController) GetProductByIDInternal(c *gin.Context) {
