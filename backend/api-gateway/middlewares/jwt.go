@@ -14,7 +14,11 @@ import (
 	"github.com/joho/godotenv"
 )
 
-var secretKey []byte
+var (
+	secretKey    []byte
+	isProduction bool
+	cookieDomain string
+)
 
 func init() {
 	_ = godotenv.Load()
@@ -23,13 +27,14 @@ func init() {
 		logger.Log.Fatal("JWT_SECRET is not set in env")
 	}
 	secretKey = []byte(secret)
+	isProduction = os.Getenv("ENV") == "production"
+	cookieDomain = os.Getenv("COOKIE_DOMAIN")
 }
 
 // JWTMiddleware validates JWT access token and refreshes when needed
 func JWTMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenString, err := c.Cookie("token")
-
 		if err != nil || tokenString == "" {
 			// Try refresh token
 			refreshToken, err := c.Cookie("refresh_token")
@@ -58,9 +63,12 @@ func JWTMiddleware() gin.HandlerFunc {
 				return
 			}
 
-			// set cookies
-			c.SetCookie("token", accessToken, 900, "/", "", true, true)                // 15 min
-			c.SetCookie("refresh_token", refreshToken, 7*24*3600, "/", "", true, true) // keep same refresh token
+			// set cookies with SameSite
+			c.SetSameSite(http.SameSiteLaxMode)
+			c.SetCookie("token", accessToken, 900, "/", cookieDomain, isProduction, true)
+
+			c.SetSameSite(http.SameSiteLaxMode)
+			c.SetCookie("refresh_token", refreshToken, 7*24*3600, "/", cookieDomain, isProduction, true)
 
 			tokenString = accessToken
 		}
@@ -111,7 +119,6 @@ func generateToken(userID, email, role string, expiration time.Duration) (string
 		"exp":   time.Now().Add(expiration).Unix(),
 		"iat":   time.Now().Unix(),
 	}
-
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString(secretKey)
 }

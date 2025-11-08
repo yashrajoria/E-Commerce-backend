@@ -36,12 +36,15 @@ func RegisterAllRoutes(r *gin.Engine) {
 	})
 
 	// ===== AUTH ROUTES (PUBLIC) =====
+	// ===== PROTECTED ROUTES (JWT Required) =====
+	protected := r.Group("/")
+	protected.Use(middlewares.JWTMiddleware())
 	auth := r.Group("/auth")
 
 	// Auth routes with wildcard
-	auth.GET("/*any", func(c *gin.Context) {
+	protected.GET("/auth/*any", func(c *gin.Context) {
 		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://auth-service:8081",
+			TargetBase: "http://auth-service:8081/auth",
 		})
 	})
 	auth.POST("/*any", func(c *gin.Context) {
@@ -49,10 +52,6 @@ func RegisterAllRoutes(r *gin.Engine) {
 			TargetBase: "http://auth-service:8081",
 		})
 	})
-
-	// ===== PROTECTED ROUTES (JWT Required) =====
-	protected := r.Group("/")
-	protected.Use(middlewares.JWTMiddleware())
 
 	// User routes - handle both /users and /users/*
 	protected.GET("/users", func(c *gin.Context) {

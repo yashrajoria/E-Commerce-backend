@@ -44,7 +44,12 @@ func (ctrl *AuthController) Login(c *gin.Context) {
 
 	domain := os.Getenv("COOKIE_DOMAIN")
 	isSecure := os.Getenv("ENV") == "production"
+
+	// Set SameSite for CSRF protection
+	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie("token", tokenPair.AccessToken, 900, "/", domain, isSecure, true)
+
+	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie("refresh_token", tokenPair.RefreshToken, 604800, "/", domain, isSecure, true)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Logged in successfully"})
@@ -105,8 +110,13 @@ func (ctrl *AuthController) VerifyEmail(c *gin.Context) {
 func (ctrl *AuthController) Logout(c *gin.Context) {
 	domain := os.Getenv("COOKIE_DOMAIN")
 	isSecure := os.Getenv("ENV") == "production"
+
+	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie("token", "", -1, "/", domain, isSecure, true)
+
+	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie("refresh_token", "", -1, "/", domain, isSecure, true)
+
 	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
 }
 
@@ -125,8 +135,38 @@ func (ctrl *AuthController) Refresh(c *gin.Context) {
 
 	domain := os.Getenv("COOKIE_DOMAIN")
 	isSecure := os.Getenv("ENV") == "production"
+
+	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie("token", newTokenPair.AccessToken, 900, "/", domain, isSecure, true)
+
+	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie("refresh_token", newTokenPair.RefreshToken, 604800, "/", domain, isSecure, true)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Token refreshed successfully"})
+}
+
+func (ctrl *AuthController) GetAuthStatus(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		// If not in context, try headers (forwarded by API gateway)
+		userID = c.GetHeader("X-User-ID")
+	}
+
+	// userID := c.GetHeader("X-User-ID")
+	email := c.GetHeader("X-User-Email")
+	role := c.GetHeader("X-User-Role")
+
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Not authenticated"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"authenticated": true,
+		"user": gin.H{
+			"id":    userID,
+			"email": email,
+			"role":  role,
+		},
+	})
 }
