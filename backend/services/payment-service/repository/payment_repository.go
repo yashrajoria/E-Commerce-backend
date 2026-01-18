@@ -36,8 +36,10 @@ func (r *gormPaymentRepo) GetPaymentByOrderID(ctx context.Context, orderID uuid.
 
 func (r *gormPaymentRepo) UpdatePaymentByOrderID(ctx context.Context, orderID uuid.UUID, status string, checkoutURL *string, stripePaymentID *string) error {
 	updates := map[string]interface{}{
-		"status":       status,
-		"checkout_url": checkoutURL,
+		"status": status,
+	}
+	if checkoutURL != nil {
+		updates["checkout_url"] = checkoutURL
 	}
 	if stripePaymentID != nil {
 		updates["stripe_payment_id"] = stripePaymentID
