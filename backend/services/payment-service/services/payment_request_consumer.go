@@ -6,6 +6,7 @@ import (
 	"payment-service/kafka"
 	"payment-service/models"
 	"payment-service/repository"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,6 +24,10 @@ type PaymentRequestConsumer struct {
 }
 
 func NewPaymentRequestConsumer(brokers []string, topic, groupID string, producer *kafka.PaymentEventProducer, stripeSvc *StripeService, repo repository.PaymentRepository, logger *zap.Logger) *PaymentRequestConsumer {
+	topic = strings.TrimSpace(topic)
+	if topic == "" {
+		zap.L().Fatal("PaymentRequestConsumer topic is empty")
+	}
 	r := kafkago.NewReader(kafkago.ReaderConfig{
 		Brokers:  brokers,
 		Topic:    topic,

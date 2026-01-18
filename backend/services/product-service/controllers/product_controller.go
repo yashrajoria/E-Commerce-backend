@@ -87,9 +87,16 @@ func (ctrl *ProductController) GetProducts(c *gin.Context) {
 	// 1. Parse Parameters (Same as before)
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	perPage, _ := strconv.Atoi(c.DefaultQuery("perPage", "10"))
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 10
+	}
 
 	// Parse filters for the Cache Key
 	isFeatured := c.Query("is_featured")
+	normalizedIsFeatured := strings.ToLower(strings.TrimSpace(isFeatured))
 	categoryIDsParam := c.Query("categoryId")
 	normalizedCategoryKey := ""
 	var categoryIDs []uuid.UUID
@@ -118,6 +125,7 @@ func (ctrl *ProductController) GetProducts(c *gin.Context) {
 	}
 
 	sortParam := strings.TrimSpace(c.Query("sort"))
+	normalizedSortParam := strings.ToLower(sortParam)
 	if sortParam != "" && !isSupportedSort(sortParam) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid sort value"})
 		return
@@ -156,9 +164,9 @@ func (ctrl *ProductController) GetProducts(c *gin.Context) {
 		"products:p:%d:l:%d:f:%s:c:%s:s:%s:min:%s:max:%s",
 		page,
 		perPage,
-		isFeatured,
+		normalizedIsFeatured,
 		normalizedCategoryKey,
-		sortParam,
+		normalizedSortParam,
 		formatFloatForCache(minPrice),
 		formatFloatForCache(maxPrice),
 	)
@@ -230,7 +238,9 @@ func (ctrl *ProductController) GetProducts(c *gin.Context) {
 	jsonBytes, err := json.Marshal(response)
 	if err == nil {
 		// Set TTL to 10 minutes (or whatever fits your needs)
-		ctrl.redis.Set(c.Request.Context(), cacheKey, jsonBytes, 10*time.Minute)
+		if err := ctrl.redis.Set(c.Request.Context(), cacheKey, jsonBytes, 10*time.Minute).Err(); err != nil {
+			zap.L().Error("failed to cache products response in Redis", zap.Error(err), zap.String("cacheKey", cacheKey))
+		}
 	}
 
 	c.JSON(http.StatusOK, response)
