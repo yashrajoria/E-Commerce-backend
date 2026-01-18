@@ -7,8 +7,6 @@ import (
 	"order-service/kafka"
 	"order-service/models"
 	"os"
-
-	// "order-service/services"
 	"time"
 
 	kafkago "github.com/segmentio/kafka-go"
@@ -117,7 +115,7 @@ func StartCheckoutConsumer(brokers []string, topic, groupID string, db *gorm.DB,
 			UserID:      userUUID,
 			ID:          orderID_uuid,
 			Amount:      totalAmount,
-			Status:      "PENDING_PAYMENT",
+			Status:      "pending_payment",
 			OrderNumber: "ORD-" + time.Now().Format("20060102-150405") + "-" + uuid.New().String()[:8],
 			CreatedAt:   time.Now(),
 			UpdatedAt:   time.Now(),
@@ -138,7 +136,7 @@ func StartCheckoutConsumer(brokers []string, topic, groupID string, db *gorm.DB,
 			continue
 		}
 
-		log.Printf("✅ order created id=%s user=%s items=%d total_amount=%.2f",
+		log.Printf("✅ order created id=%s user=%s items=%d total_amount=%d",
 			order.ID.String(), order.UserID.String(), validItems, order.Amount)
 
 		// Emit payment request
