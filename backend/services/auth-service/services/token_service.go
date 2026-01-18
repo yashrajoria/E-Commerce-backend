@@ -31,12 +31,12 @@ func NewTokenService() *TokenService {
 
 // GenerateTokenPair creates a new access and refresh token pair.
 func (s *TokenService) GenerateTokenPair(userID, email, role string) (*TokenPair, error) {
-	accessToken, err := s.generateToken(userID, email, role, 15*time.Minute)
+	accessToken, err := s.generateToken(userID, email, role, "access", 15*time.Minute)
 	if err != nil {
 		return nil, err
 	}
 
-	refreshToken, err := s.generateToken(userID, email, role, 7*24*time.Hour) // 7 days
+	refreshToken, err := s.generateToken(userID, email, role, "refresh", 7*24*time.Hour) // 7 days
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +48,7 @@ func (s *TokenService) GenerateTokenPair(userID, email, role string) (*TokenPair
 }
 
 // ValidateToken parses and validates any given token string.
-func (s *TokenService) ValidateToken(tokenStr string) (jwt.MapClaims, error) {
+func (s *TokenService) ValidateToken(tokenStr, expectedType string) (jwt.MapClaims, error) {
 	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method")
@@ -64,15 +64,21 @@ func (s *TokenService) ValidateToken(tokenStr string) (jwt.MapClaims, error) {
 	if !ok {
 		return nil, fmt.Errorf("invalid token claims")
 	}
+	if expectedType != "" {
+		if typ, ok := claims["typ"].(string); !ok || typ != expectedType {
+			return nil, fmt.Errorf("invalid token type")
+		}
+	}
 	return claims, nil
 }
 
 // generateToken is an internal helper to create a specific token.
-func (s *TokenService) generateToken(userID, email, role string, duration time.Duration) (string, error) {
+func (s *TokenService) generateToken(userID, email, role, tokenType string, duration time.Duration) (string, error) {
 	claims := jwt.MapClaims{
 		"sub":   userID,
 		"email": email,
 		"role":  role,
+		"typ":   tokenType,
 		"exp":   time.Now().Add(duration).Unix(),
 		"iat":   time.Now().Unix(),
 	}
