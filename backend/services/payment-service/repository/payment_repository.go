@@ -11,7 +11,7 @@ import (
 type PaymentRepository interface {
 	CreatePayment(ctx context.Context, payment *models.Payment) error
 	GetPaymentByOrderID(ctx context.Context, orderID uuid.UUID) (*models.Payment, error)
-	UpdatePaymentByOrderID(ctx context.Context, orderID uuid.UUID, status string, checkoutURL *string) error
+	UpdatePaymentByOrderID(ctx context.Context, orderID uuid.UUID, status string, checkoutURL *string, stripePaymentID *string) error
 }
 
 type gormPaymentRepo struct {
@@ -34,10 +34,13 @@ func (r *gormPaymentRepo) GetPaymentByOrderID(ctx context.Context, orderID uuid.
 	return &payment, nil
 }
 
-func (r *gormPaymentRepo) UpdatePaymentByOrderID(ctx context.Context, orderID uuid.UUID, status string, checkoutURL *string) error {
+func (r *gormPaymentRepo) UpdatePaymentByOrderID(ctx context.Context, orderID uuid.UUID, status string, checkoutURL *string, stripePaymentID *string) error {
 	updates := map[string]interface{}{
 		"status":       status,
 		"checkout_url": checkoutURL,
+	}
+	if stripePaymentID != nil {
+		updates["stripe_payment_id"] = stripePaymentID
 	}
 	return r.db.WithContext(ctx).Model(&models.Payment{}).Where("order_id = ?", orderID).Updates(updates).Error
 }
