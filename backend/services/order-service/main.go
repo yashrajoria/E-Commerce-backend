@@ -44,7 +44,11 @@ func main() {
 	r.Use(middleware.ConfigMiddleware(cfg.ProductServiceURL))
 
 	orderRepository := repositories.NewGormOrderRepository(database.DB)
-	orderService := services.NewOrderService(orderRepository, kafka.NewProducer(strings.Split(cfg.KafkaBrokers, ","), cfg.KafkaTopic))
+	orderService := services.NewOrderService(
+		orderRepository,
+		kafka.NewProducer(strings.Split(cfg.KafkaBrokers, ","), cfg.KafkaTopic),
+		cfg.KafkaTopic,
+	)
 	orderController := controllers.NewOrderController(orderService)
 	routes.RegisterOrderRoutes(r, orderController)
 
@@ -60,13 +64,13 @@ func main() {
 	// Allow both "kafka:9092" or "kafka:9092,another:9092"
 	brokers := strings.Split(brokersEnv, ",")
 
-	checkoutTopic := os.Getenv("CHECKOUT_TOPIC")
-	if checkoutTopic == "" {
-		checkoutTopic = "checkout-events"
-	}
+	checkoutTopic := cfg.KafkaTopic
 	paymentEventsTopic := os.Getenv("PAYMENT_TOPIC")
 	if paymentEventsTopic == "" {
-		paymentEventsTopic = "payment-events"
+		paymentEventsTopic = os.Getenv("PAYMENT_KAFKA_TOPIC")
+		if paymentEventsTopic == "" {
+			paymentEventsTopic = "payment-events"
+		}
 	}
 	paymentRequestsTopic := os.Getenv("PAYMENT_REQUEST_TOPIC")
 	if paymentRequestsTopic == "" {

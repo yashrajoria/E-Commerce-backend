@@ -8,202 +8,87 @@ import (
 )
 
 func RegisterAllRoutes(r *gin.Engine) {
+	forwardTo := func(targetBase string) gin.HandlerFunc {
+		return func(c *gin.Context) {
+			utils.ForwardRequest(c, utils.ForwardOptions{
+				TargetBase: targetBase,
+			})
+		}
+	}
+
 	// ===== PUBLIC ROUTES =====
 	public := r.Group("/")
 
 	// Products routes - handle both /products and /products/*
-	public.GET("/products", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://product-service:8082/products",
-		})
-	})
-	public.GET("/products/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://product-service:8082/products",
-		})
-	})
+	products := forwardTo("http://product-service:8082/products")
+	public.GET("/products", products)
+	public.GET("/products/*any", products)
 
 	// Categories routes - handle both /categories and /categories/*
-	public.GET("/categories", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://product-service:8082/categories",
-		})
-	})
-	public.GET("/categories/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://product-service:8082/categories",
-		})
-	})
+	categories := forwardTo("http://product-service:8082/categories")
+	public.GET("/categories", categories)
+	public.GET("/categories/*any", categories)
 
 	// ===== AUTH ROUTES (PUBLIC) =====
-	auth := r.Group("/auth")
-
-	// Auth routes with wildcard
-	auth.GET("/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://auth-service:8081",
-		})
-	})
-	auth.POST("/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://auth-service:8081",
-		})
-	})
-
 	// ===== PROTECTED ROUTES (JWT Required) =====
 	protected := r.Group("/")
 	protected.Use(middlewares.JWTMiddleware())
+	auth := r.Group("/auth")
+	authProxy := forwardTo("http://auth-service:8081/auth")
+
+	// Auth routes with wildcard
+	protected.GET("/auth/*any", authProxy)
+	auth.POST("/*any", authProxy)
 
 	// User routes - handle both /users and /users/*
-	protected.GET("/users", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://user-service:8085/users",
-		})
-	})
-	protected.GET("/users/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://user-service:8085/users",
-		})
-	})
-	protected.POST("/users/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://user-service:8085/users",
-		})
-	})
-	protected.PUT("/users/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://user-service:8085/users",
-		})
-	})
-	protected.DELETE("/users/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://user-service:8085/users",
-		})
-	})
+	users := forwardTo("http://user-service:8085/users")
+	protected.GET("/users", users)
+	protected.GET("/users/*any", users)
+	protected.POST("/users/*any", users)
+	protected.PUT("/users/*any", users)
+	protected.DELETE("/users/*any", users)
 
 	// Cart routes - handle both /cart and /cart/*
-	protected.GET("/cart", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://cart-service:8086/cart",
-		})
-	})
-	protected.GET("/cart/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://cart-service:8086/cart",
-		})
-	})
-	protected.POST("/cart/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://cart-service:8086/cart",
-		})
-	})
-	protected.PUT("/cart/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://cart-service:8086/cart",
-		})
-	})
-	protected.DELETE("/cart/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://cart-service:8086/cart",
-		})
-	})
+	cart := forwardTo("http://cart-service:8086/cart")
+	protected.GET("/cart", cart)
+	protected.GET("/cart/*any", cart)
+	protected.POST("/cart/*any", cart)
+	protected.PUT("/cart/*any", cart)
+	protected.DELETE("/cart/*any", cart)
 
 	// Order routes - handle both /orders and /orders/*
-	protected.GET("/orders", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://order-service:8083/orders",
-		})
-	})
-	protected.GET("/orders/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://order-service:8083/orders",
-		})
-	})
-	protected.POST("/orders", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://order-service:8083/orders",
-		})
-	})
-	protected.POST("/orders/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://order-service:8083/orders",
-		})
-	})
+	orders := forwardTo("http://order-service:8083/orders")
+	protected.GET("/orders", orders)
+	protected.GET("/orders/*any", orders)
+	protected.POST("/orders", orders)
+	protected.POST("/orders/*any", orders)
 
 	// ===== ADMIN ROUTES (JWT + Admin Role Required) =====
 	admin := protected.Group("/")
 	admin.Use(middlewares.AdminRoleMiddleware())
 
 	// Admin product routes
-	admin.POST("/products", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://product-service:8082/products",
-		})
-	})
-	admin.POST("/products/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://product-service:8082/products",
-		})
-	})
-	admin.PUT("/products/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://product-service:8082/products",
-		})
-	})
-	admin.DELETE("/products/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://product-service:8082/products",
-		})
-	})
+	admin.POST("/products", products)
+	admin.POST("/products/*any", products)
+	admin.PUT("/products/*any", products)
+	admin.DELETE("/products/*any", products)
 
 	// Admin category routes
-	admin.POST("/categories", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://product-service:8082/categories",
-		})
-	})
-	admin.POST("/categories/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://product-service:8082/categories",
-		})
-	})
-	admin.PUT("/categories/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://product-service:8082/categories",
-		})
-	})
-	admin.DELETE("/categories/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://product-service:8082/categories",
-		})
-	})
+	admin.POST("/categories", categories)
+	admin.POST("/categories/*any", categories)
+	admin.PUT("/categories/*any", categories)
+	admin.DELETE("/categories/*any", categories)
 
 	// Admin order routes
-	admin.PUT("/orders/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://order-service:8083/orders",
-		})
-	})
-	admin.DELETE("/orders/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://order-service:8083/orders",
-		})
-	})
+	admin.PUT("/orders/*any", orders)
+	admin.DELETE("/orders/*any", orders)
 
 	// Payment routes (protected)
-	protected.POST("/payment", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://payment-service:8087/payment",
-		})
-	})
-	protected.POST("/payment/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://payment-service:8087/payment",
-		})
-	})
-	protected.GET("/payment/*any", func(c *gin.Context) {
-		utils.ForwardRequest(c, utils.ForwardOptions{
-			TargetBase: "http://payment-service:8087/payment",
-		})
-	})
+	payment := forwardTo("http://payment-service:8087/payment")
+	protected.POST("/payment", payment)
+	protected.POST("/payment/*any", payment)
+	protected.GET("/payment/*any", payment)
+
+	// Stripe webhook (public)
+	public.POST("/stripe/webhook", forwardTo("http://payment-service:8087/stripe/webhook"))
 }

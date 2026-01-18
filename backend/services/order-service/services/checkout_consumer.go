@@ -7,8 +7,6 @@ import (
 	"order-service/kafka"
 	"order-service/models"
 	"os"
-
-	// "order-service/services"
 	"time"
 
 	kafkago "github.com/segmentio/kafka-go"
@@ -45,6 +43,16 @@ func StartCheckoutConsumer(brokers []string, topic, groupID string, db *gorm.DB,
 		userUUID, err := uuid.Parse(evt.UserID)
 		if err != nil {
 			log.Printf("❌ user_id is not a valid UUID: %s", evt.UserID)
+			continue
+		}
+
+		if evt.OrderID == "" {
+			log.Printf("❌ missing OrderID in CheckoutEvent, skipping")
+			continue
+		}
+		orderID_uuid, err := uuid.Parse(evt.OrderID)
+		if err != nil {
+			log.Printf("❌ invalid OrderID UUID format: %s", evt.OrderID)
 			continue
 		}
 
@@ -105,6 +113,7 @@ func StartCheckoutConsumer(brokers []string, topic, groupID string, db *gorm.DB,
 		// Create the order
 		order := models.Order{
 			UserID:      userUUID,
+			ID:          orderID_uuid,
 			Amount:      totalAmount,
 			Status:      "pending_payment",
 			OrderNumber: "ORD-" + time.Now().Format("20060102-150405") + "-" + uuid.New().String()[:8],
@@ -127,7 +136,7 @@ func StartCheckoutConsumer(brokers []string, topic, groupID string, db *gorm.DB,
 			continue
 		}
 
-		log.Printf("✅ order created id=%s user=%s items=%d total_amount=%.2f",
+		log.Printf("✅ order created id=%s user=%s items=%d total_amount=%d",
 			order.ID.String(), order.UserID.String(), validItems, order.Amount)
 
 		// Emit payment request

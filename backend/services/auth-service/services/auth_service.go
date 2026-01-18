@@ -22,7 +22,7 @@ type IUserRepository interface {
 
 type ITokenService interface {
 	GenerateTokenPair(userID, email, role string) (*TokenPair, error)
-	ValidateToken(tokenStr string) (jwt.MapClaims, error)
+	ValidateToken(tokenStr, expectedType string) (jwt.MapClaims, error)
 }
 
 type IEmailService interface {
@@ -33,20 +33,15 @@ type IEmailService interface {
 type EmailService struct{}
 
 func NewEmailService() *EmailService { return &EmailService{} }
-func (s *EmailService) SendVerificationEmail(email, code string) error {
-	fmt.Printf("--- SIMULATING EMAIL ---\nTo: %s\nVerification Code: %s\n------------------------\n", email, code)
-	return nil
-}
 
 type AuthService struct {
 	userRepo     IUserRepository
 	tokenService ITokenService
-	emailService IEmailService
 	db           *gorm.DB
 }
 
-func NewAuthService(ur IUserRepository, ts ITokenService, es IEmailService, db *gorm.DB) *AuthService {
-	return &AuthService{userRepo: ur, tokenService: ts, emailService: es, db: db}
+func NewAuthService(ur IUserRepository, ts ITokenService, db *gorm.DB) *AuthService {
+	return &AuthService{userRepo: ur, tokenService: ts, db: db}
 }
 
 func (s *AuthService) Login(ctx context.Context, email, password string) (*TokenPair, error) {
@@ -84,7 +79,6 @@ func (s *AuthService) Register(ctx context.Context, name, email, password, role 
 		}
 
 		verificationCode := GenerateRandomCode(6)
-
 		newUser := &models.User{
 			ID:               uuid.New(),
 			Email:            email,
@@ -99,7 +93,7 @@ func (s *AuthService) Register(ctx context.Context, name, email, password, role 
 			return fmt.Errorf("failed to create account: %w", err)
 		}
 
-		if err := s.emailService.SendVerificationEmail(newUser.Email, newUser.VerificationCode); err != nil {
+		if err := SendVerificationEmail(newUser.Email, newUser.VerificationCode); err != nil {
 			return fmt.Errorf("failed to send verification email: %w", err)
 		}
 
@@ -124,7 +118,7 @@ func (s *AuthService) VerifyEmail(ctx context.Context, email, code string) error
 }
 
 func (s *AuthService) RefreshTokens(ctx context.Context, refreshToken string) (*TokenPair, error) {
-	claims, err := s.tokenService.ValidateToken(refreshToken)
+	claims, err := s.tokenService.ValidateToken(refreshToken, "refresh")
 	if err != nil {
 		return nil, fmt.Errorf("invalid refresh token: %w", err)
 	}

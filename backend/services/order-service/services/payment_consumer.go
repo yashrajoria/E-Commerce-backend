@@ -50,11 +50,17 @@ func (pc *PaymentConsumer) Start() {
 			continue
 		}
 
+		log.Printf("ℹ️  [OrderService][PaymentConsumer] received event: order_id=%s type=%s", evt.OrderID, evt.Type)
+
 		now := time.Now()
 		switch evt.Type {
 		case "payment_succeeded":
 			pc.updateOrderStatusWithTime(evt.OrderID, "paid", &now, nil)
 		case "payment_failed":
+			pc.updateOrderStatusWithTime(evt.OrderID, "payment_failed", nil, &now)
+		case "checkout_session_created":
+			log.Printf("ℹ️  [OrderService][PaymentConsumer] checkout session created for order=%s", evt.OrderID)
+		case "checkout_session_failed":
 			pc.updateOrderStatusWithTime(evt.OrderID, "payment_failed", nil, &now)
 		default:
 			log.Printf("⚠️  [OrderService][PaymentConsumer] unknown event type: %s", evt.Type)
@@ -79,8 +85,19 @@ func (pc *PaymentConsumer) updateOrderStatusWithTime(orderID, status string, com
 			return err
 		}
 		if order.Status == status {
-			log.Printf("ℹ️  [OrderService][PaymentConsumer] order=%s already %s; skipping", orderID, status)
-			return nil
+			needsUpdate := false
+			if completedAt != nil && order.CompletedAt == nil {
+				updateFields["completed_at"] = *completedAt
+				needsUpdate = true
+			}
+			if canceledAt != nil && order.CanceledAt == nil {
+				updateFields["canceled_at"] = *canceledAt
+				needsUpdate = true
+			}
+			if !needsUpdate {
+				log.Printf("ℹ️  [OrderService][PaymentConsumer] order=%s already %s; skipping", orderID, status)
+				return nil
+			}
 		}
 		return tx.Model(&order).Updates(updateFields).Error
 	})

@@ -42,8 +42,8 @@ func main() {
 
 	// Initialize Services
 	tokenService := services.NewTokenService()
-	emailService := services.NewEmailService()
-	authService := services.NewAuthService(userRepo, tokenService, emailService, database.DB)
+	// emailService := services.NewEmailService()
+	authService := services.NewAuthService(userRepo, tokenService, database.DB)
 
 	// Initialize Controllers
 	authController := controllers.NewAuthController(authService)
@@ -69,7 +69,8 @@ func main() {
 		authRoutes.POST("/login", authController.Login)
 		authRoutes.POST("/verify-email", authController.VerifyEmail)
 		authRoutes.POST("/logout", authController.Logout)
-		authRoutes.POST("/refresh", authController.Refresh) // Added the refresh route
+		authRoutes.POST("/refresh", authController.Refresh)     // Added the refresh route
+		authRoutes.GET("/status", authController.GetAuthStatus) // Added the status route
 	}
 
 	// --- 5. Graceful Shutdown ---

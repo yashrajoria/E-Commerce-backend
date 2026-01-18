@@ -16,13 +16,14 @@ import (
 
 	"github.com/cloudinary/cloudinary-go"
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis/v8"
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
 )
 
-func main() {
-	// --- 1. Initialization ---
+var ProductRedis *redis.Client
 
+func main() {
 	// Initialize structured logger
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()        // Flushes buffer, if any
@@ -30,6 +31,18 @@ func main() {
 
 	// Load .env file (optional, falls back to system env)
 	_ = godotenv.Load()
+
+	// --- 1. Initialization ---
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		redisURL = "redis://redis:6379"
+	}
+	redisOpts, err := redis.ParseURL(redisURL)
+	if err != nil {
+		zap.L().Warn("Failed to parse REDIS_URL, falling back to default", zap.Error(err))
+		redisOpts = &redis.Options{Addr: "redis:6379", DB: 0}
+	}
+	ProductRedis = redis.NewClient(redisOpts)
 
 	// Load configuration from environment variables
 	cfg, err := LoadConfig()
@@ -54,13 +67,16 @@ func main() {
 	// Initialize Repositories
 	productRepo := repository.NewProductRepository(database.DB)
 	categoryRepo := repository.NewCategoryRepository(database.DB)
+	if err := productRepo.EnsureIndexes(context.Background()); err != nil {
+		zap.L().Warn("Failed to ensure product indexes", zap.Error(err))
+	}
 
 	// Initialize Services, injecting repositories
 	productService := services.NewProductService(productRepo, categoryRepo, cld)
 	categoryService := services.NewCategoryService(categoryRepo)
 
 	// Initialize Controllers, injecting services
-	productController := controllers.NewProductController(productService)
+	productController := controllers.NewProductController(productService, ProductRedis)
 	categoryController := controllers.NewCategoryController(categoryService)
 
 	// --- 3. HTTP Server & Middleware ---

@@ -76,3 +76,32 @@ func (r *ProductRepository) FindByIDInternal(ctx context.Context, id uuid.UUID) 
 	err := r.collection.FindOne(ctx, filter).Decode(&product)
 	return &product, err
 }
+
+// repositories/product_repository.go
+
+func (r *ProductRepository) FindBySKUs(ctx context.Context, skus []string) ([]models.Product, error) {
+	var products []models.Product
+
+	filter := bson.M{"sku": bson.M{"$in": skus}}
+	cursor, err := r.collection.Find(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	if err = cursor.All(ctx, &products); err != nil {
+		return nil, err
+	}
+
+	return products, nil
+}
+
+func (r *ProductRepository) EnsureIndexes(ctx context.Context) error {
+	models := []mongo.IndexModel{
+		{
+			Keys: bson.D{{Key: "category_ids", Value: 1}},
+		},
+	}
+	_, err := r.collection.Indexes().CreateMany(ctx, models)
+	return err
+}

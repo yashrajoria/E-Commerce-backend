@@ -18,7 +18,7 @@ func Load() Config {
 		Port:         getEnv("PORT", "8086"),
 		RedisURL:     getEnv("REDIS_URL", "redis://redis:6379"),
 		KafkaBrokers: os.Getenv("KAFKA_BROKERS"),
-		KafkaTopic:   os.Getenv("CART_KAFKA_TOPIC"),
+		KafkaTopic:   getEnv("CHECKOUT_TOPIC", getEnv("CART_KAFKA_TOPIC", "checkout.requested")),
 		CartTTL:      time.Hour * 24 * 7, // default 7 days
 	}
 }

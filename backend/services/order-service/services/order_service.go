@@ -45,12 +45,14 @@ func (e *ServiceError) Error() string {
 type OrderService struct {
 	orderRepo     repositories.OrderRepository
 	kafkaProducer *kafka.Producer
+	checkoutTopic string
 }
 
-func NewOrderService(orderRepo repositories.OrderRepository, kafkaProducer *kafka.Producer) *OrderService {
+func NewOrderService(orderRepo repositories.OrderRepository, kafkaProducer *kafka.Producer, checkoutTopic string) *OrderService {
 	return &OrderService{
 		orderRepo:     orderRepo,
 		kafkaProducer: kafkaProducer,
+		checkoutTopic: checkoutTopic,
 	}
 }
 
@@ -89,7 +91,7 @@ func (s *OrderService) CreateOrder(ctx context.Context, userID string, req *Crea
 	}
 
 	// Publish to Kafka
-	if err := s.kafkaProducer.Publish("checkout.requested", eventBytes); err != nil {
+	if err := s.kafkaProducer.Publish(s.checkoutTopic, eventBytes); err != nil {
 		log.Printf("[OrderService] Failed to publish to Kafka: %v", err)
 		return &ServiceError{
 			StatusCode: 500,

@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time"
 
 	"api-gateway/logger"
 
@@ -14,7 +13,11 @@ import (
 	"github.com/joho/godotenv"
 )
 
-var secretKey []byte
+var (
+	secretKey    []byte
+	isProduction bool
+	cookieDomain string
+)
 
 func init() {
 	_ = godotenv.Load()
@@ -23,50 +26,22 @@ func init() {
 		logger.Log.Fatal("JWT_SECRET is not set in env")
 	}
 	secretKey = []byte(secret)
+	isProduction = os.Getenv("ENV") == "production"
+	cookieDomain = os.Getenv("COOKIE_DOMAIN")
 }
 
 // JWTMiddleware validates JWT access token and refreshes when needed
 func JWTMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenString, err := c.Cookie("token")
-
 		if err != nil || tokenString == "" {
-			// Try refresh token
-			refreshToken, err := c.Cookie("refresh_token")
-			if err != nil || refreshToken == "" {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing authentication token"})
-				c.Abort()
-				return
-			}
-
-			claims, err := parseToken(refreshToken)
-			if err != nil {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid refresh token"})
-				c.Abort()
-				return
-			}
-
-			userID, _ := claims["sub"].(string)
-			email, _ := claims["email"].(string)
-			role, _ := claims["role"].(string)
-
-			// generate new access token
-			accessToken, err := generateToken(userID, email, role, 15*time.Minute)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate new access token"})
-				c.Abort()
-				return
-			}
-
-			// set cookies
-			c.SetCookie("token", accessToken, 900, "/", "", true, true)                // 15 min
-			c.SetCookie("refresh_token", refreshToken, 7*24*3600, "/", "", true, true) // keep same refresh token
-
-			tokenString = accessToken
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing authentication token"})
+			c.Abort()
+			return
 		}
 
 		// validate final access token
-		claims, err := parseToken(tokenString)
+		claims, err := parseToken(tokenString, "access")
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
 			c.Abort()
@@ -102,22 +77,8 @@ func AdminRoleMiddleware() gin.HandlerFunc {
 	}
 }
 
-// generateToken creates signed JWT token with claims
-func generateToken(userID, email, role string, expiration time.Duration) (string, error) {
-	claims := jwt.MapClaims{
-		"sub":   userID,
-		"email": email,
-		"role":  role,
-		"exp":   time.Now().Add(expiration).Unix(),
-		"iat":   time.Now().Unix(),
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(secretKey)
-}
-
 // parseToken validates and extracts claims
-func parseToken(tokenStr string) (jwt.MapClaims, error) {
+func parseToken(tokenStr, expectedType string) (jwt.MapClaims, error) {
 	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -132,6 +93,11 @@ func parseToken(tokenStr string) (jwt.MapClaims, error) {
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
 		return nil, fmt.Errorf("invalid token claims")
+	}
+	if expectedType != "" {
+		if typ, ok := claims["typ"].(string); !ok || typ != expectedType {
+			return nil, fmt.Errorf("invalid token type")
+		}
 	}
 
 	return claims, nil

@@ -16,6 +16,8 @@ func RegisterRoutes(r *gin.Engine, productController *controllers.ProductControl
 		// Create a new product
 		productRoutes.POST("/", productController.CreateProduct)
 		// Bulk create products
+		productRoutes.POST("/bulk/validate", productController.ValidateBulkImport)
+
 		productRoutes.POST("/bulk", productController.CreateBulkProducts)
 		// Update a product
 		productRoutes.PUT("/:id", productController.UpdateProduct)

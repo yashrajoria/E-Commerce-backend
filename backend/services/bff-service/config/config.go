@@ -1,41 +1,24 @@
 package config
 
-import (
-	"log"
-	"os"
+import "os"
 
-	"github.com/joho/godotenv"
-)
-
-// Config holds the loaded configuration
 type Config struct {
-	BffAddr         string
-	UserServiceURL  string
-	OrderServiceURL string
+	Port           string
+	APIGatewayURL  string
+	RequestTimeout string
 }
 
-var AppConfig Config
-
-// LoadConfig loads configuration from the .env file
-func LoadConfig() {
-	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found, using environment variables")
-	}
-
-	AppConfig = Config{
-		BffAddr:         getEnv("BFF_SERVICE_ADDR", ":8000"),
-		UserServiceURL:  getEnv("USER_SERVICE_URL", ""),
-		OrderServiceURL: getEnv("ORDER_SERVICE_URL", ""),
+func Load() Config {
+	return Config{
+		Port:           getEnv("PORT", "8088"),
+		APIGatewayURL:  getEnv("API_GATEWAY_URL", "http://api-gateway:8080"),
+		RequestTimeout: getEnv("REQUEST_TIMEOUT", "10s"),
 	}
 }
 
-// Helper to get an environment variable or return a default
 func getEnv(key, fallback string) string {
-	if value, ok := os.LookupEnv(key); ok {
-		return value
-	}
-	if fallback == "" {
-		log.Fatalf("FATAL: Environment variable %s is not set.", key)
+	if val := os.Getenv(key); val != "" {
+		return val
 	}
 	return fallback
 }

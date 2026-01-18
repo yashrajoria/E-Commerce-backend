@@ -1,15 +1,23 @@
 package controllers
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"math"
+	"mime/multipart"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
+	"time"
 
+	"product-service/models"
 	"product-service/services"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
+	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -18,6 +26,17 @@ import (
 
 // Use a single instance of Validate, it caches struct info
 var validate = validator.New()
+
+type ProductServiceAPI interface {
+	GetProduct(ctx context.Context, id uuid.UUID) (*models.Product, error)
+	ListProducts(ctx context.Context, params services.ListProductsParams) ([]*models.Product, int64, error)
+	CreateProduct(ctx context.Context, req services.ProductCreateRequest, images []*multipart.FileHeader) (*models.Product, error)
+	UpdateProduct(ctx context.Context, id uuid.UUID, updates bson.M) (int64, error)
+	DeleteProduct(ctx context.Context, id uuid.UUID) (int64, error)
+	GetProductInternal(ctx context.Context, id uuid.UUID) (*services.ProductInternalDTO, error)
+	ValidateBulkImport(ctx context.Context, file multipart.File) (*models.BulkImportValidation, error)
+	CreateBulkProducts(ctx context.Context, file multipart.File, autoCreateCategories bool) (*models.BulkImportResult, error)
+}
 
 // CreateProductRequest defines the expected structure for creating a product via multipart-form.
 type CreateProductRequest struct {
@@ -32,12 +51,14 @@ type CreateProductRequest struct {
 }
 
 type ProductController struct {
-	productService *services.ProductService
+	productService ProductServiceAPI
+	redis          *redis.Client
 }
 
-func NewProductController(ps *services.ProductService) *ProductController {
+func NewProductController(ps ProductServiceAPI, redis *redis.Client) *ProductController {
 	return &ProductController{
 		productService: ps,
+		redis:          redis,
 	}
 }
 
@@ -63,18 +84,107 @@ func (ctrl *ProductController) GetProductByID(c *gin.Context) {
 }
 
 func (ctrl *ProductController) GetProducts(c *gin.Context) {
+	// 1. Parse Parameters (Same as before)
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	if page < 1 {
-		page = 1
-	}
 	perPage, _ := strconv.Atoi(c.DefaultQuery("perPage", "10"))
-	if perPage <= 0 {
-		perPage = 10
+
+	// Parse filters for the Cache Key
+	isFeatured := c.Query("is_featured")
+	categoryIDsParam := c.Query("categoryId")
+	normalizedCategoryKey := ""
+	var categoryIDs []uuid.UUID
+	if categoryIDsParam != "" {
+		rawIDs := strings.Split(categoryIDsParam, ",")
+		var categoryIDStrings []string
+		for _, rawID := range rawIDs {
+			trimmed := strings.TrimSpace(rawID)
+			if trimmed == "" {
+				continue
+			}
+			categoryUUID, err := uuid.Parse(trimmed)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category ID format"})
+				return
+			}
+			categoryIDs = append(categoryIDs, categoryUUID)
+			categoryIDStrings = append(categoryIDStrings, categoryUUID.String())
+		}
+		if len(categoryIDs) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category ID format"})
+			return
+		}
+		sort.Strings(categoryIDStrings)
+		normalizedCategoryKey = strings.Join(categoryIDStrings, ",")
 	}
 
+	sortParam := strings.TrimSpace(c.Query("sort"))
+	if sortParam != "" && !isSupportedSort(sortParam) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid sort value"})
+		return
+	}
+
+	var minPrice *float64
+	minPriceStr := strings.TrimSpace(c.Query("minPrice"))
+	if minPriceStr != "" {
+		parsed, err := strconv.ParseFloat(minPriceStr, 64)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid minPrice value"})
+			return
+		}
+		minPrice = &parsed
+	}
+
+	var maxPrice *float64
+	maxPriceStr := strings.TrimSpace(c.Query("maxPrice"))
+	if maxPriceStr != "" {
+		parsed, err := strconv.ParseFloat(maxPriceStr, 64)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid maxPrice value"})
+			return
+		}
+		maxPrice = &parsed
+	}
+
+	if minPrice != nil && maxPrice != nil && *minPrice > *maxPrice {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "minPrice must be less than or equal to maxPrice"})
+		return
+	}
+
+	// 2. GENERATE A UNIQUE CACHE KEY
+	// The key MUST include every variable that changes the output
+	cacheKey := fmt.Sprintf(
+		"products:p:%d:l:%d:f:%s:c:%s:s:%s:min:%s:max:%s",
+		page,
+		perPage,
+		isFeatured,
+		normalizedCategoryKey,
+		sortParam,
+		formatFloatForCache(minPrice),
+		formatFloatForCache(maxPrice),
+	)
+
+	// 3. TRY TO GET FROM REDIS
+	val, err := ctrl.redis.Get(c.Request.Context(), cacheKey).Result()
+
+	if err == nil {
+		// --- CACHE HIT ---
+		var cachedResponse map[string]interface{}
+
+		// Unmarshal the JSON string back into a Go map/struct
+		if err := json.Unmarshal([]byte(val), &cachedResponse); err == nil {
+			zap.L().Info("Returning data from Redis Cache")
+			c.JSON(http.StatusOK, cachedResponse)
+			return // <--- RETURN IMMEDIATELY, SKIP DB
+		}
+	}
+
+	// --- CACHE MISS (Proceed to DB) ---
+
+	// Prepare params for Service (Same as before)
 	params := services.ListProductsParams{
 		Page:    page,
 		PerPage: perPage,
+		Sort:    sortParam,
 	}
 
 	if isFeaturedStr := c.Query("is_featured"); isFeaturedStr != "" {
@@ -86,25 +196,26 @@ func (ctrl *ProductController) GetProducts(c *gin.Context) {
 		params.IsFeatured = &isFeatured
 	}
 
-	if categoryIDStr := c.Param("categoryId"); categoryIDStr != "" {
-		categoryUUID, err := uuid.Parse(categoryIDStr)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category ID format"})
-			return
-		}
-		params.CategoryID = categoryUUID
+	if len(categoryIDs) > 0 {
+		params.CategoryID = categoryIDs
+	}
+	if minPrice != nil {
+		params.MinPrice = minPrice
+	}
+	if maxPrice != nil {
+		params.MaxPrice = maxPrice
 	}
 
 	products, total, err := ctrl.productService.ListProducts(c.Request.Context(), params)
 	if err != nil {
-		zap.L().Error("Service failed to list products", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch products"})
 		return
 	}
 
 	totalPages := int(math.Ceil(float64(total) / float64(perPage)))
 
-	c.JSON(http.StatusOK, gin.H{
+	// Construct Response
+	response := gin.H{
 		"products": products,
 		"meta": gin.H{
 			"page":       page,
@@ -112,7 +223,17 @@ func (ctrl *ProductController) GetProducts(c *gin.Context) {
 			"total":      total,
 			"totalPages": totalPages,
 		},
-	})
+	}
+
+	// 4. SAVE TO REDIS (Serialize to JSON)
+	// We store the whole response so we can return it instantly next time
+	jsonBytes, err := json.Marshal(response)
+	if err == nil {
+		// Set TTL to 10 minutes (or whatever fits your needs)
+		ctrl.redis.Set(c.Request.Context(), cacheKey, jsonBytes, 10*time.Minute)
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 func (ctrl *ProductController) CreateProduct(c *gin.Context) {
@@ -216,38 +337,66 @@ func (ctrl *ProductController) DeleteProduct(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Product deleted successfully"})
 }
 
+// ValidateBulkImport validates CSV before import
+func (ctrl *ProductController) ValidateBulkImport(c *gin.Context) {
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "File is required",
+		})
+		return
+	}
+
+	fileHandle, err := file.Open()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to open file",
+		})
+		return
+	}
+	defer fileHandle.Close()
+
+	validation, err := ctrl.productService.ValidateBulkImport(c.Request.Context(), fileHandle)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, validation)
+}
+
+// CreateBulkProducts imports products from CSV
 func (ctrl *ProductController) CreateBulkProducts(c *gin.Context) {
 	file, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "File upload required in 'file' field"})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "File is required",
+		})
 		return
 	}
 
-	src, err := file.Open()
+	autoCreate := c.DefaultQuery("auto_create_categories", "false") == "true"
+
+	fileHandle, err := file.Open()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open uploaded file"})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to open file",
+		})
 		return
 	}
-	defer src.Close()
+	defer fileHandle.Close()
 
-	inserted, errorsList, err := ctrl.productService.CreateBulkProducts(c.Request.Context(), src)
+	result, err := ctrl.productService.CreateBulkProducts(c.Request.Context(), fileHandle, autoCreate)
 	if err != nil {
-		zap.L().Error("Service failed during bulk create", zap.Error(err))
-		// Check for duplicate key errors specifically
-		if mongo.IsDuplicateKeyError(err) {
-			c.JSON(http.StatusConflict, gin.H{"error": "Bulk insert failed due to duplicate SKU. Please ensure all SKUs are unique."})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "An unexpected error occurred during bulk import"})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message":        "Bulk import process completed.",
-		"inserted_count": inserted,
-		"errors_count":   len(errorsList),
-		"errors":         errorsList,
-	})
+	c.JSON(http.StatusOK, result)
 }
 
 func (ctrl *ProductController) GetProductByIDInternal(c *gin.Context) {
@@ -270,4 +419,20 @@ func (ctrl *ProductController) GetProductByIDInternal(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, productDTO)
+}
+
+func isSupportedSort(sortParam string) bool {
+	switch sortParam {
+	case "price_asc", "price_desc", "created_at_asc", "created_at_desc", "name_asc", "name_desc":
+		return true
+	default:
+		return false
+	}
+}
+
+func formatFloatForCache(value *float64) string {
+	if value == nil {
+		return ""
+	}
+	return strconv.FormatFloat(*value, 'f', -1, 64)
 }

@@ -53,8 +53,8 @@ func (m *MockTokenService) GenerateTokenPair(userID, email, role string) (*Token
 
 // === THIS IS THE FIX ===
 // The return type of the mock method must match the interface exactly.
-func (m *MockTokenService) ValidateToken(tokenStr string) (jwt.MapClaims, error) {
-	args := m.Called(tokenStr)
+func (m *MockTokenService) ValidateToken(tokenStr, expectedType string) (jwt.MapClaims, error) {
+	args := m.Called(tokenStr, expectedType)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
