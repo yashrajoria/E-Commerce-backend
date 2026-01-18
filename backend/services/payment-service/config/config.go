@@ -18,6 +18,7 @@ type Config struct {
 	StripeWebhookKey string
 	KafkaBrokers     string
 	KafkaTopic       string
+	PaymentRequestTopic string
 }
 
 func LoadConfig() (*Config, error) {
@@ -33,7 +34,8 @@ func LoadConfig() (*Config, error) {
 		StripeSecretKey:  os.Getenv("STRIPE_API_KEY"),
 		StripeWebhookKey: os.Getenv("STRIPE_WEBHOOK_SECRET"),
 		KafkaBrokers:     os.Getenv("KAFKA_BROKERS"),
-		KafkaTopic:       os.Getenv("PAYMENT_KAFKA_TOPIC"),
+		KafkaTopic:       getEnv("PAYMENT_TOPIC", getEnv("PAYMENT_KAFKA_TOPIC", "payment-events")),
+		PaymentRequestTopic: getEnv("PAYMENT_REQUEST_TOPIC", "payment-requests"),
 	}
 
 	if cfg.PostgresUser == "" || cfg.PostgresPassword == "" || cfg.PostgresDB == "" || cfg.PostgresHost == "" ||

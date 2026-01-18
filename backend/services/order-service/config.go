@@ -31,7 +31,7 @@ func LoadConfig() (*Config, error) {
 		PostgresTimeZone:  getEnv("POSTGRES_TIMEZONE", "Asia/Kolkata"),
 		ProductServiceURL: getEnv("PRODUCT_SERVICE_URL", "http://product-service:8082"),
 		KafkaBrokers:      os.Getenv("KAFKA_BROKERS"),
-		KafkaTopic:        os.Getenv("CART_KAFKA_TOPIC"),
+		KafkaTopic:        getEnv("CHECKOUT_TOPIC", getEnv("CART_KAFKA_TOPIC", "checkout.requested")),
 	}
 
 	if cfg.PostgresUser == "" || cfg.PostgresPassword == "" || cfg.PostgresDB == "" || cfg.PostgresHost == "" {

@@ -115,8 +115,14 @@ func (pc *PaymentController) InitiatePayment(c *gin.Context) {
 
 // Handles Stripe webhooks for payment status updates
 func (pc *PaymentController) StripeWebhook(c *gin.Context) {
+	pc.Logger.Info("Stripe webhook received", zap.String("path", c.FullPath()), zap.Bool("has_signature", c.GetHeader("Stripe-Signature") != ""))
+
 	event, err := pc.Stripe.ParseWebhook(c.Request)
 	if err != nil {
+		pc.Logger.Warn("Stripe webhook signature verification failed",
+			zap.Error(err),
+			zap.String("stripe_signature", c.GetHeader("Stripe-Signature")),
+		)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid webhook"})
 		return
 	}

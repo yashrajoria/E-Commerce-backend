@@ -22,7 +22,7 @@ type IUserRepository interface {
 
 type ITokenService interface {
 	GenerateTokenPair(userID, email, role string) (*TokenPair, error)
-	ValidateToken(tokenStr string) (jwt.MapClaims, error)
+	ValidateToken(tokenStr, expectedType string) (jwt.MapClaims, error)
 }
 
 type IEmailService interface {
@@ -118,7 +118,7 @@ func (s *AuthService) VerifyEmail(ctx context.Context, email, code string) error
 }
 
 func (s *AuthService) RefreshTokens(ctx context.Context, refreshToken string) (*TokenPair, error) {
-	claims, err := s.tokenService.ValidateToken(refreshToken)
+	claims, err := s.tokenService.ValidateToken(refreshToken, "refresh")
 	if err != nil {
 		return nil, fmt.Errorf("invalid refresh token: %w", err)
 	}

@@ -28,6 +28,9 @@ type ListProductsParams struct {
 	PerPage    int
 	IsFeatured *bool // Use a pointer to distinguish between false and not set
 	CategoryID []uuid.UUID
+	MinPrice   *float64
+	MaxPrice   *float64
+	Sort       string
 }
 
 type ProductCreateRequest struct {
@@ -73,10 +76,23 @@ func (s *ProductService) ListProducts(ctx context.Context, params ListProductsPa
 	if len(params.CategoryID) > 0 {
 		filter["category_ids"] = bson.M{"$in": params.CategoryID}
 	}
+	if params.MinPrice != nil || params.MaxPrice != nil {
+		priceFilter := bson.M{}
+		if params.MinPrice != nil {
+			priceFilter["$gte"] = *params.MinPrice
+		}
+		if params.MaxPrice != nil {
+			priceFilter["$lte"] = *params.MaxPrice
+		}
+		filter["price"] = priceFilter
+	}
 
 	findOptions := options.Find().
 		SetLimit(int64(params.PerPage)).
 		SetSkip(int64((params.Page - 1) * params.PerPage))
+	if sortField, sortDirection := resolveSort(params.Sort); sortField != "" {
+		findOptions.SetSort(bson.D{{Key: sortField, Value: sortDirection}})
+	}
 
 	products, err := s.productRepo.Find(ctx, filter, findOptions)
 	if err != nil {
@@ -89,6 +105,25 @@ func (s *ProductService) ListProducts(ctx context.Context, params ListProductsPa
 	}
 
 	return products, total, nil
+}
+
+func resolveSort(sortParam string) (string, int) {
+	switch sortParam {
+	case "price_asc":
+		return "price", 1
+	case "price_desc":
+		return "price", -1
+	case "created_at_asc":
+		return "created_at", 1
+	case "created_at_desc":
+		return "created_at", -1
+	case "name_asc":
+		return "name", 1
+	case "name_desc":
+		return "name", -1
+	default:
+		return "", 0
+	}
 }
 
 func (s *ProductService) CreateProduct(ctx context.Context, req ProductCreateRequest, images []*multipart.FileHeader) (*models.Product, error) {

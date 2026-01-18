@@ -48,6 +48,7 @@ func main() {
 	paymentProducer := kafka.NewPaymentEventProducer(strings.Split(cfg.KafkaBrokers, ","), cfg.KafkaTopic)
 	paymentRequestConsumer := services.NewPaymentRequestConsumer(
 		strings.Split(cfg.KafkaBrokers, ","),
+		cfg.PaymentRequestTopic,
 		groupID,
 		paymentProducer,
 		stripeSvc,

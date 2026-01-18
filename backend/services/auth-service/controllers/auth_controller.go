@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"auth-service/services"
 
@@ -168,5 +169,6 @@ func (ctrl *AuthController) GetAuthStatus(c *gin.Context) {
 			"email": email,
 			"role":  role,
 		},
+		"timestamp": time.Now().UTC(),
 	})
 }

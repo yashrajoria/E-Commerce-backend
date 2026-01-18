@@ -19,22 +19,23 @@ type PaymentRequestConsumer struct {
 	stripeSvc       *StripeService
 	logger          *zap.Logger
 	repo            repository.PaymentRepository
+	topic           string
 }
 
-func NewPaymentRequestConsumer(brokers []string, groupID string, producer *kafka.PaymentEventProducer, stripeSvc *StripeService, repo repository.PaymentRepository, logger *zap.Logger) *PaymentRequestConsumer {
+func NewPaymentRequestConsumer(brokers []string, topic, groupID string, producer *kafka.PaymentEventProducer, stripeSvc *StripeService, repo repository.PaymentRepository, logger *zap.Logger) *PaymentRequestConsumer {
 	r := kafkago.NewReader(kafkago.ReaderConfig{
 		Brokers:  brokers,
-		Topic:    "payment-requests",
+		Topic:    topic,
 		GroupID:  groupID,
 		MinBytes: 1e3,
 		MaxBytes: 10e6,
 	})
-	zap.L().Info("PaymentRequestConsumer initialized", zap.String("topic", "payment-requests"), zap.Strings("brokers", brokers), zap.String("group_id", groupID))
-	return &PaymentRequestConsumer{reader: r, paymentProducer: producer, stripeSvc: stripeSvc, logger: zap.L(), repo: repo}
+	zap.L().Info("PaymentRequestConsumer initialized", zap.String("topic", topic), zap.Strings("brokers", brokers), zap.String("group_id", groupID))
+	return &PaymentRequestConsumer{reader: r, paymentProducer: producer, stripeSvc: stripeSvc, logger: zap.L(), repo: repo, topic: topic}
 }
 
 func (c *PaymentRequestConsumer) Start() {
-	c.logger.Info("Starting PaymentRequestConsumer", zap.String("topic", "payment-requests"))
+	c.logger.Info("Starting PaymentRequestConsumer", zap.String("topic", c.topic))
 	ctx := context.Background() // Use this context for DB calls
 	for {
 		m, err := c.reader.ReadMessage(ctx)
@@ -76,24 +77,27 @@ func (c *PaymentRequestConsumer) Start() {
 		// Simulate payment processing (fake delay)
 		time.Sleep(2 * time.Second)
 
-		sessionURL, err := c.stripeSvc.CreateCheckoutSession(amountForStripe, "inr", req.OrderID)
+		session, err := c.stripeSvc.CreateCheckoutSession(amountForStripe, "inr", req.OrderID, req.UserID)
 		var eventType string
 		var urlForDB *string
+		checkoutURL := ""
 
 		if err != nil {
 			c.logger.Warn("Stripe checkout session creation failed", zap.String("order_id", req.OrderID), zap.Error(err))
 			eventType = "checkout_session_failed"
 			// --- 3. UPDATE DB ON FAILURE ---
-			if err_db := c.repo.UpdatePaymentByOrderID(ctx, orderID, "FAILED", nil); err_db != nil {
+			if err_db := c.repo.UpdatePaymentByOrderID(ctx, orderID, "FAILED", nil, nil); err_db != nil {
 				c.logger.Error("Failed to update payment status to FAILED", zap.String("order_id", req.OrderID), zap.Error(err_db))
 			}
 			// ---
 		} else {
-			c.logger.Info("Stripe checkout session created successfully", zap.String("order_id", req.OrderID), zap.String("session_url", sessionURL))
+			c.logger.Info("Stripe checkout session created successfully", zap.String("order_id", req.OrderID), zap.String("session_url", session.URL))
 			eventType = "checkout_session_created"
-			urlForDB = &sessionURL
+			urlForDB = &session.URL
+			checkoutURL = session.URL
 			// --- 4. UPDATE DB ON SUCCESS ---
-			if err_db := c.repo.UpdatePaymentByOrderID(ctx, orderID, "URL_READY", urlForDB); err_db != nil {
+			// Pass session.ID to be saved as stripe_payment_id
+			if err_db := c.repo.UpdatePaymentByOrderID(ctx, orderID, "URL_READY", urlForDB, &session.ID); err_db != nil {
 				c.logger.Error("Failed to update payment status to URL_READY", zap.String("order_id", req.OrderID), zap.Error(err_db))
 			}
 			// ---
@@ -108,7 +112,7 @@ func (c *PaymentRequestConsumer) Start() {
 			Type:        eventType,
 			Amount:      req.Amount,
 			Currency:    "INR",
-			CheckoutURL: sessionURL,
+			CheckoutURL: checkoutURL,
 			Timestamp:   time.Now().UTC(),
 		}
 

@@ -34,7 +34,7 @@ func (s *StripeService) CreatePaymentIntent(amount int64, currency string) (stri
 	return pi.ID, nil
 }
 
-func (s *StripeService) CreateCheckoutSession(amount int64, currency, orderID string) (string, error) {
+func (s *StripeService) CreateCheckoutSession(amount int64, currency, orderID, userID string) (*stripe.CheckoutSession, error) {
 	params := &stripe.CheckoutSessionParams{
 		PaymentMethodTypes: stripe.StringSlice([]string{"card"}),
 		Mode:               stripe.String(string(stripe.CheckoutSessionModePayment)),
@@ -54,12 +54,15 @@ func (s *StripeService) CreateCheckoutSession(amount int64, currency, orderID st
 		},
 	}
 	params.AddMetadata("order_id", orderID)
+	if userID != "" {
+		params.AddMetadata("user_id", userID)
+	}
 
 	sess, err := session.New(params)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return sess.URL, nil
+	return sess, nil
 }
 
 func (s *StripeService) ParseWebhook(r *http.Request) (stripe.Event, error) {

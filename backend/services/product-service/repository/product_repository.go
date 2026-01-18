@@ -95,3 +95,13 @@ func (r *ProductRepository) FindBySKUs(ctx context.Context, skus []string) ([]mo
 
 	return products, nil
 }
+
+func (r *ProductRepository) EnsureIndexes(ctx context.Context) error {
+	models := []mongo.IndexModel{
+		{
+			Keys: bson.D{{Key: "category_ids", Value: 1}},
+		},
+	}
+	_, err := r.collection.Indexes().CreateMany(ctx, models)
+	return err
+}
