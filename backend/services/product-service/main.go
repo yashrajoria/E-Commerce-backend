@@ -14,7 +14,10 @@ import (
 	"product-service/routes"
 	"product-service/services"
 
-	"github.com/cloudinary/cloudinary-go"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awscfg "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
 	"github.com/joho/godotenv"
@@ -55,12 +58,45 @@ func main() {
 		zap.L().Fatal("Failed to connect to database", zap.Error(err))
 	}
 
-	// Initialize external services like Cloudinary
-	// (Ensure CLOUDINARY_URL is in your .env or environment)
-	cld, err := cloudinary.New()
-	if err != nil {
-		zap.L().Fatal("Failed to initialize Cloudinary", zap.Error(err))
+	// Initialize AWS S3 (LocalStack-compatible) using AWS SDK v2
+	awsRegion := os.Getenv("AWS_REGION")
+	if awsRegion == "" {
+		awsRegion = "us-east-1"
 	}
+	awsEndpoint := os.Getenv("AWS_S3_ENDPOINT") // e.g. http://localstack:4566
+	awsAccessKey := os.Getenv("AWS_ACCESS_KEY_ID")
+	awsSecret := os.Getenv("AWS_SECRET_ACCESS_KEY")
+
+	cfgOpts := []func(*awscfg.LoadOptions) error{
+		awscfg.WithRegion(awsRegion),
+	}
+	if awsAccessKey != "" || awsSecret != "" {
+		cfgOpts = append(cfgOpts, awscfg.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider(awsAccessKey, awsSecret, ""),
+		))
+	}
+	if awsEndpoint != "" {
+		cfgOpts = append(cfgOpts, awscfg.WithEndpointResolverWithOptions(
+			aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
+				if service == s3.ServiceID {
+					return aws.Endpoint{URL: awsEndpoint, SigningRegion: awsRegion}, nil
+				}
+				return aws.Endpoint{}, &aws.EndpointNotFoundError{}
+			}),
+		))
+	}
+
+	awsCfg, err := awscfg.LoadDefaultConfig(context.Background(), cfgOpts...)
+	if err != nil {
+		zap.L().Fatal("Failed to load AWS config", zap.Error(err))
+	}
+
+	s3Client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
+		o.UsePathStyle = true
+	})
+
+	// Presign client for generating presigned URLs
+	presignClient := s3.NewPresignClient(s3Client)
 
 	// --- 2. Dependency Injection (Wiring the layers together) ---
 
@@ -72,7 +108,19 @@ func main() {
 	}
 
 	// Initialize Services, injecting repositories
-	productService := services.NewProductService(productRepo, categoryRepo, cld)
+	// Bucket and prefix (ensure these env vars are set; defaults provided)
+	bucket := os.Getenv("AWS_S3_BUCKET")
+	if bucket == "" {
+		bucket = "shopswift"
+	}
+	prefix := os.Getenv("AWS_S3_PREFIX")
+	if prefix == "" {
+		prefix = "products/"
+	}
+	endpoint := os.Getenv("AWS_S3_ENDPOINT")
+	cloudfrontDomain := os.Getenv("AWS_CLOUDFRONT_DOMAIN")
+
+	productService := services.NewProductService(productRepo, categoryRepo, s3Client, presignClient, bucket, prefix, endpoint, cloudfrontDomain)
 	categoryService := services.NewCategoryService(categoryRepo)
 
 	// Initialize Controllers, injecting services
