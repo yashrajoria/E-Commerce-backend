@@ -36,6 +36,7 @@ type ProductServiceAPI interface {
 	GetProductInternal(ctx context.Context, id uuid.UUID) (*services.ProductInternalDTO, error)
 	ValidateBulkImport(ctx context.Context, file multipart.File) (*models.BulkImportValidation, error)
 	CreateBulkProducts(ctx context.Context, file multipart.File, autoCreateCategories bool) (*models.BulkImportResult, error)
+	GeneratePresignedUpload(ctx context.Context, sku, filename, contentType string, expiresSeconds int64) (string, string, string, error)
 }
 
 // CreateProductRequest defines the expected structure for creating a product via multipart-form.
@@ -407,6 +408,37 @@ func (ctrl *ProductController) CreateBulkProducts(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, result)
+}
+
+// GetPresignUpload returns a presigned URL for direct S3 upload and the public URL
+func (ctrl *ProductController) GetPresignUpload(c *gin.Context) {
+	sku := c.Query("sku")
+	if strings.TrimSpace(sku) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sku query parameter is required"})
+		return
+	}
+
+	filename := c.DefaultQuery("filename", "upload")
+	contentType := c.DefaultQuery("content_type", "application/octet-stream")
+	expiresStr := c.DefaultQuery("expires", "900")
+	expires, err := strconv.ParseInt(expiresStr, 10, 64)
+	if err != nil || expires <= 0 {
+		expires = 900
+	}
+
+	uploadURL, key, publicURL, err := ctrl.productService.GeneratePresignedUpload(c.Request.Context(), sku, filename, contentType, expires)
+	if err != nil {
+		zap.L().Error("failed to generate presigned upload", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate presigned upload"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"upload_url": uploadURL,
+		"method":     "PUT",
+		"key":        key,
+		"public_url": publicURL,
+	})
 }
 
 func (ctrl *ProductController) GetProductByIDInternal(c *gin.Context) {
