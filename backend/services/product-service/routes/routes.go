@@ -15,6 +15,8 @@ func RegisterRoutes(r *gin.Engine, productController *controllers.ProductControl
 		productRoutes.GET("/:id", productController.GetProductByID)
 		// Create a new product
 		productRoutes.POST("/", productController.CreateProduct)
+		// Generate a presigned upload URL for S3
+		productRoutes.GET("/presign", productController.GetPresignUpload)
 		// Bulk create products
 		productRoutes.POST("/bulk/validate", productController.ValidateBulkImport)
 
