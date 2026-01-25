@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -15,8 +17,8 @@ import (
 	"product-service/models"
 	"product-service/repository"
 
-	"github.com/cloudinary/cloudinary-go"
-	"github.com/cloudinary/cloudinary-go/api/uploader"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -51,17 +53,57 @@ type ProductInternalDTO struct {
 }
 
 type ProductService struct {
-	productRepo  *repository.ProductRepository
-	categoryRepo *repository.CategoryRepository
-	cld          *cloudinary.Cloudinary
+	productRepo   *repository.ProductRepository
+	categoryRepo  *repository.CategoryRepository
+	s3Client      *s3.Client
+	presignClient *s3.PresignClient
+	bucket        string
+	prefix        string
+	endpoint      string
+	cdnDomain     string
 }
 
-func NewProductService(pr *repository.ProductRepository, cr *repository.CategoryRepository, cld *cloudinary.Cloudinary) *ProductService {
+func NewProductService(pr *repository.ProductRepository, cr *repository.CategoryRepository, s3Client *s3.Client, presignClient *s3.PresignClient, bucket, prefix, endpoint, cdnDomain string) *ProductService {
 	return &ProductService{
-		productRepo:  pr,
-		categoryRepo: cr,
-		cld:          cld,
+		productRepo:   pr,
+		categoryRepo:  cr,
+		s3Client:      s3Client,
+		presignClient: presignClient,
+		bucket:        bucket,
+		prefix:        prefix,
+		endpoint:      endpoint,
+		cdnDomain:     cdnDomain,
 	}
+}
+
+// GeneratePresignedUpload returns a presigned PUT URL, the object key, and the public URL for the object
+func (s *ProductService) GeneratePresignedUpload(ctx context.Context, sku, filename, contentType string, expiresSeconds int64) (string, string, string, error) {
+	ext := filepath.Ext(filename)
+	key := fmt.Sprintf("%sproduct_img_%s_%s%s", s.prefix, sku, uuid.New().String(), ext)
+
+	input := &s3.PutObjectInput{
+		Bucket:      aws.String(s.bucket),
+		Key:         aws.String(key),
+		ContentType: aws.String(contentType),
+	}
+
+	presignedReq, err := s.presignClient.PresignPutObject(ctx, input, func(opts *s3.PresignOptions) {
+		opts.Expires = time.Duration(expiresSeconds) * time.Second
+	})
+	if err != nil {
+		return "", "", "", fmt.Errorf("failed to presign put object: %w", err)
+	}
+
+	var publicURL string
+	if s.cdnDomain != "" {
+		publicURL = fmt.Sprintf("https://%s/%s", strings.TrimRight(s.cdnDomain, "/"), key)
+	} else if s.endpoint != "" {
+		publicURL = fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpoint, "/"), s.bucket, key)
+	} else {
+		publicURL = fmt.Sprintf("https://%s.s3.amazonaws.com/%s", s.bucket, key)
+	}
+
+	return presignedReq.URL, key, publicURL, nil
 }
 
 func (s *ProductService) GetProduct(ctx context.Context, id uuid.UUID) (*models.Product, error) {
@@ -151,7 +193,7 @@ func (s *ProductService) CreateProduct(ctx context.Context, req ProductCreateReq
 		}
 	}
 
-	// Step 2: Upload images to Cloudinary
+	// Step 2: Upload images to S3
 	var imageURLs []string
 	for i, fileHeader := range images {
 		file, err := fileHeader.Open()
@@ -159,15 +201,27 @@ func (s *ProductService) CreateProduct(ctx context.Context, req ProductCreateReq
 			continue // Or return error
 		}
 		defer file.Close()
-		uploadParams := uploader.UploadParams{
-			PublicID: fmt.Sprintf("product_img_%s_%d", req.SKU, i),
-			Folder:   "ecommerce/products",
-		}
-		uploadResp, err := s.cld.Upload.Upload(ctx, file, uploadParams)
+		data, err := io.ReadAll(file)
 		if err != nil {
-			continue // Or return error
+			continue
 		}
-		imageURLs = append(imageURLs, uploadResp.SecureURL)
+		key := fmt.Sprintf("%sproduct_img_%s_%d", s.prefix, req.SKU, i)
+		_, err = s.s3Client.PutObject(ctx, &s3.PutObjectInput{
+			Bucket:      aws.String(s.bucket),
+			Key:         aws.String(key),
+			Body:        bytes.NewReader(data),
+			ContentType: aws.String(fileHeader.Header.Get("Content-Type")),
+		})
+		if err != nil {
+			continue
+		}
+		var urlStr string
+		if s.endpoint != "" {
+			urlStr = fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpoint, "/"), s.bucket, key)
+		} else {
+			urlStr = fmt.Sprintf("https://%s.s3.amazonaws.com/%s", s.bucket, key)
+		}
+		imageURLs = append(imageURLs, urlStr)
 	}
 
 	// Step 3: Create the product model
@@ -594,7 +648,7 @@ func (s *ProductService) CreateBulkProducts(ctx context.Context, file multipart.
 			continue
 		}
 
-		// Upload image to Cloudinary
+		// Upload image to S3
 		imageURL := strings.TrimSpace(pp.Row[index["imageurl"]])
 		var imageURLs []string
 
@@ -654,15 +708,23 @@ func (s *ProductService) uploadImageFromURL(ctx context.Context, imageURL, sku s
 		return "", fmt.Errorf("failed to download image: status %d", resp.StatusCode)
 	}
 
-	uploadParams := uploader.UploadParams{
-		PublicID: fmt.Sprintf("product_img_%s_%d", sku, index),
-		Folder:   "ecommerce/products",
-	}
-
-	uploadResp, err := s.cld.Upload.Upload(ctx, resp.Body, uploadParams)
+	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to upload to cloudinary: %w", err)
+		return "", fmt.Errorf("failed to read downloaded image: %w", err)
+	}
+	key := fmt.Sprintf("%sproduct_img_%s_%d", s.prefix, sku, index)
+	_, err = s.s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(s.bucket),
+		Key:         aws.String(key),
+		Body:        bytes.NewReader(data),
+		ContentType: aws.String(http.DetectContentType(data)),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to upload to s3: %w", err)
 	}
 
-	return uploadResp.SecureURL, nil
+	if s.endpoint != "" {
+		return fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpoint, "/"), s.bucket, key), nil
+	}
+	return fmt.Sprintf("https://%s.s3.amazonaws.com/%s", s.bucket, key), nil
 }
