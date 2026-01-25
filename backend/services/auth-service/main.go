@@ -10,6 +10,7 @@ import (
 
 	"auth-service/controllers"
 	"auth-service/database"
+	"auth-service/models"
 	"auth-service/repository"
 	"auth-service/services"
 
@@ -33,7 +34,10 @@ func main() {
 	if err := database.Connect(); err != nil { // Assuming you have a Connect function
 		zap.L().Fatal("Database connection failed", zap.Error(err))
 	}
-	// Run migrations if needed (your logic for this is fine)
+	// Run migrations (auto-migrate models including refresh tokens)
+	if err := models.Migrate(database.DB); err != nil {
+		zap.L().Fatal("DB migration failed", zap.Error(err))
+	}
 
 	// --- 2. Dependency Injection (Wiring the layers) ---
 
