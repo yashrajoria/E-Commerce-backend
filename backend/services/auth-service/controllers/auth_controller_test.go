@@ -42,6 +42,11 @@ func (m *MockAuthService) RefreshTokens(ctx context.Context, refreshToken string
 	return args.Get(0).(*services.TokenPair), args.Error(1)
 }
 
+func (m *MockAuthService) Logout(ctx context.Context, refreshToken string) error {
+	args := m.Called(ctx, refreshToken)
+	return args.Error(0)
+}
+
 // --- Tests ---
 
 func TestLoginController(t *testing.T) {
