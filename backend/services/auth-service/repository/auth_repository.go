@@ -36,3 +36,22 @@ func (r *UserRepository) FindByID(ctx context.Context, id uuid.UUID) (*models.Us
 	err := r.db.WithContext(ctx).Where("id = ?", id).First(&user).Error
 	return &user, err
 }
+
+// Refresh token storage
+func (r *UserRepository) CreateRefreshToken(ctx context.Context, rt *models.RefreshToken) error {
+	return r.db.WithContext(ctx).Create(rt).Error
+}
+
+func (r *UserRepository) GetRefreshTokenByTokenID(ctx context.Context, tokenID string) (*models.RefreshToken, error) {
+	var rt models.RefreshToken
+	err := r.db.WithContext(ctx).Where("token_id = ?", tokenID).First(&rt).Error
+	return &rt, err
+}
+
+func (r *UserRepository) RevokeRefreshTokenByTokenID(ctx context.Context, tokenID string) error {
+	return r.db.WithContext(ctx).Model(&models.RefreshToken{}).Where("token_id = ?", tokenID).Update("revoked", true).Error
+}
+
+func (r *UserRepository) RevokeAllUserRefreshTokens(ctx context.Context, userID uuid.UUID) error {
+	return r.db.WithContext(ctx).Model(&models.RefreshToken{}).Where("user_id = ?", userID).Update("revoked", true).Error
+}

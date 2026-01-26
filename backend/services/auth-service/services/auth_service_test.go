@@ -41,14 +41,34 @@ func (m *MockUserRepository) Update(ctx context.Context, user *models.User) erro
 	return args.Error(0)
 }
 
-type MockTokenService struct{ mock.Mock }
+func (m *MockUserRepository) CreateRefreshToken(ctx context.Context, rt *models.RefreshToken) error {
+	args := m.Called(ctx, rt)
+	return args.Error(0)
+}
 
-func (m *MockTokenService) GenerateTokenPair(userID, email, role string) (*TokenPair, error) {
-	args := m.Called(userID, email, role)
+func (m *MockUserRepository) GetRefreshTokenByTokenID(ctx context.Context, tokenID string) (*models.RefreshToken, error) {
+	args := m.Called(ctx, tokenID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*TokenPair), args.Error(1)
+	return args.Get(0).(*models.RefreshToken), args.Error(1)
+}
+
+func (m *MockUserRepository) RevokeRefreshTokenByTokenID(ctx context.Context, tokenID string) error {
+	args := m.Called(ctx, tokenID)
+	return args.Error(0)
+}
+
+type MockTokenService struct{ mock.Mock }
+
+func (m *MockTokenService) GenerateTokenPair(userID, email, role string) (*TokenPair, string, error) {
+	args := m.Called(userID, email, role)
+	if args.Get(0) == nil {
+		return nil, "", args.Error(2)
+	}
+	tokenPair := args.Get(0).(*TokenPair)
+	tokenID, _ := args.Get(1).(string)
+	return tokenPair, tokenID, args.Error(2)
 }
 
 // === THIS IS THE FIX ===
@@ -74,7 +94,7 @@ func (m *MockEmailService) SendVerificationEmail(email, code string) error {
 func TestLogin(t *testing.T) {
 	mockRepo := new(MockUserRepository)
 	mockTokenService := new(MockTokenService)
-	authService := NewAuthService(mockRepo, mockTokenService, nil, nil)
+	authService := NewAuthService(mockRepo, mockTokenService, nil)
 	ctx := context.Background()
 
 	password := "strongpassword123"
@@ -90,7 +110,9 @@ func TestLogin(t *testing.T) {
 	t.Run("Success", func(t *testing.T) {
 		// Arrange
 		mockRepo.On("FindByEmail", ctx, testUser.Email).Return(testUser, nil).Once()
-		mockTokenService.On("GenerateTokenPair", testUser.ID.String(), testUser.Email, testUser.Role).Return(&TokenPair{"access", "refresh"}, nil).Once()
+		mockTokenService.On("GenerateTokenPair", testUser.ID.String(), testUser.Email, testUser.Role).Return(&TokenPair{"access", "refresh"}, "rt-id-1", nil).Once()
+		// Expect the repository to be asked to store the refresh token
+		mockRepo.On("CreateRefreshToken", ctx, mock.Anything).Return(nil).Once()
 
 		// Act
 		tokenPair, err := authService.Login(ctx, testUser.Email, password)

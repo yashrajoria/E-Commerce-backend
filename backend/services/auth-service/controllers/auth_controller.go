@@ -17,6 +17,7 @@ type IAuthService interface {
 	Register(ctx context.Context, name, email, password, role string) error
 	VerifyEmail(ctx context.Context, email, code string) error
 	RefreshTokens(ctx context.Context, refreshToken string) (*services.TokenPair, error)
+	Logout(ctx context.Context, refreshToken string) error
 }
 
 type AuthController struct {
@@ -109,6 +110,10 @@ func (ctrl *AuthController) VerifyEmail(c *gin.Context) {
 }
 
 func (ctrl *AuthController) Logout(c *gin.Context) {
+	// try to revoke server-side refresh token if present
+	refreshToken, _ := c.Cookie("refresh_token")
+	_ = ctrl.service.Logout(c.Request.Context(), refreshToken)
+
 	domain := os.Getenv("COOKIE_DOMAIN")
 	isSecure := os.Getenv("ENV") == "production"
 
@@ -147,13 +152,18 @@ func (ctrl *AuthController) Refresh(c *gin.Context) {
 }
 
 func (ctrl *AuthController) GetAuthStatus(c *gin.Context) {
-	userID, exists := c.Get("user_id")
-	if !exists {
+	u, exists := c.Get("user_id")
+	var userID string
+	if exists {
+		if s, ok := u.(string); ok {
+			userID = s
+		}
+	}
+	if userID == "" {
 		// If not in context, try headers (forwarded by API gateway)
 		userID = c.GetHeader("X-User-ID")
 	}
 
-	// userID := c.GetHeader("X-User-ID")
 	email := c.GetHeader("X-User-Email")
 	role := c.GetHeader("X-User-Role")
 

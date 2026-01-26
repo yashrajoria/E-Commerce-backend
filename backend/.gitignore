@@ -1,0 +1,7 @@
+.env
+Dockerfile
+docker-compose.yml
+docker-compose.prod.yml
+.air.toml
+.dockerignore
+Dockerfile.prod

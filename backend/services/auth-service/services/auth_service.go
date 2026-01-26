@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"auth-service/models"
 	"auth-service/repository"
@@ -18,10 +19,13 @@ type IUserRepository interface {
 	FindByID(ctx context.Context, id uuid.UUID) (*models.User, error)
 	Create(ctx context.Context, user *models.User) error
 	Update(ctx context.Context, user *models.User) error
+	CreateRefreshToken(ctx context.Context, rt *models.RefreshToken) error
+	GetRefreshTokenByTokenID(ctx context.Context, tokenID string) (*models.RefreshToken, error)
+	RevokeRefreshTokenByTokenID(ctx context.Context, tokenID string) error
 }
 
 type ITokenService interface {
-	GenerateTokenPair(userID, email, role string) (*TokenPair, error)
+	GenerateTokenPair(userID, email, role string) (*TokenPair, string, error)
 	ValidateToken(tokenStr, expectedType string) (jwt.MapClaims, error)
 }
 
@@ -58,7 +62,23 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*Token
 		return nil, fmt.Errorf("invalid email or password")
 	}
 
-	return s.tokenService.GenerateTokenPair(user.ID.String(), user.Email, user.Role)
+	tokenPair, refreshTokenID, err := s.tokenService.GenerateTokenPair(user.ID.String(), user.Email, user.Role)
+	if err != nil {
+		return nil, err
+	}
+
+	// persist refresh token for rotation/revocation
+	rt := &models.RefreshToken{
+		TokenID:   refreshTokenID,
+		UserID:    user.ID,
+		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
+	}
+	if err := s.userRepo.CreateRefreshToken(ctx, rt); err != nil {
+		// if persistence fails, do not return tokens
+		return nil, fmt.Errorf("failed to store refresh token: %w", err)
+	}
+
+	return tokenPair, nil
 }
 
 func (s *AuthService) Register(ctx context.Context, name, email, password, role string) error {
@@ -147,5 +167,52 @@ func (s *AuthService) RefreshTokens(ctx context.Context, refreshToken string) (*
 		return nil, fmt.Errorf("invalid token: role claim is missing or not a string")
 	}
 
-	return s.tokenService.GenerateTokenPair(userIDStr, email, role)
+	// verify the refresh token against DB (jti)
+	jti, ok := claims["jti"].(string)
+	if !ok || jti == "" {
+		return nil, fmt.Errorf("invalid refresh token: jti missing")
+	}
+
+	stored, err := s.userRepo.GetRefreshTokenByTokenID(ctx, jti)
+	if err != nil {
+		return nil, fmt.Errorf("invalid refresh token: %w", err)
+	}
+	if stored.Revoked || stored.ExpiresAt.Before(time.Now()) {
+		return nil, fmt.Errorf("refresh token revoked or expired")
+	}
+
+	// revoke old refresh token
+	if err := s.userRepo.RevokeRefreshTokenByTokenID(ctx, jti); err != nil {
+		return nil, fmt.Errorf("failed to revoke old refresh token: %w", err)
+	}
+
+	// generate new pair and persist new refresh token
+	tokenPair, newTokenID, err := s.tokenService.GenerateTokenPair(userIDStr, email, role)
+	if err != nil {
+		return nil, err
+	}
+
+	newRT := &models.RefreshToken{
+		TokenID:   newTokenID,
+		UserID:    userID,
+		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
+	}
+	if err := s.userRepo.CreateRefreshToken(ctx, newRT); err != nil {
+		return nil, fmt.Errorf("failed to store new refresh token: %w", err)
+	}
+
+	return tokenPair, nil
+}
+
+// Logout revokes a given refresh token so it cannot be used anymore
+func (s *AuthService) Logout(ctx context.Context, refreshToken string) error {
+	claims, err := s.tokenService.ValidateToken(refreshToken, "refresh")
+	if err != nil {
+		return err
+	}
+	jti, ok := claims["jti"].(string)
+	if !ok || jti == "" {
+		return fmt.Errorf("invalid refresh token: jti missing")
+	}
+	return s.userRepo.RevokeRefreshTokenByTokenID(ctx, jti)
 }

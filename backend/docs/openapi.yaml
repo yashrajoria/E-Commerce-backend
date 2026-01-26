@@ -1,0 +1,1532 @@
+openapi: 3.0.3
+info:
+  title: Ecommerce Backend API
+  version: 1.0.0
+  description: >
+    OpenAPI specification for API Gateway, BFF, and backend services.
+servers:
+  - url: http://localhost:8080
+    description: API Gateway
+  - url: http://localhost:8088
+    description: BFF Service
+  - url: http://localhost:8081
+    description: Auth Service
+  - url: http://localhost:8085
+    description: User Service
+  - url: http://localhost:8082
+    description: Product Service
+  - url: http://localhost:8086
+    description: Cart Service
+  - url: http://localhost:8083
+    description: Order Service
+  - url: http://localhost:8087
+    description: Payment Service
+tags:
+  - name: Gateway
+    description: API Gateway proxy endpoints
+  - name: BFF
+    description: Web BFF endpoints
+  - name: Auth Service
+    description: Authentication and session management
+  - name: User Service
+    description: User profile management
+  - name: Product Service
+    description: Product and category APIs
+  - name: Cart Service
+    description: Cart APIs
+  - name: Order Service
+    description: Order APIs
+  - name: Payment Service
+    description: Payment APIs and Stripe webhook
+
+paths:
+  /health:
+    get:
+      tags: [Gateway]
+      summary: Gateway health check
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /bff/home:
+    get:
+      tags: [BFF]
+      summary: Home page data (products + categories)
+      responses:
+        "200":
+          description: Aggregated home data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BFFHomeResponse"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /bff/profile:
+    get:
+      tags: [BFF]
+      summary: Profile page data (profile + orders)
+      responses:
+        "200":
+          description: Aggregated profile data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BFFProfileResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /bff/auth/register:
+    post:
+      tags: [BFF]
+      summary: Register a user
+      requestBody:
+        $ref: "#/components/requestBodies/RegisterRequest"
+      responses:
+        "201":
+          $ref: "#/components/responses/MessageResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /bff/auth/login:
+    post:
+      tags: [BFF]
+      summary: Login and set auth cookies
+      requestBody:
+        $ref: "#/components/requestBodies/LoginRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /bff/auth/logout:
+    post:
+      tags: [BFF]
+      summary: Logout and clear auth cookies
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /bff/auth/refresh:
+    post:
+      tags: [BFF]
+      summary: Refresh access token (uses refresh cookie)
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /bff/auth/status:
+    get:
+      tags: [BFF]
+      summary: Get auth status
+      responses:
+        "200":
+          description: Auth status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthStatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /bff/auth/verify-email:
+    post:
+      tags: [BFF]
+      summary: Verify email address
+      requestBody:
+        $ref: "#/components/requestBodies/VerifyEmailRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  /bff/products:
+    get:
+      tags: [BFF]
+      summary: Product list
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PerPageParam"
+        - $ref: "#/components/parameters/IsFeaturedParam"
+        - $ref: "#/components/parameters/CategoryIDsParam"
+        - $ref: "#/components/parameters/MinPriceParam"
+        - $ref: "#/components/parameters/MaxPriceParam"
+        - $ref: "#/components/parameters/SortParam"
+      responses:
+        "200":
+          description: Product list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductListResponse"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /bff/products/{id}:
+    get:
+      tags: [BFF]
+      summary: Product detail
+      parameters:
+        - $ref: "#/components/parameters/ProductID"
+      responses:
+        "200":
+          description: Product
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /bff/categories:
+    get:
+      tags: [BFF]
+      summary: Category tree
+      responses:
+        "200":
+          description: Category tree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CategoryListResponse"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /bff/cart:
+    get:
+      tags: [BFF]
+      summary: Current cart
+      responses:
+        "200":
+          description: Cart
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cart"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /bff/cart/add:
+    post:
+      tags: [BFF]
+      summary: Add items to cart
+      requestBody:
+        $ref: "#/components/requestBodies/AddItemsRequest"
+      responses:
+        "200":
+          description: Updated cart
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cart"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /bff/cart/remove/{product_id}:
+    delete:
+      tags: [BFF]
+      summary: Remove item from cart
+      parameters:
+        - $ref: "#/components/parameters/ProductIDString"
+      responses:
+        "200":
+          description: Updated cart
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cart"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /bff/cart/clear:
+    delete:
+      tags: [BFF]
+      summary: Clear cart
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /bff/cart/checkout:
+    post:
+      tags: [BFF]
+      summary: Checkout cart
+      responses:
+        "200":
+          description: Checkout started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /bff/orders:
+    get:
+      tags: [BFF]
+      summary: List user orders
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+      responses:
+        "200":
+          description: Order list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /bff/orders/{id}:
+    get:
+      tags: [BFF]
+      summary: Order detail
+      parameters:
+        - $ref: "#/components/parameters/OrderID"
+      responses:
+        "200":
+          description: Order detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderDetailResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /bff/users/profile:
+    put:
+      tags: [BFF]
+      summary: Update profile
+      requestBody:
+        $ref: "#/components/requestBodies/UpdateProfileRequest"
+      responses:
+        "200":
+          description: Profile updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateProfileResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /bff/users/change-password:
+    post:
+      tags: [BFF]
+      summary: Change password
+      requestBody:
+        $ref: "#/components/requestBodies/ChangePasswordRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /bff/payment/status/by-order/{order_id}:
+    get:
+      tags: [BFF]
+      summary: Payment status by order
+      parameters:
+        - $ref: "#/components/parameters/OrderID"
+      responses:
+        "200":
+          description: Payment status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentStatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /bff/payment/verify-payment:
+    post:
+      tags: [BFF]
+      summary: Verify payment
+      requestBody:
+        $ref: "#/components/requestBodies/VerifyPaymentRequest"
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyPaymentResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  /auth/register:
+    post:
+      tags: [Gateway, Auth Service]
+      summary: Register a user
+      requestBody:
+        $ref: "#/components/requestBodies/RegisterRequest"
+      responses:
+        "201":
+          $ref: "#/components/responses/MessageResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /auth/login:
+    post:
+      tags: [Gateway, Auth Service]
+      summary: Login and set auth cookies
+      requestBody:
+        $ref: "#/components/requestBodies/LoginRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/logout:
+    post:
+      tags: [Gateway, Auth Service]
+      summary: Logout and clear auth cookies
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+
+  /auth/refresh:
+    post:
+      tags: [Gateway, Auth Service]
+      summary: Refresh access token (uses refresh cookie)
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/status:
+    get:
+      tags: [Gateway, Auth Service]
+      summary: Get auth status
+      responses:
+        "200":
+          description: Auth status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthStatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/verify-email:
+    post:
+      tags: [Gateway, Auth Service]
+      summary: Verify email
+      requestBody:
+        $ref: "#/components/requestBodies/VerifyEmailRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /users/profile:
+    get:
+      tags: [Gateway, User Service]
+      summary: Get user profile
+      responses:
+        "200":
+          description: Profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfileResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    put:
+      tags: [Gateway, User Service]
+      summary: Update user profile
+      requestBody:
+        $ref: "#/components/requestBodies/UpdateProfileRequest"
+      responses:
+        "200":
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateProfileResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /users/change-password:
+    post:
+      tags: [Gateway, User Service]
+      summary: Change password
+      requestBody:
+        $ref: "#/components/requestBodies/ChangePasswordRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /products:
+    get:
+      tags: [Gateway, Product Service]
+      summary: List products
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PerPageParam"
+        - $ref: "#/components/parameters/IsFeaturedParam"
+        - $ref: "#/components/parameters/CategoryIDsParam"
+        - $ref: "#/components/parameters/MinPriceParam"
+        - $ref: "#/components/parameters/MaxPriceParam"
+        - $ref: "#/components/parameters/SortParam"
+      responses:
+        "200":
+          description: Product list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductListResponse"
+    post:
+      tags: [Gateway, Product Service]
+      summary: Create product
+      requestBody:
+        $ref: "#/components/requestBodies/CreateProductRequest"
+      responses:
+        "201":
+          description: Product created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+
+  /products/{id}:
+    get:
+      tags: [Gateway, Product Service]
+      summary: Get product by ID
+      parameters:
+        - $ref: "#/components/parameters/ProductID"
+      responses:
+        "200":
+          description: Product
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Gateway, Product Service]
+      summary: Update product
+      parameters:
+        - $ref: "#/components/parameters/ProductID"
+      requestBody:
+        $ref: "#/components/requestBodies/UpdateProductRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+    delete:
+      tags: [Gateway, Product Service]
+      summary: Delete product
+      parameters:
+        - $ref: "#/components/parameters/ProductID"
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+
+  /products/bulk/validate:
+    post:
+      tags: [Gateway, Product Service]
+      summary: Validate bulk CSV
+      requestBody:
+        $ref: "#/components/requestBodies/BulkValidateRequest"
+      responses:
+        "200":
+          description: Validation results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkImportValidation"
+
+  /products/bulk:
+    post:
+      tags: [Gateway, Product Service]
+      summary: Bulk import CSV
+      requestBody:
+        $ref: "#/components/requestBodies/BulkImportRequest"
+      responses:
+        "200":
+          description: Bulk import result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkImportResult"
+
+  /categories:
+    get:
+      tags: [Gateway, Product Service]
+      summary: Category tree
+      responses:
+        "200":
+          description: Category tree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CategoryListResponse"
+    post:
+      tags: [Gateway, Product Service]
+      summary: Create category
+      requestBody:
+        $ref: "#/components/requestBodies/CreateCategoryRequest"
+      responses:
+        "201":
+          description: Category created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+
+  /categories/{id}:
+    put:
+      tags: [Gateway, Product Service]
+      summary: Update category
+      parameters:
+        - $ref: "#/components/parameters/CategoryID"
+      requestBody:
+        $ref: "#/components/requestBodies/CreateCategoryRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+    delete:
+      tags: [Gateway, Product Service]
+      summary: Delete category
+      parameters:
+        - $ref: "#/components/parameters/CategoryID"
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+
+  /cart:
+    get:
+      tags: [Gateway, Cart Service]
+      summary: Get cart
+      responses:
+        "200":
+          description: Cart
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cart"
+
+  /cart/add:
+    post:
+      tags: [Gateway, Cart Service]
+      summary: Add items to cart
+      requestBody:
+        $ref: "#/components/requestBodies/AddItemsRequest"
+      responses:
+        "200":
+          description: Updated cart
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cart"
+
+  /cart/remove/{product_id}:
+    delete:
+      tags: [Gateway, Cart Service]
+      summary: Remove item from cart
+      parameters:
+        - $ref: "#/components/parameters/ProductIDString"
+      responses:
+        "200":
+          description: Updated cart
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cart"
+
+  /cart/clear:
+    delete:
+      tags: [Gateway, Cart Service]
+      summary: Clear cart
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+
+  /cart/checkout:
+    post:
+      tags: [Gateway, Cart Service]
+      summary: Checkout cart
+      responses:
+        "200":
+          description: Checkout started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutResponse"
+
+  /orders:
+    get:
+      tags: [Gateway, Order Service]
+      summary: List user orders
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+      responses:
+        "200":
+          description: Order list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderListResponse"
+    post:
+      tags: [Gateway]
+      summary: Create order (if enabled)
+      requestBody:
+        $ref: "#/components/requestBodies/CreateOrderRequest"
+      responses:
+        "202":
+          $ref: "#/components/responses/AcceptedResponse"
+
+  /orders/{id}:
+    get:
+      tags: [Gateway, Order Service]
+      summary: Get order by ID
+      parameters:
+        - $ref: "#/components/parameters/OrderID"
+      responses:
+        "200":
+          description: Order detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderDetailResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /orders/admin:
+    get:
+      tags: [Gateway, Order Service]
+      summary: Admin list all orders
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+      responses:
+        "200":
+          description: Order list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderListResponse"
+
+  /payment/status/by-order/{order_id}:
+    get:
+      tags: [Gateway, Payment Service]
+      summary: Payment status by order
+      parameters:
+        - $ref: "#/components/parameters/OrderID"
+      responses:
+        "200":
+          description: Payment status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentStatusResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /payment/verify-payment:
+    post:
+      tags: [Gateway, Payment Service]
+      summary: Verify payment
+      requestBody:
+        $ref: "#/components/requestBodies/VerifyPaymentRequest"
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyPaymentResponse"
+
+  /stripe/webhook:
+    post:
+      tags: [Gateway, Payment Service]
+      summary: Stripe webhook endpoint
+      requestBody:
+        description: Stripe webhook payload
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+components:
+  parameters:
+    ProductID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ProductIDString:
+      name: product_id
+      in: path
+      required: true
+      schema:
+        type: string
+    CategoryID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    OrderID:
+      name: order_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PageParam:
+      name: page
+      in: query
+      schema:
+        type: integer
+        default: 1
+    PerPageParam:
+      name: perPage
+      in: query
+      schema:
+        type: integer
+        default: 10
+    LimitParam:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        default: 10
+    IsFeaturedParam:
+      name: is_featured
+      in: query
+      schema:
+        type: boolean
+    CategoryIDsParam:
+      name: categoryId
+      in: query
+      description: Comma-separated list of category UUIDs.
+      schema:
+        type: string
+        example: "8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1,9c2a1c4b-8c5c-4a59-8f1b-1a2b3c4d5e6f"
+    MinPriceParam:
+      name: minPrice
+      in: query
+      description: Minimum price filter (inclusive).
+      schema:
+        type: number
+        format: float
+        example: 10.5
+    MaxPriceParam:
+      name: maxPrice
+      in: query
+      description: Maximum price filter (inclusive).
+      schema:
+        type: number
+        format: float
+        example: 199.99
+    SortParam:
+      name: sort
+      in: query
+      description: Sorting key for the product list.
+      schema:
+        type: string
+        enum: [price_asc, price_desc, created_at_asc, created_at_desc, name_asc, name_desc]
+
+  requestBodies:
+    LoginRequest:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/LoginRequest"
+    RegisterRequest:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/RegisterRequest"
+    VerifyEmailRequest:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/VerifyEmailRequest"
+    UpdateProfileRequest:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/UpdateProfileRequest"
+    ChangePasswordRequest:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ChangePasswordRequest"
+    AddItemsRequest:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AddItemsRequest"
+    CreateOrderRequest:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CreateOrderRequest"
+    VerifyPaymentRequest:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/VerifyPaymentRequest"
+    CreateProductRequest:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            $ref: "#/components/schemas/CreateProductRequest"
+    UpdateProductRequest:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+    CreateCategoryRequest:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CreateCategoryRequest"
+    BulkValidateRequest:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            required: [file]
+            properties:
+              file:
+                type: string
+                format: binary
+    BulkImportRequest:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            required: [file]
+            properties:
+              file:
+                type: string
+                format: binary
+              auto_create_categories:
+                type: boolean
+
+  responses:
+    MessageResponse:
+      description: Message response
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MessageResponse"
+    AcceptedResponse:
+      description: Accepted
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MessageResponse"
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Conflict:
+      description: Conflict
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    BadGateway:
+      description: Upstream error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        message:
+          type: string
+    MessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        details:
+          type: string
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+    RegisterRequest:
+      type: object
+      required: [name, email, password, role]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+        role:
+          type: string
+    VerifyEmailRequest:
+      type: object
+      required: [email, code]
+      properties:
+        email:
+          type: string
+          format: email
+        code:
+          type: string
+    AuthStatusResponse:
+      type: object
+      properties:
+        authenticated:
+          type: boolean
+        user:
+          type: object
+          properties:
+            id:
+              type: string
+            email:
+              type: string
+            role:
+              type: string
+        timestamp:
+          type: string
+          format: date-time
+    UserProfileResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        phone_number:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        role:
+          type: string
+    UpdateProfileRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        phone_number:
+          type: string
+    UpdateProfileResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        user:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
+            phone_number:
+              type: string
+              nullable: true
+    ChangePasswordRequest:
+      type: object
+      required: [old_password, new_password]
+      properties:
+        old_password:
+          type: string
+          format: password
+        new_password:
+          type: string
+          format: password
+    Product:
+      type: object
+      properties:
+        _id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        price:
+          type: number
+        quantity:
+          type: integer
+        description:
+          type: string
+        images:
+          type: array
+          items:
+            type: string
+        brand:
+          type: string
+        sku:
+          type: string
+        category_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        category_path:
+          type: array
+          items:
+            type: string
+        is_featured:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ProductListResponse:
+      type: object
+      properties:
+        products:
+          type: array
+          items:
+            $ref: "#/components/schemas/Product"
+        meta:
+          type: object
+          properties:
+            page:
+              type: integer
+            perPage:
+              type: integer
+            total:
+              type: integer
+            totalPages:
+              type: integer
+    Category:
+      type: object
+      properties:
+        _id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        parent_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        image:
+          type: string
+        ancestors:
+          type: array
+          items:
+            type: string
+            format: uuid
+        slug:
+          type: string
+        path:
+          type: array
+          items:
+            type: string
+        level:
+          type: integer
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        children:
+          type: array
+          items:
+            $ref: "#/components/schemas/Category"
+    CategoryListResponse:
+      type: array
+      items:
+        $ref: "#/components/schemas/Category"
+    CreateProductRequest:
+      type: object
+      required: [name, description, brand, sku, price, quantity, category, images]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        brand:
+          type: string
+        sku:
+          type: string
+        price:
+          type: number
+        quantity:
+          type: integer
+        is_featured:
+          type: boolean
+        category:
+          type: string
+          description: JSON string array of category names
+        images:
+          type: array
+          items:
+            type: string
+            format: binary
+    CreateCategoryRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        parent_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        image:
+          type: string
+        ancestors:
+          type: array
+          items:
+            type: string
+            format: uuid
+        slug:
+          type: string
+        path:
+          type: array
+          items:
+            type: string
+        level:
+          type: integer
+        is_active:
+          type: boolean
+    CartItem:
+      type: object
+      properties:
+        product_id:
+          type: string
+        quantity:
+          type: integer
+    Cart:
+      type: object
+      properties:
+        user_id:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CartItem"
+        updated_at:
+          type: string
+          format: date-time
+    AddItemsRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CartItem"
+    CheckoutResponse:
+      type: object
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+    CreateOrderRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [product_id, quantity]
+            properties:
+              product_id:
+                type: string
+                format: uuid
+              quantity:
+                type: integer
+    OrderItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+        price:
+          type: integer
+    Order:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        order_number:
+          type: string
+        user_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+        status:
+          type: string
+        canceled_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        order_items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderItem"
+    OrderListResponse:
+      type: object
+      properties:
+        orders:
+          type: array
+          items:
+            $ref: "#/components/schemas/Order"
+        meta:
+          type: object
+          properties:
+            page:
+              type: integer
+            limit:
+              type: integer
+            total_orders:
+              type: integer
+            total_pages:
+              type: integer
+            has_more:
+              type: boolean
+    OrderDetailResponse:
+      type: object
+      properties:
+        order:
+          $ref: "#/components/schemas/Order"
+    PaymentStatusResponse:
+      type: object
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        checkout_url:
+          type: string
+          nullable: true
+    VerifyPaymentRequest:
+      type: object
+      required: [payment_id, session_id]
+      properties:
+        payment_id:
+          type: string
+        session_id:
+          type: string
+    VerifyPaymentResponse:
+      type: object
+      properties:
+        status:
+          type: string
+    BFFHomeResponse:
+      type: object
+      properties:
+        products:
+          $ref: "#/components/schemas/ProductListResponse"
+        categories:
+          $ref: "#/components/schemas/CategoryListResponse"
+        timestamp:
+          type: string
+          format: date-time
+    BFFProfileResponse:
+      type: object
+      properties:
+        profile:
+          $ref: "#/components/schemas/UserProfileResponse"
+        orders:
+          $ref: "#/components/schemas/OrderListResponse"
+        timestamp:
+          type: string
+          format: date-time
+    BulkImportValidation:
+      type: object
+      properties:
+        totalProducts:
+          type: integer
+        validProducts:
+          type: integer
+        invalidProducts:
+          type: integer
+        missingCategories:
+          type: array
+          items:
+            type: string
+        duplicateSKUs:
+          type: array
+          items:
+            type: string
+        errors:
+          type: array
+          items:
+            type: object
+        warnings:
+          type: array
+          items:
+            type: object
+    BulkImportResult:
+      type: object
+      properties:
+        insertedCount:
+          type: integer
+        errorsCount:
+          type: integer
+        errors:
+          type: array
+          items:
+            type: object
+        message:
+          type: string
