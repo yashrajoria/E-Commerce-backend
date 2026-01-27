@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -18,14 +19,18 @@ var (
 
 // ConnectWithConfig connects to MongoDB using the provided URI and database name.
 func ConnectWithConfig(mongoURL, dbName string) error {
-	ctx, cancel = context.WithCancel(context.Background())
+	var timeoutCtx context.Context
+	timeoutCtx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+	ctx = context.Background()
 	clientOptions := options.Client().ApplyURI(mongoURL)
 
-	client, err := mongo.Connect(ctx, clientOptions)
+	client, err := mongo.Connect(timeoutCtx, clientOptions)
 	if err != nil {
+		cancel()
 		return fmt.Errorf("failed to connect to MongoDB: %w", err)
 	}
-	if err := client.Ping(ctx, nil); err != nil {
+	if err := client.Ping(timeoutCtx, nil); err != nil {
+		cancel()
 		return fmt.Errorf("failed to ping MongoDB: %w", err)
 	}
 	MongoClient = client
@@ -36,11 +41,15 @@ func ConnectWithConfig(mongoURL, dbName string) error {
 
 // Close disconnects from MongoDB
 func Close() error {
+	// Create a timeout context for graceful disconnect
+	disconnectCtx, disconnectCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer disconnectCancel()
+	
 	// Disconnect from MongoDB
-	if err := MongoClient.Disconnect(ctx); err != nil {
+	if err := MongoClient.Disconnect(disconnectCtx); err != nil {
 		return fmt.Errorf("failed to disconnect from MongoDB: %w", err)
 	}
 
-	log.Println("❌ Disconnected from MongoDB")
+	log.Println("✅ Disconnected from MongoDB")
 	return nil
 }

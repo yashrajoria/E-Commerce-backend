@@ -2,6 +2,7 @@ package routes
 
 import (
 	"bff-service/controllers"
+	"bff-service/middleware"
 
 	"github.com/gin-gonic/gin"
 )
@@ -9,43 +10,50 @@ import (
 func RegisterRoutes(r *gin.Engine, ctrl *controllers.BFFController) {
 	r.GET("/health", ctrl.Health)
 
-	bff := r.Group("/bff")
+	// Public routes - no auth required
+	public := r.Group("/bff")
 	{
-		// Home page: products + categories
-		bff.GET("/home", ctrl.Home)
-		// Profile page: profile + orders
-		bff.GET("/profile", ctrl.Profile)
-
 		// Auth flows (login/register/logout/refresh/status)
-		bff.POST("/auth/register", ctrl.Proxy("POST", "/auth/register"))
-		bff.POST("/auth/login", ctrl.Proxy("POST", "/auth/login"))
-		bff.POST("/auth/logout", ctrl.Proxy("POST", "/auth/logout"))
-		bff.POST("/auth/refresh", ctrl.Proxy("POST", "/auth/refresh"))
-		bff.GET("/auth/status", ctrl.Proxy("GET", "/auth/status"))
-		bff.POST("/auth/verify-email", ctrl.Proxy("POST", "/auth/verify-email"))
+		public.POST("/auth/register", ctrl.Proxy("POST", "/auth/register"))
+		public.POST("/auth/login", ctrl.Proxy("POST", "/auth/login"))
+		public.POST("/auth/verify-email", ctrl.Proxy("POST", "/auth/verify-email"))
+		public.POST("/auth/refresh", ctrl.Proxy("POST", "/auth/refresh"))
 
-		// Products pages
-		bff.GET("/products", ctrl.Proxy("GET", "/products"))
-		bff.GET("/products/:id", ctrl.ProductByID)
-		bff.GET("/categories", ctrl.Proxy("GET", "/categories"))
+		// Public product pages
+		public.GET("/products", ctrl.Proxy("GET", "/products"))
+		public.GET("/products/:id", ctrl.ProductByID)
+		public.GET("/categories", ctrl.Proxy("GET", "/categories"))
+
+		// Home page: products + categories
+		public.GET("/home", ctrl.Home)
+	}
+
+	// Protected routes - require authentication
+	protected := r.Group("/bff")
+	protected.Use(middleware.AuthMiddleware())
+	{
+		// Auth flows
+		protected.POST("/auth/logout", ctrl.Proxy("POST", "/auth/logout"))
+		protected.GET("/auth/status", ctrl.Proxy("GET", "/auth/status"))
 
 		// Cart page
-		bff.GET("/cart", ctrl.Proxy("GET", "/cart"))
-		bff.POST("/cart/add", ctrl.Proxy("POST", "/cart/add"))
-		bff.DELETE("/cart/remove/:product_id", ctrl.CartRemoveItem)
-		bff.DELETE("/cart/clear", ctrl.Proxy("DELETE", "/cart/clear"))
-		bff.POST("/cart/checkout", ctrl.Proxy("POST", "/cart/checkout"))
+		protected.GET("/cart", ctrl.Proxy("GET", "/cart"))
+		protected.POST("/cart/add", ctrl.Proxy("POST", "/cart/add"))
+		protected.DELETE("/cart/remove/:product_id", ctrl.CartRemoveItem)
+		protected.DELETE("/cart/clear", ctrl.Proxy("DELETE", "/cart/clear"))
+		protected.POST("/cart/checkout", ctrl.Proxy("POST", "/cart/checkout"))
 
 		// Orders page
-		bff.GET("/orders", ctrl.Proxy("GET", "/orders"))
-		bff.GET("/orders/:id", ctrl.OrderByID)
+		protected.GET("/orders", ctrl.Proxy("GET", "/orders"))
+		protected.GET("/orders/:id", ctrl.OrderByID)
 
 		// Profile settings
-		bff.PUT("/users/profile", ctrl.Proxy("PUT", "/users/profile"))
-		bff.POST("/users/change-password", ctrl.Proxy("POST", "/users/change-password"))
+		protected.GET("/profile", ctrl.Profile)
+		protected.PUT("/users/profile", ctrl.Proxy("PUT", "/users/profile"))
+		protected.POST("/users/change-password", ctrl.Proxy("POST", "/users/change-password"))
 
 		// Payments
-		bff.GET("/payment/status/by-order/:order_id", ctrl.PaymentStatusByOrderID)
-		bff.POST("/payment/verify-payment", ctrl.Proxy("POST", "/payment/verify-payment"))
+		protected.GET("/payment/status/by-order/:order_id", ctrl.PaymentStatusByOrderID)
+		protected.POST("/payment/verify-payment", ctrl.Proxy("POST", "/payment/verify-payment"))
 	}
 }

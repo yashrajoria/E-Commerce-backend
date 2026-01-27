@@ -28,7 +28,10 @@ var ProductRedis *redis.Client
 
 func main() {
 	// Initialize structured logger
-	logger, _ := zap.NewProduction()
+	logger, err := zap.NewProduction()
+	if err != nil {
+		panic("failed to initialize logger: " + err.Error())
+	}
 	defer logger.Sync()        // Flushes buffer, if any
 	zap.ReplaceGlobals(logger) // Set the global logger
 
@@ -163,11 +166,23 @@ func main() {
 	zap.L().Info("Shutting down Product Service...")
 
 	// Create a context with a timeout to allow for cleanup
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		zap.L().Fatal("Server forced to shutdown", zap.Error(err))
+	}
+
+	// Close database connection
+	if err := database.Close(); err != nil {
+		zap.L().Error("Failed to close database", zap.Error(err))
+	}
+
+	// Close Redis connection
+	if ProductRedis != nil {
+		if err := ProductRedis.Close(); err != nil {
+			zap.L().Error("Failed to close Redis", zap.Error(err))
+		}
 	}
 
 	zap.L().Info("Product Service stopped gracefully")

@@ -5,6 +5,7 @@ import (
 	"cart-service/controllers"
 	"cart-service/database"
 	"cart-service/kafka"
+	"cart-service/middleware"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -19,8 +20,9 @@ func RegisterCartRoutes(
 	repo := database.NewCartRepository(redisClient, cfg.CartTTL)
 	controller := controllers.NewCartController(repo, producer, cfg)
 
-	// You can add a middleware here to extract user ID from JWT if needed
+	// Protected cart routes (require authentication)
 	api := r.Group("/cart")
+	api.Use(middleware.AuthMiddleware())
 	{
 		api.GET("/", controller.GetCart)
 		api.POST("/add", controller.AddItems)

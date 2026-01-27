@@ -148,6 +148,21 @@ func (s *AuthService) RefreshTokens(ctx context.Context, refreshToken string) (*
 		return nil, fmt.Errorf("invalid token: user ID (sub) claim is missing or not a string")
 	}
 
+	// Verify refresh token hasn't been revoked
+	tokenIDStr, ok := claims["jti"].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid token: jti claim missing")
+	}
+
+	existingToken, err := s.userRepo.GetRefreshTokenByTokenID(ctx, tokenIDStr)
+	if err != nil {
+		return nil, fmt.Errorf("refresh token not found or invalid")
+	}
+
+	if existingToken.Revoked {
+		return nil, fmt.Errorf("refresh token has been revoked")
+	}
+
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid token: user ID (sub) is not a valid UUID")
@@ -215,4 +230,31 @@ func (s *AuthService) Logout(ctx context.Context, refreshToken string) error {
 		return fmt.Errorf("invalid refresh token: jti missing")
 	}
 	return s.userRepo.RevokeRefreshTokenByTokenID(ctx, jti)
+}
+// ResendVerificationEmail generates a new verification code and sends it to the user
+func (s *AuthService) ResendVerificationEmail(ctx context.Context, email string) error {
+	user, err := s.userRepo.FindByEmail(ctx, email)
+	if err != nil {
+		return fmt.Errorf("user not found")
+	}
+
+	if user.EmailVerified {
+		return fmt.Errorf("email already verified")
+	}
+
+	// Generate a new verification code
+	verificationCode := GenerateRandomCode(6)
+	user.VerificationCode = verificationCode
+
+	// Update user with new code
+	if err := s.userRepo.Update(ctx, user); err != nil {
+		return fmt.Errorf("failed to update verification code: %w", err)
+	}
+
+	// Send verification email
+	if err := SendVerificationEmail(user.Email, verificationCode); err != nil {
+		return fmt.Errorf("failed to send verification email: %w", err)
+	}
+
+	return nil
 }

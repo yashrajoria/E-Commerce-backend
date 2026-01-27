@@ -23,7 +23,10 @@ func main() {
 	// --- 1. Initialization ---
 
 	// Initialize structured logger
-	logger, _ := zap.NewProduction()
+	logger, err := zap.NewProduction()
+	if err != nil {
+		panic("failed to initialize logger: " + err.Error())
+	}
 	defer logger.Sync()
 	zap.ReplaceGlobals(logger)
 
@@ -106,6 +109,11 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		zap.L().Fatal("Server forced to shutdown", zap.Error(err))
+	}
+
+	// Close database connection
+	if err := database.Close(); err != nil {
+		zap.L().Error("Failed to close database", zap.Error(err))
 	}
 
 	zap.L().Info("Server exited gracefully")
