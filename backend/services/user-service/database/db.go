@@ -25,6 +25,18 @@ func ConnectPostgres(autoMigrateModels ...interface{}) (*gorm.DB, error) {
 	dbSSLMode := os.Getenv("POSTGRES_SSLMODE")
 	dbTimeZone := os.Getenv("POSTGRES_TIMEZONE")
 
+	// Validate required environment variables
+	if dbUser == "" {
+		return nil, fmt.Errorf("POSTGRES_USER environment variable not set")
+	}
+	if dbPassword == "" {
+		return nil, fmt.Errorf("POSTGRES_PASSWORD environment variable not set")
+	}
+	if dbName == "" {
+		return nil, fmt.Errorf("POSTGRES_DB environment variable not set")
+	}
+
+	// Set defaults for optional variables
 	if dbHost == "" {
 		dbHost = "localhost"
 	}
@@ -70,4 +82,16 @@ func Connect() error {
 		return err
 	}
 	return nil
+}
+
+// Close closes the database connection gracefully
+func Close() error {
+	if DB == nil {
+		return nil
+	}
+	sqlDB, err := DB.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get database instance: %w", err)
+	}
+	return sqlDB.Close()
 }
