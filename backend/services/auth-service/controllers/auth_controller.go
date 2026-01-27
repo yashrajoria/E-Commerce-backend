@@ -18,6 +18,7 @@ type IAuthService interface {
 	VerifyEmail(ctx context.Context, email, code string) error
 	RefreshTokens(ctx context.Context, refreshToken string) (*services.TokenPair, error)
 	Logout(ctx context.Context, refreshToken string) error
+	ResendVerificationEmail(ctx context.Context, email string) error
 }
 
 type AuthController struct {
@@ -69,17 +70,28 @@ func (ctrl *AuthController) Register(c *gin.Context) {
 		return
 	}
 
+	// Validate password strength before proceeding
+	pwValidator := services.NewPasswordValidator()
+	if err := pwValidator.ValidatePassword(req.Password); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
 	err := ctrl.service.Register(c.Request.Context(), req.Name, req.Email, req.Password, req.Role)
 	if err != nil {
 		if strings.Contains(err.Error(), "already exists") {
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 			return
 		}
+		if strings.Contains(err.Error(), "failed to send verification email") {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Account created, but failed to send verification email. Please try verifying later."})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create account at this time."})
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"message": "Account created successfully. Please verify your email."})
+	c.JSON(http.StatusCreated, gin.H{"message": "Account created successfully. Please verify your email.", "email": req.Email})
 }
 
 func (ctrl *AuthController) VerifyEmail(c *gin.Context) {
@@ -181,4 +193,34 @@ func (ctrl *AuthController) GetAuthStatus(c *gin.Context) {
 		},
 		"timestamp": time.Now().UTC(),
 	})
+}
+
+func (ctrl *AuthController) ResendVerificationEmail(c *gin.Context) {
+	var req struct {
+		Email string `json:"email" binding:"required,email"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body", "details": err.Error()})
+		return
+	}
+
+	err := ctrl.service.ResendVerificationEmail(c.Request.Context(), req.Email)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
+		if strings.Contains(err.Error(), "already verified") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Email already verified"})
+			return
+		}
+		if strings.Contains(err.Error(), "failed to send") {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send verification email. Please try again later."})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not resend verification email"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Verification email sent successfully"})
 }
