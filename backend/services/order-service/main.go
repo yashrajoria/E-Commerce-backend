@@ -24,7 +24,10 @@ import (
 )
 
 func main() {
-	logger, _ := zap.NewProduction()
+	logger, err := zap.NewProduction()
+	if err != nil {
+		panic("failed to initialize logger: " + err.Error())
+	}
 	defer logger.Sync()
 
 	cfg, err := LoadConfig()
@@ -80,6 +83,9 @@ func main() {
 
 	// --- Producer: payment-requests (Order → Payment) ---
 	paymentProducer := kafka.NewProducer(brokers, paymentRequestsTopic)
+	if paymentProducer == nil {
+		logger.Fatal("Failed to create payment Kafka producer")
+	}
 	defer paymentProducer.Close()
 
 	// --- Consumer: checkout-events (Cart → Order) ---
@@ -103,8 +109,19 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_ = srv.Shutdown(ctx)
+	
+	logger.Info("Shutting down Order Service...")
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		logger.Error("Server shutdown error", zap.Error(err))
+	}
+
+	// Close database connection
+	sqlDB, _ := database.DB.DB()
+	if sqlDB != nil {
+		sqlDB.Close()
+	}
+
 	logger.Info("Order Service stopped gracefully")
 }
