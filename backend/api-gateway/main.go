@@ -18,17 +18,29 @@ import (
 // CORS Middleware - Apply this globally
 func CORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		allowedOrigins := map[string]bool{
-			"http://localhost:3000": true,
-			"http://localhost:3001": true,
-		}
+		// Allowed origins can be configured with ALLOWED_ORIGINS env var (comma-separated).
+		// Use "*" to allow all origins (development only).
+		allowed := os.Getenv("ALLOWED_ORIGINS")
 		origin := c.Request.Header.Get("Origin")
-		if allowedOrigins[origin] {
-			c.Header("Access-Control-Allow-Origin", origin)
+
+		if allowed == "*" {
+			c.Header("Access-Control-Allow-Origin", "*")
+		} else if allowed != "" {
+			for _, o := range strings.Split(allowed, ",") {
+				if strings.TrimSpace(o) == origin {
+					c.Header("Access-Control-Allow-Origin", origin)
+					break
+				}
+			}
+		} else {
+			// fallback to localhost dev origins
+			if origin == "http://localhost:3000" || origin == "http://localhost:3001" {
+				c.Header("Access-Control-Allow-Origin", origin)
+			}
 		}
 
 		c.Header("Access-Control-Allow-Credentials", "true")
-		c.Header("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+		c.Header("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSF R-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
 		c.Header("Access-Control-Allow-Methods", "POST, HEAD, PATCH, OPTIONS, GET, PUT, DELETE")
 
 		if c.Request.Method == "OPTIONS" {
