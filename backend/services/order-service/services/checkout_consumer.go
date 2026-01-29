@@ -15,7 +15,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func StartCheckoutConsumer(brokers []string, topic, groupID string, db *gorm.DB, paymentProducer *kafka.Producer) {
+func StartCheckoutConsumer(ctx context.Context, brokers []string, topic, groupID string, db *gorm.DB, paymentProducer *kafka.Producer) {
 	if topic == "" {
 		log.Fatal("❌ [OrderService][CheckoutConsumer] empty topic: set CHECKOUT_TOPIC or pass a topic name")
 	}
@@ -26,7 +26,19 @@ func StartCheckoutConsumer(brokers []string, topic, groupID string, db *gorm.DB,
 	log.Printf("[OrderService][CheckoutConsumer] listening topic=%s group=%s brokers=%v", topic, groupID, brokers)
 
 	for {
-		m, err := r.ReadMessage(context.Background())
+		select {
+		case <-ctx.Done():
+			log.Println("[OrderService][CheckoutConsumer] Shutting down gracefully")
+			return
+		default:
+		}
+		
+		readCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		m, err := r.ReadMessage(readCtx)
+		cancel()
+		if err == context.Canceled {
+			return
+		}
 		if err != nil {
 			log.Printf("❌ read error: %v", err)
 			continue
@@ -76,7 +88,7 @@ func StartCheckoutConsumer(brokers []string, topic, groupID string, db *gorm.DB,
 			}
 
 			// Fetch product details
-			product, err := FetchProductByID(context.Background(), productServiceURL, pid)
+			product, err := FetchProductByID(ctx, productServiceURL, pid)
 			if err != nil {
 				log.Printf("⚠️ failed to fetch product for product_id=%s: %v", it.ProductID, err)
 				continue

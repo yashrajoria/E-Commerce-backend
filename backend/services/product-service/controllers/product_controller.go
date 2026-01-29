@@ -14,6 +14,8 @@ import (
 
 	"product-service/models"
 	"product-service/services"
+	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"os"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
@@ -26,6 +28,13 @@ import (
 
 // Use a single instance of Validate, it caches struct info
 var validate = validator.New()
+
+// Validation constants
+const (
+	MaxPageSize   = 100
+	MaxPageNumber = 1000000
+	MaxUploadSize = 50 * 1024 * 1024 // 50MB
+)
 
 type ProductServiceAPI interface {
 	GetProduct(ctx context.Context, id uuid.UUID) (*models.Product, error)
@@ -85,14 +94,26 @@ func (ctrl *ProductController) GetProductByID(c *gin.Context) {
 }
 
 func (ctrl *ProductController) GetProducts(c *gin.Context) {
-	// 1. Parse Parameters (Same as before)
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("perPage", "10"))
-	if page < 1 {
-		page = 1
+	// 1. Parse Parameters with validation
+	pageStr := c.DefaultQuery("page", "1")
+	perPageStr := c.DefaultQuery("perPage", "10")
+
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page < 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid page number"})
+		return
 	}
-	if perPage < 1 {
-		perPage = 10
+	if page > MaxPageNumber {
+		page = MaxPageNumber
+	}
+
+	perPage, err := strconv.Atoi(perPageStr)
+	if err != nil || perPage < 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid page size"})
+		return
+	}
+	if perPage > MaxPageSize {
+		perPage = MaxPageSize
 	}
 
 	// Parse filters for the Cache Key
@@ -358,6 +379,11 @@ func (ctrl *ProductController) ValidateBulkImport(c *gin.Context) {
 		return
 	}
 
+	if file.Size > MaxUploadSize {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "File too large (max 50MB)"})
+		return
+	}
+
 	fileHandle, err := file.Open()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -385,6 +411,11 @@ func (ctrl *ProductController) CreateBulkProducts(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "File is required",
 		})
+		return
+	}
+
+	if file.Size > MaxUploadSize {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "File too large (max 50MB)"})
 		return
 	}
 
@@ -439,6 +470,59 @@ func (ctrl *ProductController) GetPresignUpload(c *gin.Context) {
 		"key":        key,
 		"public_url": publicURL,
 	})
+}
+
+// PostPresignUpload returns a presigned URL for PUT upload for a specific product ID.
+func (ctrl *ProductController) PostPresignUpload(c *gin.Context) {
+	id := c.Param("id")
+	productID, err := uuid.Parse(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid UUID format"})
+		return
+	}
+
+	// ensure product exists
+	_, err = ctrl.productService.GetProduct(c.Request.Context(), productID)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Product not found"})
+			return
+		}
+		zap.L().Error("Service failed to get product", zap.Error(err), zap.String("id", id))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal Server Error"})
+		return
+	}
+
+	// prepare presign
+	filename := c.DefaultQuery("filename", "upload")
+	expiresStr := c.DefaultQuery("expires", "900")
+	expires, err := strconv.ParseInt(expiresStr, 10, 64)
+	if err != nil || expires <= 0 {
+		expires = 900
+	}
+
+	// load aws config and generate presign
+	cfg, err := aws_pkg.LoadAWSConfig(c.Request.Context())
+	if err != nil {
+		zap.L().Error("failed to load aws config", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "AWS config error"})
+		return
+	}
+
+	bucket := os.Getenv("S3_BUCKET_IMAGES")
+	if bucket == "" {
+		bucket = "ecommerce-product-images"
+	}
+
+	key := fmt.Sprintf("product/%s/%s", productID.String(), filename)
+	url, _, err := aws_pkg.GeneratePresignedPutURL(c.Request.Context(), cfg, bucket, key, expires)
+	if err != nil {
+		zap.L().Error("failed to generate presigned url", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate presigned upload"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"upload_url": url, "method": "PUT", "key": key, "expires_in": expires})
 }
 
 func (ctrl *ProductController) GetProductByIDInternal(c *gin.Context) {

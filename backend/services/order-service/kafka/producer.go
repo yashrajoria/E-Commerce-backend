@@ -14,6 +14,12 @@ type Producer struct {
 	topic  string
 }
 
+// ProducerAPI defines the subset of producer behaviour used by services.
+type ProducerAPI interface {
+	Publish(topic string, message []byte) error
+	Close() error
+}
+
 func NewProducer(brokers []string, topic string) *Producer {
 	w := &kafka.Writer{
 		Addr:     kafka.TCP(brokers...),

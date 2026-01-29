@@ -20,6 +20,7 @@ import (
 	"order-service/services"
 
 	"github.com/gin-gonic/gin"
+	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"go.uber.org/zap"
 )
 
@@ -46,11 +47,33 @@ func main() {
 	r.Use(gin.Recovery())
 	r.Use(middleware.ConfigMiddleware(cfg.ProductServiceURL))
 
+	// Add request timeout middleware
+	r.Use(func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+		defer cancel()
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
+
 	orderRepository := repositories.NewGormOrderRepository(database.DB)
+
+	// Optional SNS setup (used for order events push to LocalStack/AWS)
+	var snsClient *aws_pkg.SNSClient
+	snsTopic := os.Getenv("ORDER_SNS_TOPIC_ARN")
+	if snsTopic != "" {
+		if awsCfg, err := aws_pkg.LoadAWSConfig(context.Background()); err == nil {
+			snsClient = aws_pkg.NewSNSClient(awsCfg)
+		} else {
+			logger.Warn("Failed to load AWS config for SNS", zap.Error(err))
+		}
+	}
+
 	orderService := services.NewOrderService(
 		orderRepository,
 		kafka.NewProducer(strings.Split(cfg.KafkaBrokers, ","), cfg.KafkaTopic),
 		cfg.KafkaTopic,
+		snsClient,
+		os.Getenv("ORDER_SNS_TOPIC_ARN"),
 	)
 	orderController := controllers.NewOrderController(orderService)
 	routes.RegisterOrderRoutes(r, orderController)
@@ -88,8 +111,12 @@ func main() {
 	}
 	defer paymentProducer.Close()
 
+	// --- Graceful shutdown context ---
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	defer shutdownCancel()
+
 	// --- Consumer: checkout-events (Cart → Order) ---
-	go services.StartCheckoutConsumer(brokers, checkoutTopic, groupID, database.DB, paymentProducer)
+	go services.StartCheckoutConsumer(shutdownCtx, brokers, checkoutTopic, groupID, database.DB, paymentProducer)
 
 	// --- Consumer: payment-events (Payment → Order) ---
 	paymentConsumer := services.NewPaymentConsumer(brokers, paymentEventsTopic, groupID, database.DB)
@@ -109,11 +136,15 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	logger.Info("Initiating graceful shutdown...")
+	shutdownCancel()            // Cancel all consumers
+	time.Sleep(1 * time.Second) // Give consumers time to shut down
+
+	httpShutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	
+
 	logger.Info("Shutting down Order Service...")
-	if err := srv.Shutdown(shutdownCtx); err != nil {
+	if err := srv.Shutdown(httpShutdownCtx); err != nil {
 		logger.Error("Server shutdown error", zap.Error(err))
 	}
 

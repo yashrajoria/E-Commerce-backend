@@ -12,6 +12,10 @@ require (
 	gorm.io/gorm v1.26.1
 )
 
+require github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws v0.0.0
+
+replace github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws => ../../pkg/aws
+
 require (
 	github.com/bytedance/sonic v1.9.1 // indirect
 	github.com/chenzhuoyu/base64x v0.0.0-20221115062448-fe3a3abad311 // indirect

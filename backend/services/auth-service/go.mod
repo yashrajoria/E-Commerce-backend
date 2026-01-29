@@ -14,6 +14,10 @@ require (
 	gorm.io/gorm v1.26.1
 )
 
+require github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws v0.0.0
+
+replace github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws => ../../pkg/aws
+
 require (
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/zap v1.27.0

@@ -11,6 +11,10 @@ require (
 	go.uber.org/zap v1.26.0
 )
 
+require github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws v0.0.0
+
+replace github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws => ../../pkg/aws
+
 require (
 	github.com/bytedance/sonic v1.11.6 // indirect
 	github.com/bytedance/sonic/loader v0.1.1 // indirect

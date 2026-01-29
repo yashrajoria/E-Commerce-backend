@@ -42,30 +42,16 @@ func main() {
 	r := gin.New()
 	r.Use(gin.Recovery())
 
-	// CORS setup (could move allowedOrigins to config)
-	allowedOrigins := map[string]bool{
-		"http://localhost:3000":  true,
-		"http://localhost:3001":  true,
-		"https://yourdomain.com": true,
-	}
+	// Add request timeout middleware
 	r.Use(func(c *gin.Context) {
-		origin := c.Request.Header.Get("Origin")
-		if !allowedOrigins[origin] {
-			origin = "http://localhost:3000"
-		}
-		if !allowedOrigins[origin] {
-			origin = "http://localhost:3001"
-		}
-		c.Header("Access-Control-Allow-Origin", origin)
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
-		c.Header("Access-Control-Allow-Credentials", "true")
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(http.StatusOK)
-			return
-		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+		defer cancel()
+		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	})
+
+	// CORS is handled by API Gateway, not here
+	// Remove duplicate CORS middleware to avoid conflicts
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "OK"})

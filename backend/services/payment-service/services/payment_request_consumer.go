@@ -39,11 +39,22 @@ func NewPaymentRequestConsumer(brokers []string, topic, groupID string, producer
 	return &PaymentRequestConsumer{reader: r, paymentProducer: producer, stripeSvc: stripeSvc, logger: zap.L(), repo: repo, topic: topic}
 }
 
-func (c *PaymentRequestConsumer) Start() {
+func (c *PaymentRequestConsumer) Start(ctx context.Context) {
 	c.logger.Info("Starting PaymentRequestConsumer", zap.String("topic", c.topic))
-	ctx := context.Background() // Use this context for DB calls
 	for {
-		m, err := c.reader.ReadMessage(ctx)
+		select {
+		case <-ctx.Done():
+			c.logger.Info("PaymentRequestConsumer shutting down gracefully")
+			return
+		default:
+		}
+		
+		readCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		m, err := c.reader.ReadMessage(readCtx)
+		cancel()
+		if err == context.Canceled {
+			return
+		}
 		if err != nil {
 			c.logger.Warn("Error reading payment request", zap.Error(err))
 			continue

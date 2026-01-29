@@ -64,14 +64,27 @@ func main() {
 		paymentRepo,
 		logger,
 	)
+
+	// --- Graceful shutdown context ---
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	defer shutdownCancel()
+
 	// Start consuming payment requests in the background
-	go paymentRequestConsumer.Start()
+	go paymentRequestConsumer.Start(shutdownCtx)
 
 	defer paymentProducer.Close()
 
 	// HTTP server
 	r := gin.New()
 	r.Use(gin.Recovery())
+
+	// Add request timeout middleware
+	r.Use(func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+		defer cancel()
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
 
 	pc := &controllers.PaymentController{
 		Stripe: stripeSvc,
@@ -99,11 +112,15 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	logger.Info("Initiating graceful shutdown...")
+	shutdownCancel()            // Cancel consumer
+	time.Sleep(1 * time.Second) // Give consumer time to shut down
+
+	httpShutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	logger.Info("Shutting down Payment Service...")
-	if err := srv.Shutdown(shutdownCtx); err != nil {
+	if err := srv.Shutdown(httpShutdownCtx); err != nil {
 		logger.Error("Server shutdown error", zap.Error(err))
 	}
 

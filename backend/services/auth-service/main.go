@@ -59,6 +59,15 @@ func main() {
 
 	r := gin.New()
 	r.Use(gin.Recovery()) // Panic protection
+
+	// Add request timeout middleware
+	r.Use(func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+		defer cancel()
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
+
 	// r.Use(middlewares.SecurityHeaders()) // Good to have
 	// r.Use(middlewares.RateLimitMiddleware()) // Good to have
 

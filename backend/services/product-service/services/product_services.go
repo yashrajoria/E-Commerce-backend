@@ -605,6 +605,15 @@ func (s *ProductService) CreateBulkProducts(ctx context.Context, file multipart.
 			continue
 		}
 
+		// Validate quantity is non-negative
+		if quantity < 0 {
+			errorsList = append(errorsList, map[string]interface{}{
+				"row":   pp.RowNum,
+				"error": "Quantity cannot be negative",
+			})
+			continue
+		}
+
 		// Skip if SKU already exists
 		if existingSKUs[sku] {
 			errorsList = append(errorsList, map[string]interface{}{

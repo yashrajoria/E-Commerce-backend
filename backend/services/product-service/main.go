@@ -134,6 +134,15 @@ func main() {
 
 	r := gin.New()
 	r.Use(gin.Recovery()) // Recover from panics
+
+	// Add request timeout middleware
+	r.Use(func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+		defer cancel()
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
+
 	// Add a request logger middleware here if desired
 
 	// --- 4. Route Registration ---

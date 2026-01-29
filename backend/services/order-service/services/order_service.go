@@ -8,6 +8,8 @@ import (
 	"order-service/models"
 	repositories "order-service/repository"
 
+	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+
 	"time"
 
 	"github.com/google/uuid"
@@ -44,15 +46,19 @@ func (e *ServiceError) Error() string {
 
 type OrderService struct {
 	orderRepo     repositories.OrderRepository
-	kafkaProducer *kafka.Producer
+	kafkaProducer kafka.ProducerAPI
 	checkoutTopic string
+	snsClient     *aws_pkg.SNSClient
+	snsTopicArn   string
 }
 
-func NewOrderService(orderRepo repositories.OrderRepository, kafkaProducer *kafka.Producer, checkoutTopic string) *OrderService {
+func NewOrderService(orderRepo repositories.OrderRepository, kafkaProducer kafka.ProducerAPI, checkoutTopic string, snsClient aws_pkg.SNSPublisher, snsTopicArn string) *OrderService {
 	return &OrderService{
 		orderRepo:     orderRepo,
 		kafkaProducer: kafkaProducer,
 		checkoutTopic: checkoutTopic,
+		snsClient:     snsClient,
+		snsTopicArn:   snsTopicArn,
 	}
 }
 
@@ -96,6 +102,16 @@ func (s *OrderService) CreateOrder(ctx context.Context, userID string, req *Crea
 		return &ServiceError{
 			StatusCode: 500,
 			Message:    "Failed to publish checkout event",
+		}
+	}
+
+	// Optionally publish to SNS (best-effort)
+	if s.snsClient != nil && s.snsTopicArn != "" {
+		if err := s.snsClient.Publish(ctx, s.snsTopicArn, eventBytes); err != nil {
+			log.Printf("[OrderService] SNS publish failed: %v", err)
+			// don't fail the request if SNS fails; it's best-effort for now
+		} else {
+			log.Printf("[OrderService] SNS published to %s", s.snsTopicArn)
 		}
 	}
 
