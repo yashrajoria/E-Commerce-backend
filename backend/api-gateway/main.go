@@ -12,32 +12,34 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-contrib/cors"
 	"go.uber.org/zap"
+	"strings"
 )
 
 // CORS Middleware - Apply this globally
 func CORSMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		allowedOrigins := map[string]bool{
-			"http://localhost:3000": true,
-			"http://localhost:3001": true,
-		}
-		origin := c.Request.Header.Get("Origin")
-		if allowedOrigins[origin] {
-			c.Header("Access-Control-Allow-Origin", origin)
-		}
-
-		c.Header("Access-Control-Allow-Credentials", "true")
-		c.Header("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
-		c.Header("Access-Control-Allow-Methods", "POST, HEAD, PATCH, OPTIONS, GET, PUT, DELETE")
-
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
-
-		c.Next()
+	// Use gin-contrib/cors with configuration from ALLOWED_ORIGINS
+	allowed := os.Getenv("ALLOWED_ORIGINS")
+	config := cors.Config{
+		AllowCredentials: true,
+		AllowMethods:     []string{"POST", "HEAD", "PATCH", "OPTIONS", "GET", "PUT", "DELETE"},
+		AllowHeaders:     []string{"Content-Type", "Content-Length", "Accept-Encoding", "X-CSRF-Token", "Authorization", "Accept", "Origin", "Cache-Control", "X-Requested-With"},
 	}
+
+	if allowed == "*" {
+		config.AllowAllOrigins = true
+	} else if allowed != "" {
+		var origins []string
+		for _, o := range strings.Split(allowed, ",") {
+			origins = append(origins, strings.TrimSpace(o))
+		}
+		config.AllowOrigins = origins
+	} else {
+		config.AllowOrigins = []string{"http://localhost:3000", "http://localhost:3001"}
+	}
+
+	return cors.New(config)
 }
 
 // CustomRecovery recovers from panics and logs them

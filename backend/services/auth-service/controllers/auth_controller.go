@@ -48,11 +48,12 @@ func (ctrl *AuthController) Login(c *gin.Context) {
 	domain := os.Getenv("COOKIE_DOMAIN")
 	isSecure := os.Getenv("ENV") == "production"
 
-	// Set SameSite for CSRF protection
+	// Set cookies. Use SameSite=None for refresh cookie to allow cross-site refresh requests.
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie("token", tokenPair.AccessToken, 900, "/", domain, isSecure, true)
 
-	c.SetSameSite(http.SameSiteLaxMode)
+	// Refresh cookie must be SameSite=None and Secure in cross-site contexts
+	c.SetSameSite(http.SameSiteNoneMode)
 	c.SetCookie("refresh_token", tokenPair.RefreshToken, 604800, "/", domain, isSecure, true)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Logged in successfully"})
@@ -132,7 +133,8 @@ func (ctrl *AuthController) Logout(c *gin.Context) {
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie("token", "", -1, "/", domain, isSecure, true)
 
-	c.SetSameSite(http.SameSiteLaxMode)
+	// Clear refresh cookie with SameSite=None to match how it was set
+	c.SetSameSite(http.SameSiteNoneMode)
 	c.SetCookie("refresh_token", "", -1, "/", domain, isSecure, true)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
@@ -157,7 +159,8 @@ func (ctrl *AuthController) Refresh(c *gin.Context) {
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie("token", newTokenPair.AccessToken, 900, "/", domain, isSecure, true)
 
-	c.SetSameSite(http.SameSiteLaxMode)
+	// Refresh cookie must be SameSite=None
+	c.SetSameSite(http.SameSiteNoneMode)
 	c.SetCookie("refresh_token", newTokenPair.RefreshToken, 604800, "/", domain, isSecure, true)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Token refreshed successfully"})

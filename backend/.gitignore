@@ -65,3 +65,4 @@ docker-compose.yml
 *.toml
 docker-compose.prod.yml
 .air.toml
+/tmp/
