@@ -22,16 +22,16 @@ func NewStripeService(secretKey, webhookKey string) *StripeService {
 	return &StripeService{SecretKey: secretKey, WebhookKey: webhookKey}
 }
 
-func (s *StripeService) CreatePaymentIntent(amount int64, currency string) (string, error) {
+func (s *StripeService) CreatePaymentIntent(amount int64, currency string) (*stripe.PaymentIntent, error) {
 	params := &stripe.PaymentIntentParams{
 		Amount:   stripe.Int64(amount),
 		Currency: stripe.String(currency),
 	}
 	pi, err := paymentintent.New(params)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return pi.ID, nil
+	return pi, nil
 }
 
 func (s *StripeService) CreateCheckoutSession(amount int64, currency, orderID, userID string) (*stripe.CheckoutSession, error) {
