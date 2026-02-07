@@ -2,30 +2,32 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"cart-service/config"
 	"cart-service/database"
-	"cart-service/kafka"
 	"cart-service/models"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 )
 
 type CartController struct {
-	Repo     *database.CartRepository
-	Producer *kafka.Producer
-	Config   config.Config
+	Repo      *database.CartRepository
+	SNSClient *aws_pkg.SNSClient
+	Config    config.Config
 }
 
-func NewCartController(repo *database.CartRepository, producer *kafka.Producer, cfg config.Config) *CartController {
+func NewCartController(repo *database.CartRepository, snsClient *aws_pkg.SNSClient, cfg config.Config) *CartController {
 	return &CartController{
-		Repo:     repo,
-		Producer: producer,
-		Config:   cfg,
+		Repo:      repo,
+		SNSClient: snsClient,
+		Config:    cfg,
 	}
 }
 
@@ -176,7 +178,7 @@ func (cc *CartController) ClearCart(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "cart cleared"})
 }
 
-// Checkout publishes the cart to Kafka and clears it
+// Checkout publishes the cart to SNS and clears it
 func (cc *CartController) Checkout(c *gin.Context) {
 	userID := c.GetHeader("X-User-ID")
 	if userID == "" {
@@ -199,7 +201,7 @@ func (cc *CartController) Checkout(c *gin.Context) {
 		return
 	}
 	orderID := uuid.New().String()
-	// Build Kafka payload
+	// Build SNS payload
 	event := models.CheckoutEvent{
 		Event:     "checkout.requested",
 		UserID:    userID,
@@ -208,8 +210,14 @@ func (cc *CartController) Checkout(c *gin.Context) {
 		OrderID:   orderID,
 	}
 
-	if err := cc.Producer.SendCheckoutEvent(event); err != nil {
-		log.Printf("❌ [Checkout] Failed to send Kafka event for userID=%s: %v", userID, err)
+	eventBytes, _ := json.Marshal(event)
+	topicArn := os.Getenv("ORDER_SNS_TOPIC_ARN")
+	if topicArn == "" {
+		topicArn = "arn:aws:sns:eu-west-2:000000000000:order-events"
+	}
+
+	if err := cc.SNSClient.Publish(ctx, topicArn, eventBytes); err != nil {
+		log.Printf("❌ [Checkout] Failed to send SNS event for userID=%s: %v", userID, err)
 
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to publish checkout event"})
 		return
