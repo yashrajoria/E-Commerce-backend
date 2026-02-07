@@ -48,6 +48,13 @@ if [ -z "${TOPIC_ARN}" ]; then
 fi
 echo "SNS topic ARN: ${TOPIC_ARN}"
 
+echo "Creating SNS topic payment-events"
+PAYMENT_TOPIC_ARN=$(_aws sns create-topic --name payment-events --output text --query 'TopicArn' 2>/dev/null || true)
+if [ -z "${PAYMENT_TOPIC_ARN}" ]; then
+  PAYMENT_TOPIC_ARN=$(_aws sns create-topic --name payment-events --output text --query 'TopicArn')
+fi
+echo "Payment topic ARN: ${PAYMENT_TOPIC_ARN}"
+
 # SQS queues
 echo "Waiting for SQS to be available (up to ${WAIT_RETRIES:-30} attempts)..."
 for i in $(seq 1 ${WAIT_RETRIES:-30}); do
@@ -66,12 +73,18 @@ echo "Creating SQS queues"
 _aws sqs create-queue --queue-name order-processing-queue || true
 _aws sqs create-queue --queue-name order-processing-dlq || true
 _aws sqs create-queue --queue-name email-notify-queue || true
+_aws sqs create-queue --queue-name payment-events-queue || true
+_aws sqs create-queue --queue-name payment-request-queue || true
 
 # Subscribe SQS to SNS
 echo "Subscribing queues to SNS"
 QUEUE_URL=$(_aws sqs get-queue-url --queue-name order-processing-queue --output text --query 'QueueUrl')
 QUEUE_ARN=$(_aws sqs get-queue-attributes --queue-url ${QUEUE_URL} --attribute-names QueueArn --output text --query 'Attributes.QueueArn')
 _aws sns subscribe --topic-arn ${TOPIC_ARN} --protocol sqs --notification-endpoint ${QUEUE_ARN} || true
+
+PAY_QUEUE_URL=$(_aws sqs get-queue-url --queue-name payment-events-queue --output text --query 'QueueUrl')
+PAY_QUEUE_ARN=$(_aws sqs get-queue-attributes --queue-url ${PAY_QUEUE_URL} --attribute-names QueueArn --output text --query 'Attributes.QueueArn')
+_aws sns subscribe --topic-arn ${PAYMENT_TOPIC_ARN} --protocol sqs --notification-endpoint ${PAY_QUEUE_ARN} || true
 
 # DynamoDB tables
 echo "Creating DynamoDB tables"
@@ -93,6 +106,14 @@ done
 
 _aws dynamodb create-table --table-name Products --attribute-definitions AttributeName=product_id,AttributeType=S --key-schema AttributeName=product_id,KeyType=HASH --billing-mode PAY_PER_REQUEST || true
 _aws dynamodb create-table --table-name Inventory --attribute-definitions AttributeName=product_id,AttributeType=S --key-schema AttributeName=product_id,KeyType=HASH --billing-mode PAY_PER_REQUEST || true
+_aws dynamodb create-table --table-name Categories --attribute-definitions AttributeName=category_id,AttributeType=S --key-schema AttributeName=category_id,KeyType=HASH --billing-mode PAY_PER_REQUEST || true
+# Seed initial categories into DynamoDB
+echo "Seeding initial categories into DynamoDB"
+_aws dynamodb put-item --table-name Categories --item '{"category_id": {"S": "cat-electronics"}, "name": {"S": "Electronics"}}' || true
+_aws dynamodb put-item --table-name Categories --item '{"category_id": {"S": "cat-fashion"}, "name": {"S": "Fashion"}}' || true
+_aws dynamodb put-item --table-name Categories --item '{"category_id": {"S": "cat-home"}, "name": {"S": "Home"}}' || true
+_aws dynamodb put-item --table-name Categories --item '{"category_id": {"S": "cat-books"}, "name": {"S": "Books"}}' || true
+_aws dynamodb put-item --table-name Categories --item '{"category_id": {"S": "cat-sports"}, "name": {"S": "Sports"}}' || true
 
 echo "LocalStack resources provisioned"
 
