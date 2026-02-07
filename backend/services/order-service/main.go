@@ -6,13 +6,11 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
 	"order-service/controllers"
 	"order-service/database"
-	"order-service/kafka"
 	"order-service/middleware"
 	"order-service/models"
 	repositories "order-service/repository"
@@ -42,6 +40,16 @@ func main() {
 	if err := database.DB.AutoMigrate(&models.Order{}, &models.OrderItem{}); err != nil {
 		logger.Fatal("Migration failed", zap.Error(err))
 	}
+
+	// --- AWS setup ---
+	awsCfg, err := aws_pkg.LoadAWSConfig(context.Background())
+	if err != nil {
+		logger.Fatal("Failed to load AWS config", zap.Error(err))
+	}
+
+	// SNS client for publishing order events
+	snsClient := aws_pkg.NewSNSClient(awsCfg)
+
 	// --- HTTP router ---
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -57,23 +65,10 @@ func main() {
 
 	orderRepository := repositories.NewGormOrderRepository(database.DB)
 
-	// Optional SNS setup (used for order events push to LocalStack/AWS)
-	var snsClient *aws_pkg.SNSClient
-	snsTopic := os.Getenv("ORDER_SNS_TOPIC_ARN")
-	if snsTopic != "" {
-		if awsCfg, err := aws_pkg.LoadAWSConfig(context.Background()); err == nil {
-			snsClient = aws_pkg.NewSNSClient(awsCfg)
-		} else {
-			logger.Warn("Failed to load AWS config for SNS", zap.Error(err))
-		}
-	}
-
-	orderService := services.NewOrderService(
+	orderService := services.NewOrderServiceSQS(
 		orderRepository,
-		kafka.NewProducer(strings.Split(cfg.KafkaBrokers, ","), cfg.KafkaTopic),
-		cfg.KafkaTopic,
 		snsClient,
-		os.Getenv("ORDER_SNS_TOPIC_ARN"),
+		cfg.OrderSNSTopicARN,
 	)
 	orderController := controllers.NewOrderController(orderService)
 	routes.RegisterOrderRoutes(r, orderController)
@@ -81,47 +76,62 @@ func main() {
 	r.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "OK"}) })
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: r}
 
-	// --- Kafka config (env w/ sensible defaults for Docker) ---
-	brokersEnv := os.Getenv("KAFKA_BROKERS")
-	log.Println("KAFKA_BROKERS:", brokersEnv)
-	if brokersEnv == "" {
-		brokersEnv = "kafka:9092" // works inside docker-compose network
-	}
-	// Allow both "kafka:9092" or "kafka:9092,another:9092"
-	brokers := strings.Split(brokersEnv, ",")
-
-	checkoutTopic := cfg.KafkaTopic
-	paymentEventsTopic := os.Getenv("PAYMENT_TOPIC")
-	if paymentEventsTopic == "" {
-		paymentEventsTopic = os.Getenv("PAYMENT_KAFKA_TOPIC")
-		if paymentEventsTopic == "" {
-			paymentEventsTopic = "payment-events"
-		}
-	}
-	paymentRequestsTopic := os.Getenv("PAYMENT_REQUEST_TOPIC")
-	if paymentRequestsTopic == "" {
-		paymentRequestsTopic = "payment-requests"
-	}
-	groupID := "order-service-group"
-
-	// --- Producer: payment-requests (Order → Payment) ---
-	paymentProducer := kafka.NewProducer(brokers, paymentRequestsTopic)
-	if paymentProducer == nil {
-		logger.Fatal("Failed to create payment Kafka producer")
-	}
-	defer paymentProducer.Close()
-
 	// --- Graceful shutdown context ---
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	defer shutdownCancel()
 
-	// --- Consumer: checkout-events (Cart → Order) ---
-	go services.StartCheckoutConsumer(shutdownCtx, brokers, checkoutTopic, groupID, database.DB, paymentProducer)
+	// --- SQS Consumers (replaces Kafka) ---
+	// Get queue URLs (fallback to env if not in config)
+	checkoutQueueURL := cfg.CheckoutQueueURL
+	if checkoutQueueURL == "" {
+		if url, err := aws_pkg.GetQueueURL(context.Background(), awsCfg, "order-processing-queue"); err == nil {
+			checkoutQueueURL = url
+		} else {
+			logger.Warn("Could not get checkout queue URL", zap.Error(err))
+		}
+	}
 
-	// --- Consumer: payment-events (Payment → Order) ---
-	paymentConsumer := services.NewPaymentConsumer(brokers, paymentEventsTopic, groupID, database.DB)
-	go paymentConsumer.Start()
-	defer paymentConsumer.Close()
+	paymentEventsQueueURL := cfg.PaymentEventsQueueURL
+	if paymentEventsQueueURL == "" {
+		if url, err := aws_pkg.GetQueueURL(context.Background(), awsCfg, "payment-events-queue"); err == nil {
+			paymentEventsQueueURL = url
+		} else {
+			logger.Warn("Could not get payment events queue URL", zap.Error(err))
+		}
+	}
+
+	paymentRequestQueueURL := cfg.PaymentRequestQueueURL
+	if paymentRequestQueueURL == "" {
+		if url, err := aws_pkg.GetQueueURL(context.Background(), awsCfg, "payment-request-queue"); err == nil {
+			paymentRequestQueueURL = url
+		} else {
+			logger.Warn("Could not get payment request queue URL", zap.Error(err))
+		}
+	}
+
+	// Start SQS consumers
+	if checkoutQueueURL != "" && paymentRequestQueueURL != "" {
+		checkoutConsumer := services.NewSQSCheckoutConsumer(
+			aws_pkg.NewSQSConsumer(awsCfg, checkoutQueueURL),
+			aws_pkg.NewSQSConsumer(awsCfg, paymentRequestQueueURL), // For sending payment requests
+			database.DB,
+		)
+		go checkoutConsumer.Start(shutdownCtx)
+		logger.Info("Started SQS checkout consumer", zap.String("queue", checkoutQueueURL))
+	} else {
+		logger.Warn("Checkout consumer not started - missing queue URLs")
+	}
+
+	if paymentEventsQueueURL != "" {
+		paymentConsumer := services.NewSQSPaymentConsumer(
+			aws_pkg.NewSQSConsumer(awsCfg, paymentEventsQueueURL),
+			database.DB,
+		)
+		go paymentConsumer.Start(shutdownCtx)
+		logger.Info("Started SQS payment events consumer", zap.String("queue", paymentEventsQueueURL))
+	} else {
+		logger.Warn("Payment events consumer not started - missing queue URL")
+	}
 
 	// --- HTTP server ---
 	go func() {
@@ -154,5 +164,5 @@ func main() {
 		sqlDB.Close()
 	}
 
-	logger.Info("Order Service stopped gracefully")
+	log.Println("Order Service stopped gracefully")
 }
