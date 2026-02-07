@@ -209,6 +209,9 @@ func (ctrl *ProductController) GetProducts(c *gin.Context) {
 			c.JSON(http.StatusOK, cachedResponse)
 			return // <--- RETURN IMMEDIATELY, SKIP DB
 		}
+	} else if err != redis.Nil {
+		// Log Redis errors other than 'key not found'
+		zap.L().Error("Redis error while fetching cache", zap.Error(err), zap.String("cacheKey", cacheKey))
 	}
 
 	// --- CACHE MISS (Proceed to DB) ---
