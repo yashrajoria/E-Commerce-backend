@@ -15,7 +15,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
-	"go.mongodb.org/mongo-driver/bson"
 )
 
 type fakeProductService struct {
@@ -41,7 +40,7 @@ func (f *fakeProductService) CreateProduct(ctx context.Context, req services.Pro
 	return nil, nil
 }
 
-func (f *fakeProductService) UpdateProduct(ctx context.Context, id uuid.UUID, updates bson.M) (int64, error) {
+func (f *fakeProductService) UpdateProduct(ctx context.Context, id uuid.UUID, updates map[string]interface{}) (int64, error) {
 	return 0, nil
 }
 
@@ -57,8 +56,12 @@ func (f *fakeProductService) ValidateBulkImport(ctx context.Context, file multip
 	return nil, nil
 }
 
-func (f *fakeProductService) CreateBulkProducts(ctx context.Context, file multipart.File, autoCreateCategories bool) (*models.BulkImportResult, error) {
+func (f *fakeProductService) ProcessBulkImport(ctx context.Context, file multipart.File) (*models.BulkImportResult, error) {
 	return nil, nil
+}
+
+func (f *fakeProductService) GeneratePresignedUpload(ctx context.Context, sku, filename, contentType string, expiresSeconds int64) (string, string, string, error) {
+	return "", "", "", nil
 }
 
 func newTestRedisClient() *redis.Client {

@@ -1,22 +1,33 @@
 package controllers
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strings"
 
+	"product-service/models"
 	"product-service/services"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"go.mongodb.org/mongo-driver/mongo"
 	"go.uber.org/zap"
 )
 
-type CategoryController struct {
-	service *services.CategoryService
+// CategoryServiceAPI defines the interface for category service operations
+type CategoryServiceAPI interface {
+	CreateCategory(ctx context.Context, req services.CategoryCreateRequest) (*models.Category, error)
+	GetCategoryTree(ctx context.Context) ([]*models.Category, error)
+	UpdateCategory(ctx context.Context, id uuid.UUID, req services.CategoryCreateRequest) (int64, error)
+	DeleteCategory(ctx context.Context, id uuid.UUID) error
+	GetCategory(ctx context.Context, id uuid.UUID) (*models.Category, error)
 }
 
-func NewCategoryController(s *services.CategoryService) *CategoryController {
+type CategoryController struct {
+	service CategoryServiceAPI
+}
+
+func NewCategoryController(s CategoryServiceAPI) *CategoryController {
 	return &CategoryController{service: s}
 }
 
@@ -102,7 +113,7 @@ func (ctrl *CategoryController) DeleteCategory(c *gin.Context) {
 
 	err = ctrl.service.DeleteCategory(c.Request.Context(), categoryID)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
+		if errors.Is(err, ErrNotFound) || strings.Contains(err.Error(), "not found") {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Category not found"})
 			return
 		}

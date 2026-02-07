@@ -3,10 +3,12 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,17 +16,18 @@ import (
 
 	"product-service/models"
 	"product-service/services"
+
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
-	"os"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
 	"go.uber.org/zap"
 )
+
+// ErrNotFound is returned when a resource is not found
+var ErrNotFound = errors.New("not found")
 
 // Use a single instance of Validate, it caches struct info
 var validate = validator.New()
@@ -40,11 +43,11 @@ type ProductServiceAPI interface {
 	GetProduct(ctx context.Context, id uuid.UUID) (*models.Product, error)
 	ListProducts(ctx context.Context, params services.ListProductsParams) ([]*models.Product, int64, error)
 	CreateProduct(ctx context.Context, req services.ProductCreateRequest, images []*multipart.FileHeader) (*models.Product, error)
-	UpdateProduct(ctx context.Context, id uuid.UUID, updates bson.M) (int64, error)
+	UpdateProduct(ctx context.Context, id uuid.UUID, updates map[string]interface{}) (int64, error)
 	DeleteProduct(ctx context.Context, id uuid.UUID) (int64, error)
 	GetProductInternal(ctx context.Context, id uuid.UUID) (*services.ProductInternalDTO, error)
 	ValidateBulkImport(ctx context.Context, file multipart.File) (*models.BulkImportValidation, error)
-	CreateBulkProducts(ctx context.Context, file multipart.File, autoCreateCategories bool) (*models.BulkImportResult, error)
+	ProcessBulkImport(ctx context.Context, file multipart.File) (*models.BulkImportResult, error)
 	GeneratePresignedUpload(ctx context.Context, sku, filename, contentType string, expiresSeconds int64) (string, string, string, error)
 }
 
@@ -82,7 +85,7 @@ func (ctrl *ProductController) GetProductByID(c *gin.Context) {
 
 	product, err := ctrl.productService.GetProduct(c.Request.Context(), productID)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
+		if errors.Is(err, ErrNotFound) || strings.Contains(err.Error(), "not found") {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Product not found"})
 			return
 		}
@@ -316,6 +319,11 @@ func (ctrl *ProductController) CreateProduct(c *gin.Context) {
 		return
 	}
 
+	// Invalidate cache after creating a product
+	if err := ctrl.redis.FlushDB(c.Request.Context()).Err(); err != nil {
+		zap.L().Error("failed to invalidate cache after product creation", zap.Error(err))
+	}
+
 	c.JSON(http.StatusCreated, product)
 }
 
@@ -327,7 +335,7 @@ func (ctrl *ProductController) UpdateProduct(c *gin.Context) {
 		return
 	}
 
-	var updates bson.M
+	var updates map[string]interface{}
 	if err := c.ShouldBindJSON(&updates); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON body"})
 		return
@@ -342,6 +350,11 @@ func (ctrl *ProductController) UpdateProduct(c *gin.Context) {
 	if modifiedCount == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Product not found or no changes made"})
 		return
+	}
+
+	// Invalidate cache after updating a product
+	if err := ctrl.redis.FlushDB(c.Request.Context()).Err(); err != nil {
+		zap.L().Error("failed to invalidate cache after product update", zap.Error(err))
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Product updated successfully"})
@@ -364,6 +377,11 @@ func (ctrl *ProductController) DeleteProduct(c *gin.Context) {
 	if modifiedCount == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Product not found"})
 		return
+	}
+
+	// Invalidate cache after deleting a product
+	if err := ctrl.redis.FlushDB(c.Request.Context()).Err(); err != nil {
+		zap.L().Error("failed to invalidate cache after product deletion", zap.Error(err))
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Product deleted successfully"})
@@ -419,8 +437,6 @@ func (ctrl *ProductController) CreateBulkProducts(c *gin.Context) {
 		return
 	}
 
-	autoCreate := c.DefaultQuery("auto_create_categories", "false") == "true"
-
 	fileHandle, err := file.Open()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -430,7 +446,7 @@ func (ctrl *ProductController) CreateBulkProducts(c *gin.Context) {
 	}
 	defer fileHandle.Close()
 
-	result, err := ctrl.productService.CreateBulkProducts(c.Request.Context(), fileHandle, autoCreate)
+	result, err := ctrl.productService.ProcessBulkImport(c.Request.Context(), fileHandle)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": err.Error(),
@@ -484,7 +500,7 @@ func (ctrl *ProductController) PostPresignUpload(c *gin.Context) {
 	// ensure product exists
 	_, err = ctrl.productService.GetProduct(c.Request.Context(), productID)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
+		if errors.Is(err, ErrNotFound) || strings.Contains(err.Error(), "not found") {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Product not found"})
 			return
 		}
@@ -535,7 +551,7 @@ func (ctrl *ProductController) GetProductByIDInternal(c *gin.Context) {
 
 	productDTO, err := ctrl.productService.GetProductInternal(c.Request.Context(), productID)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
+		if errors.Is(err, ErrNotFound) || strings.Contains(err.Error(), "not found") {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Product not found"})
 			return
 		}
