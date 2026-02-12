@@ -2,7 +2,6 @@ package services
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"time"
 
@@ -46,8 +45,8 @@ func (s *TokenService) GenerateTokenPair(userID, email, role string) (*TokenPair
 	}
 
 	// Debug logging: tokens and jti (remove in production)
-	log.Printf("[TOKEN][GENERATE] user_id=%s access_token=%s", userID, accessToken)
-	log.Printf("[TOKEN][GENERATE] user_id=%s refresh_token=%s refresh_jti=%s", userID, refreshToken, tokenID)
+	// log.Printf("[TOKEN][GENERATE] user_id=%s access_token=%s", userID, accessToken)
+	// log.Printf("[TOKEN][GENERATE] user_id=%s refresh_token=%s refresh_jti=%s", userID, refreshToken, tokenID)
 
 	return &TokenPair{
 		AccessToken:  accessToken,

@@ -84,7 +84,10 @@ func (c *PaymentRequestConsumer) Start(ctx context.Context) {
 		if err != nil {
 			c.logger.Error("Failed to create Stripe PaymentIntent", zap.Error(err))
 			payment.Status = "failed"
-			c.repo.CreatePayment(ctx, &payment)
+			// Update the existing payment record instead of attempting to create it again
+			if updateErr := c.repo.UpdatePaymentByOrderID(ctx, orderID, "failed", nil, nil); updateErr != nil {
+				c.logger.Warn("Failed to mark payment as failed", zap.Error(updateErr))
+			}
 
 			// Publish failure event
 			eventMsg := models.PaymentEvent{
