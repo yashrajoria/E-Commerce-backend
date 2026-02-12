@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"mime/multipart"
 	"net/http"
@@ -442,6 +443,9 @@ func (ctrl *ProductController) CreateBulkProducts(c *gin.Context) {
 		return
 	}
 
+	// Support async processing via query param ?async=true
+	async := strings.ToLower(strings.TrimSpace(c.Query("async"))) == "true"
+
 	fileHandle, err := file.Open()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -451,6 +455,55 @@ func (ctrl *ProductController) CreateBulkProducts(c *gin.Context) {
 	}
 	defer fileHandle.Close()
 
+	if async {
+		// Persist uploaded file to disk for worker processing
+		data, err := io.ReadAll(fileHandle)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read file for async processing"})
+			return
+		}
+
+		storageDir := os.Getenv("BULK_STORAGE_DIR")
+		if storageDir == "" {
+			storageDir = "./data/bulk_imports"
+		}
+		if err := os.MkdirAll(storageDir, 0o755); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create storage dir"})
+			return
+		}
+
+		jobID := uuid.New().String()
+		filename := fmt.Sprintf("%s.csv", jobID)
+		path := fmt.Sprintf("%s/%s", strings.TrimRight(storageDir, "/"), filename)
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist file for async processing"})
+			return
+		}
+
+		jobIDStr := jobID
+		jobKey := fmt.Sprintf("bulk_import:job:%s", jobIDStr)
+		jobInfo := map[string]interface{}{"status": "pending", "created_at": time.Now().UTC().Format(time.RFC3339), "file_path": path}
+		b, _ := json.Marshal(jobInfo)
+		if err := ctrl.redis.Set(c.Request.Context(), jobKey, b, 24*time.Hour).Err(); err != nil {
+			os.Remove(path)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to enqueue job"})
+			return
+		}
+
+		// Push job ID to queue for worker(s)
+		queueKey := "bulk_import:queue"
+		if err := ctrl.redis.RPush(c.Request.Context(), queueKey, jobIDStr).Err(); err != nil {
+			os.Remove(path)
+			ctrl.redis.Del(c.Request.Context(), jobKey)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to enqueue job"})
+			return
+		}
+
+		c.JSON(http.StatusAccepted, gin.H{"job_id": jobIDStr})
+		return
+	}
+
+	// synchronous path
 	result, err := ctrl.productService.ProcessBulkImport(c.Request.Context(), fileHandle)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -458,8 +511,28 @@ func (ctrl *ProductController) CreateBulkProducts(c *gin.Context) {
 		})
 		return
 	}
-
 	c.JSON(http.StatusOK, result)
+}
+
+// GetBulkImportJobStatus returns the job status/result stored in Redis
+func (ctrl *ProductController) GetBulkImportJobStatus(c *gin.Context) {
+	id := c.Param("id")
+	if strings.TrimSpace(id) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "job id required"})
+		return
+	}
+	jobKey := fmt.Sprintf("bulk_import:job:%s", id)
+	val, err := ctrl.redis.Get(c.Request.Context(), jobKey).Result()
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
+		return
+	}
+	var out map[string]interface{}
+	if err := json.Unmarshal([]byte(val), &out); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse job result"})
+		return
+	}
+	c.JSON(http.StatusOK, out)
 }
 
 // GetPresignUpload returns a presigned URL for direct S3 upload and the public URL
