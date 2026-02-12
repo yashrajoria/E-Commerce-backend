@@ -12,6 +12,7 @@ func RegisterPaymentRoutes(r *gin.Engine, pc *controllers.PaymentController) {
 	payments.Use(middleware.AuthMiddleware())
 	{
 		payments.GET("/status/by-order/:order_id", pc.GetPaymentStatusByOrderID)
+		payments.POST("/create-checkout", pc.CreateCheckoutSession)
 		payments.POST("/verify-payment", pc.VerifyPayment)
 	}
 
