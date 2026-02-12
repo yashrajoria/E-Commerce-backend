@@ -216,8 +216,11 @@ func (cc *CartController) Checkout(c *gin.Context) {
 		topicArn = "arn:aws:sns:eu-west-2:000000000000:order-events"
 	}
 
+	// Log topic and payload size for debugging
+	// log.Printf("[CHECKOUT] publishing SNS topicArn=%q payload_len=%d userID=%s", topicArn, len(eventBytes), userID)
+
 	if err := cc.SNSClient.Publish(ctx, topicArn, eventBytes); err != nil {
-		log.Printf("❌ [Checkout] Failed to send SNS event for userID=%s: %v", userID, err)
+		log.Printf("❌ [Checkout] Failed to send SNS event for userID=%s topic=%s: %v", userID, topicArn, err)
 
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to publish checkout event"})
 		return
