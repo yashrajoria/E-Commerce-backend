@@ -6,20 +6,20 @@ import (
 )
 
 type Config struct {
-	Port         string
-	RedisURL     string
-	KafkaBrokers string
-	KafkaTopic   string
-	CartTTL      time.Duration
+	Port             string
+	RedisURL         string
+	CartTTL          time.Duration
+	CheckoutQueueURL string // SQS queue URL for checkout events
+	OrderSNSTopicARN string // SNS topic ARN for order events
 }
 
 func Load() Config {
 	return Config{
-		Port:         getEnv("PORT", "8086"),
-		RedisURL:     getEnv("REDIS_URL", "redis://redis:6379"),
-		KafkaBrokers: os.Getenv("KAFKA_BROKERS"),
-		KafkaTopic:   getEnv("CHECKOUT_TOPIC", getEnv("CART_KAFKA_TOPIC", "checkout.requested")),
-		CartTTL:      time.Hour * 24 * 7, // default 7 days
+		Port:             getEnv("PORT", "8086"),
+		RedisURL:         getEnv("REDIS_URL", "redis://redis:6379"),
+		CartTTL:          time.Hour * 24 * 7, // default 7 days
+		CheckoutQueueURL: os.Getenv("CHECKOUT_QUEUE_URL"),
+		OrderSNSTopicARN: getEnv("ORDER_SNS_TOPIC_ARN", "arn:aws:sns:eu-west-2:000000000000:order-events"),
 	}
 }
 

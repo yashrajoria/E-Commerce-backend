@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -14,9 +13,9 @@ import (
 
 	"cart-service/config"
 	"cart-service/database"
-
-	"cart-service/kafka"
 	"cart-service/routes"
+
+	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 )
 
 func main() {
@@ -27,18 +26,18 @@ func main() {
 	// Initialize Redis client
 	redisClient := database.NewRedisClient(cfg.RedisURL)
 
-	// Initialize Kafka producer
-	producer, err := kafka.NewProducer(strings.Split(cfg.KafkaBrokers, ","), cfg.KafkaTopic)
+	// Initialize AWS SNS client
+	awsCfg, err := aws_pkg.LoadAWSConfig(context.Background())
 	if err != nil {
-		log.Fatalf("failed to create Kafka producer: %v", err)
+		log.Fatalf("failed to load AWS config: %v", err)
 	}
-	defer producer.Close()
+	snsClient := aws_pkg.NewSNSClient(awsCfg)
 
 	// Initialize Gin router
 	router := gin.Default()
 
 	// Register routes
-	routes.RegisterCartRoutes(router, redisClient, producer, cfg)
+	routes.RegisterCartRoutes(router, redisClient, snsClient, cfg)
 
 	// Start HTTP server
 	srv := &http.Server{

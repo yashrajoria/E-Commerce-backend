@@ -6,20 +6,19 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
 	"payment-service/config"
 	"payment-service/controllers"
 	"payment-service/database"
-	"payment-service/kafka"
 	"payment-service/models"
 	"payment-service/repository"
 	"payment-service/routes"
 	"payment-service/services"
 
 	"github.com/gin-gonic/gin"
+	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"go.uber.org/zap"
 )
 
@@ -48,36 +47,69 @@ func main() {
 	}
 	defer logger.Sync()
 	paymentRepo := repository.NewGormPaymentRepo(database.DB)
-	// Stripe + Kafka setup
-	stripeSvc := services.NewStripeService(cfg.StripeSecretKey, cfg.StripeWebhookKey)
-	groupID := "payment-service-group" // use a unique group name
-	paymentProducer := kafka.NewPaymentEventProducer(strings.Split(cfg.KafkaBrokers, ","), cfg.KafkaTopic)
-	if paymentProducer == nil {
-		logger.Fatal("Failed to create payment Kafka producer")
+
+	// AWS setup
+	awsCfg, err := aws_pkg.LoadAWSConfig(context.Background())
+	if err != nil {
+		logger.Fatal("Failed to load AWS config", zap.Error(err))
 	}
+
+	// SNS publisher for payment events
+	paymentTopicArn := os.Getenv("PAYMENT_SNS_TOPIC_ARN")
+	if paymentTopicArn == "" {
+		paymentTopicArn = "arn:aws:sns:eu-west-2:000000000000:payment-events"
+	}
+	snsPublisher := aws_pkg.NewSNSClient(awsCfg)
+
+	// SQS consumer for payment requests
+	paymentQueueURL := os.Getenv("PAYMENT_REQUEST_QUEUE_URL")
+	if paymentQueueURL == "" {
+		// Get queue URL from LocalStack
+		queueURL, err := aws_pkg.GetQueueURL(context.Background(), awsCfg, "payment-request-queue")
+		if err != nil {
+			logger.Warn("Could not get payment queue URL", zap.Error(err))
+			paymentQueueURL = "http://localhost:4566/000000000000/payment-request-queue"
+		} else {
+			paymentQueueURL = queueURL
+		}
+	}
+
+	stripeSvc := services.NewStripeService(cfg.StripeSecretKey, cfg.StripeWebhookKey)
+	sqsConsumer := aws_pkg.NewSQSConsumer(awsCfg, paymentQueueURL)
 	paymentRequestConsumer := services.NewPaymentRequestConsumer(
-		strings.Split(cfg.KafkaBrokers, ","),
-		cfg.PaymentRequestTopic,
-		groupID,
-		paymentProducer,
+		sqsConsumer,
+		snsPublisher,
+		paymentTopicArn,
 		stripeSvc,
 		paymentRepo,
 		logger,
 	)
-	// Start consuming payment requests in the background
-	go paymentRequestConsumer.Start()
 
-	defer paymentProducer.Close()
+	// --- Graceful shutdown context ---
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	defer shutdownCancel()
+
+	// Start consuming payment requests in the background
+	go paymentRequestConsumer.Start(shutdownCtx)
 
 	// HTTP server
 	r := gin.New()
 	r.Use(gin.Recovery())
 
+	// Add request timeout middleware
+	r.Use(func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+		defer cancel()
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
+
 	pc := &controllers.PaymentController{
-		Stripe: stripeSvc,
-		Kafka:  paymentProducer,
-		Repo:   paymentRepo,
-		Logger: logger,
+		Stripe:   stripeSvc,
+		SNS:      snsPublisher,
+		TopicArn: paymentTopicArn,
+		Repo:     paymentRepo,
+		Logger:   logger,
 	}
 	routes.RegisterPaymentRoutes(r, pc)
 
@@ -99,11 +131,15 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	logger.Info("Initiating graceful shutdown...")
+	shutdownCancel()            // Cancel consumer
+	time.Sleep(1 * time.Second) // Give consumer time to shut down
+
+	httpShutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	logger.Info("Shutting down Payment Service...")
-	if err := srv.Shutdown(shutdownCtx); err != nil {
+	if err := srv.Shutdown(httpShutdownCtx); err != nil {
 		logger.Error("Server shutdown error", zap.Error(err))
 	}
 

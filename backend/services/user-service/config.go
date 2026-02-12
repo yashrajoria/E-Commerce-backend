@@ -1,8 +1,12 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+
+	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 )
 
 // Config holds all environment variables for the auth-service.
@@ -38,6 +42,37 @@ func LoadConfig() (*Config, error) {
 
 	if cfg.Port == "" {
 		cfg.Port = "8085"
+	}
+
+	if os.Getenv("AWS_USE_SECRETS") == "true" {
+		if awsCfg, err := aws_pkg.LoadAWSConfig(context.Background()); err == nil {
+			sm := aws_pkg.NewSecretsClient(awsCfg)
+
+			if jwt, err := sm.GetSecret(context.Background(), "user/JWT_SECRET"); err == nil && jwt != "" {
+				cfg.JWTSecret = jwt
+			}
+
+			if dbjson, err := sm.GetSecret(context.Background(), "user/DB_CREDENTIALS"); err == nil && dbjson != "" {
+				var m map[string]string
+				if err := json.Unmarshal([]byte(dbjson), &m); err == nil {
+					if v, ok := m["POSTGRES_USER"]; ok && v != "" {
+						cfg.PostgresUser = v
+					}
+					if v, ok := m["POSTGRES_PASSWORD"]; ok && v != "" {
+						cfg.PostgresPassword = v
+					}
+					if v, ok := m["POSTGRES_DB"]; ok && v != "" {
+						cfg.PostgresDB = v
+					}
+					if v, ok := m["POSTGRES_HOST"]; ok && v != "" {
+						cfg.PostgresHost = v
+					}
+					if v, ok := m["POSTGRES_PORT"]; ok && v != "" {
+						cfg.PostgresPort = v
+					}
+				}
+			}
+		}
 	}
 
 	// Validate required fields

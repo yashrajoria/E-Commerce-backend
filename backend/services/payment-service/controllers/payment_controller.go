@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -8,7 +9,6 @@ import (
 	"time"
 
 	"payment-service/database"
-	"payment-service/kafka"
 	"payment-service/middleware"
 	"payment-service/models"
 	"payment-service/repository"
@@ -18,15 +18,17 @@ import (
 	"github.com/google/uuid"
 	"github.com/stripe/stripe-go/v80"
 	"github.com/stripe/stripe-go/v80/checkout/session"
+	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
 type PaymentController struct {
-	Stripe *services.StripeService
-	Kafka  *kafka.PaymentEventProducer
-	Logger *zap.Logger
-	Repo   repository.PaymentRepository
+	Stripe   *services.StripeService
+	SNS      *aws_pkg.SNSClient
+	TopicArn string
+	Logger   *zap.Logger
+	Repo     repository.PaymentRepository
 }
 
 // --- ADD THIS NEW HANDLER ---
@@ -88,7 +90,7 @@ func (pc *PaymentController) InitiatePayment(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 
 	// Create Stripe PaymentIntent
-	piID, err := pc.Stripe.CreatePaymentIntent(int64(req.Amount), strings.ToLower(req.Currency))
+	pi, err := pc.Stripe.CreatePaymentIntent(int64(req.Amount), strings.ToLower(req.Currency))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -100,7 +102,7 @@ func (pc *PaymentController) InitiatePayment(c *gin.Context) {
 		Amount:          req.Amount,
 		Currency:        strings.ToLower(req.Currency),
 		Status:          "pending",
-		StripePaymentID: &piID,
+		StripePaymentID: &pi.ID,
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),
 	}
@@ -110,7 +112,7 @@ func (pc *PaymentController) InitiatePayment(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"payment_intent_id": piID})
+	c.JSON(http.StatusOK, gin.H{"payment_intent_id": pi.ID})
 }
 
 // Handles Stripe webhooks for payment status updates
@@ -195,14 +197,15 @@ func (pc *PaymentController) handleCheckoutCompleted(event stripe.Event, payload
 		Timestamp: time.Now().UTC(),
 	}
 
-	if err := pc.Kafka.SendPaymentEvent(eventMsg); err != nil {
+	eventBytes, _ := json.Marshal(eventMsg)
+	if err := pc.SNS.Publish(context.Background(), pc.TopicArn, eventBytes); err != nil {
 		pc.Logger.Warn("Failed to publish payment event", zap.Error(err))
 	} else {
 		pc.Logger.Info("Payment succeeded event published", zap.String("order_id", orderID))
 	}
 }
 
-// Updates DB + publishes standardized Kafka events
+// Updates DB + publishes standardized SNS events
 func (pc *PaymentController) handlePaymentStatus(event stripe.Event, status string, payload []byte) {
 	var pi stripe.PaymentIntent
 	if err := json.Unmarshal(event.Data.Raw, &pi); err != nil {
@@ -254,8 +257,9 @@ func (pc *PaymentController) handlePaymentStatus(event stripe.Event, status stri
 		Timestamp: time.Now().UTC(),
 	}
 
-	if err := pc.Kafka.SendPaymentEvent(eventMsg); err != nil {
-		pc.Logger.Warn("Failed to publish Kafka payment event", zap.String("payment_id", payment.Payment_ID.String()), zap.Error(err))
+	eventBytes, _ := json.Marshal(eventMsg)
+	if err := pc.SNS.Publish(context.Background(), pc.TopicArn, eventBytes); err != nil {
+		pc.Logger.Warn("Failed to publish payment event", zap.String("payment_id", payment.Payment_ID.String()), zap.Error(err))
 	}
 }
 

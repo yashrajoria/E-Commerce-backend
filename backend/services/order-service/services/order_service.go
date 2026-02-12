@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"log"
-	"order-service/kafka"
 	"order-service/models"
 	repositories "order-service/repository"
+
+	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 
 	"time"
 
@@ -43,20 +44,21 @@ func (e *ServiceError) Error() string {
 }
 
 type OrderService struct {
-	orderRepo     repositories.OrderRepository
-	kafkaProducer *kafka.Producer
-	checkoutTopic string
+	orderRepo   repositories.OrderRepository
+	snsClient   aws_pkg.SNSPublisher
+	snsTopicArn string
 }
 
-func NewOrderService(orderRepo repositories.OrderRepository, kafkaProducer *kafka.Producer, checkoutTopic string) *OrderService {
+// NewOrderServiceSQS creates an OrderService that uses SNS/SQS instead of Kafka
+func NewOrderServiceSQS(orderRepo repositories.OrderRepository, snsClient aws_pkg.SNSPublisher, snsTopicArn string) *OrderService {
 	return &OrderService{
-		orderRepo:     orderRepo,
-		kafkaProducer: kafkaProducer,
-		checkoutTopic: checkoutTopic,
+		orderRepo:   orderRepo,
+		snsClient:   snsClient,
+		snsTopicArn: snsTopicArn,
 	}
 }
 
-// CreateOrder processes order creation
+// CreateOrder processes order creation via SNS
 func (s *OrderService) CreateOrder(ctx context.Context, userID string, req *CreateOrderRequest) *ServiceError {
 	if len(req.Items) == 0 {
 		return &ServiceError{
@@ -77,6 +79,7 @@ func (s *OrderService) CreateOrder(ctx context.Context, userID string, req *Crea
 	// Create checkout event
 	checkoutEvent := models.CheckoutEvent{
 		UserID:    userID,
+		OrderID:   uuid.New().String(),
 		Items:     eventItems,
 		Timestamp: time.Now(),
 	}
@@ -90,13 +93,18 @@ func (s *OrderService) CreateOrder(ctx context.Context, userID string, req *Crea
 		}
 	}
 
-	// Publish to Kafka
-	if err := s.kafkaProducer.Publish(s.checkoutTopic, eventBytes); err != nil {
-		log.Printf("[OrderService] Failed to publish to Kafka: %v", err)
-		return &ServiceError{
-			StatusCode: 500,
-			Message:    "Failed to publish checkout event",
+	// Publish to SNS (which fans out to SQS queues)
+	if s.snsClient != nil && s.snsTopicArn != "" {
+		if err := s.snsClient.Publish(ctx, s.snsTopicArn, eventBytes); err != nil {
+			log.Printf("[OrderService] SNS publish failed: %v", err)
+			return &ServiceError{
+				StatusCode: 500,
+				Message:    "Failed to publish checkout event",
+			}
 		}
+		log.Printf("[OrderService] SNS published to %s", s.snsTopicArn)
+	} else {
+		log.Printf("[OrderService] Warning: SNS client not configured, order event not published")
 	}
 
 	log.Printf("[OrderService] Order creation initiated for user: %s", userID)

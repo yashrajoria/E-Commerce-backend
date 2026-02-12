@@ -2,8 +2,10 @@ package utils
 
 import (
 	"io"
+	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"api-gateway/logger"
 
@@ -67,7 +69,9 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 		}
 	}
 
-	client := http.DefaultClient
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		logger.Log.Error("❌ Failed to forward request", zap.Error(err))
@@ -93,7 +97,13 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 			continue
 		}
 
-		c.Header(k, strings.Join(v, ","))
+		for _, val := range v {
+			if strings.ToLower(k) == "set-cookie" {
+				// Log Set-Cookie values coming from downstream for visibility
+				log.Printf("[GATEWAY][FORWARD] downstream Set-Cookie: %s", val)
+			}
+			c.Writer.Header().Add(k, val)
+		}
 	}
 
 	// Set status AFTER all headers are set

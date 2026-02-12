@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -45,12 +46,16 @@ func (ctrl *AuthController) Login(c *gin.Context) {
 		return
 	}
 
+	// Debug logging: tokens and identifiers (remove in production)
+	log.Printf("[AUTH][LOGIN] email=%s access_token=%s", req.Email, tokenPair.AccessToken)
+	log.Printf("[AUTH][LOGIN] email=%s refresh_token=%s", req.Email, tokenPair.RefreshToken)
+
 	domain := os.Getenv("COOKIE_DOMAIN")
 	isSecure := os.Getenv("ENV") == "production"
 
 	// Set cookies. Use SameSite=None for refresh cookie to allow cross-site refresh requests.
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie("token", tokenPair.AccessToken, 900, "/", domain, isSecure, true)
+	c.SetCookie("__session", tokenPair.AccessToken, 900, "/", domain, isSecure, true)
 
 	// Refresh cookie must be SameSite=None and Secure in cross-site contexts
 	c.SetSameSite(http.SameSiteNoneMode)
@@ -131,7 +136,7 @@ func (ctrl *AuthController) Logout(c *gin.Context) {
 	isSecure := os.Getenv("ENV") == "production"
 
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie("token", "", -1, "/", domain, isSecure, true)
+	c.SetCookie("__session", "", -1, "/", domain, isSecure, true)
 
 	// Clear refresh cookie with SameSite=None to match how it was set
 	c.SetSameSite(http.SameSiteNoneMode)
@@ -157,7 +162,7 @@ func (ctrl *AuthController) Refresh(c *gin.Context) {
 	isSecure := os.Getenv("ENV") == "production"
 
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie("token", newTokenPair.AccessToken, 900, "/", domain, isSecure, true)
+	c.SetCookie("__session", newTokenPair.AccessToken, 900, "/", domain, isSecure, true)
 
 	// Refresh cookie must be SameSite=None
 	c.SetSameSite(http.SameSiteNoneMode)

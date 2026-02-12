@@ -3,10 +3,12 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,27 +17,37 @@ import (
 	"product-service/models"
 	"product-service/services"
 
+	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
 	"go.uber.org/zap"
 )
 
+// ErrNotFound is returned when a resource is not found
+var ErrNotFound = errors.New("not found")
+
 // Use a single instance of Validate, it caches struct info
 var validate = validator.New()
+
+// Validation constants
+const (
+	MaxPageSize   = 100
+	MaxPageNumber = 1000000
+	MaxUploadSize = 50 * 1024 * 1024 // 50MB
+)
 
 type ProductServiceAPI interface {
 	GetProduct(ctx context.Context, id uuid.UUID) (*models.Product, error)
 	ListProducts(ctx context.Context, params services.ListProductsParams) ([]*models.Product, int64, error)
 	CreateProduct(ctx context.Context, req services.ProductCreateRequest, images []*multipart.FileHeader) (*models.Product, error)
-	UpdateProduct(ctx context.Context, id uuid.UUID, updates bson.M) (int64, error)
+	UpdateProduct(ctx context.Context, id uuid.UUID, updates map[string]interface{}) (int64, error)
 	DeleteProduct(ctx context.Context, id uuid.UUID) (int64, error)
 	GetProductInternal(ctx context.Context, id uuid.UUID) (*services.ProductInternalDTO, error)
 	ValidateBulkImport(ctx context.Context, file multipart.File) (*models.BulkImportValidation, error)
-	CreateBulkProducts(ctx context.Context, file multipart.File, autoCreateCategories bool) (*models.BulkImportResult, error)
+	ProcessBulkImport(ctx context.Context, file multipart.File) (*models.BulkImportResult, error)
 	GeneratePresignedUpload(ctx context.Context, sku, filename, contentType string, expiresSeconds int64) (string, string, string, error)
 }
 
@@ -73,7 +85,7 @@ func (ctrl *ProductController) GetProductByID(c *gin.Context) {
 
 	product, err := ctrl.productService.GetProduct(c.Request.Context(), productID)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
+		if errors.Is(err, ErrNotFound) || strings.Contains(err.Error(), "not found") {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Product not found"})
 			return
 		}
@@ -85,14 +97,26 @@ func (ctrl *ProductController) GetProductByID(c *gin.Context) {
 }
 
 func (ctrl *ProductController) GetProducts(c *gin.Context) {
-	// 1. Parse Parameters (Same as before)
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("perPage", "10"))
-	if page < 1 {
-		page = 1
+	// 1. Parse Parameters with validation
+	pageStr := c.DefaultQuery("page", "1")
+	perPageStr := c.DefaultQuery("perPage", "10")
+
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page < 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid page number"})
+		return
 	}
-	if perPage < 1 {
-		perPage = 10
+	if page > MaxPageNumber {
+		page = MaxPageNumber
+	}
+
+	perPage, err := strconv.Atoi(perPageStr)
+	if err != nil || perPage < 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid page size"})
+		return
+	}
+	if perPage > MaxPageSize {
+		perPage = MaxPageSize
 	}
 
 	// Parse filters for the Cache Key
@@ -185,6 +209,9 @@ func (ctrl *ProductController) GetProducts(c *gin.Context) {
 			c.JSON(http.StatusOK, cachedResponse)
 			return // <--- RETURN IMMEDIATELY, SKIP DB
 		}
+	} else if err != redis.Nil {
+		// Log Redis errors other than 'key not found'
+		zap.L().Error("Redis error while fetching cache", zap.Error(err), zap.String("cacheKey", cacheKey))
 	}
 
 	// --- CACHE MISS (Proceed to DB) ---
@@ -295,6 +322,13 @@ func (ctrl *ProductController) CreateProduct(c *gin.Context) {
 		return
 	}
 
+	// Invalidate cache after creating a product
+	// WARNING: FlushDB clears the ENTIRE Redis instance. Use specific key invalidation in production.
+	// TODO: Implement pattern-based deletion (e.g. SCAN for "products:*") or versioning.
+	// if err := ctrl.redis.FlushDB(c.Request.Context()).Err(); err != nil {
+	// 	zap.L().Error("failed to invalidate cache after product creation", zap.Error(err))
+	// }
+
 	c.JSON(http.StatusCreated, product)
 }
 
@@ -306,7 +340,7 @@ func (ctrl *ProductController) UpdateProduct(c *gin.Context) {
 		return
 	}
 
-	var updates bson.M
+	var updates map[string]interface{}
 	if err := c.ShouldBindJSON(&updates); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON body"})
 		return
@@ -322,6 +356,11 @@ func (ctrl *ProductController) UpdateProduct(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Product not found or no changes made"})
 		return
 	}
+
+	// Invalidate cache after updating a product
+	// if err := ctrl.redis.FlushDB(c.Request.Context()).Err(); err != nil {
+	// 	zap.L().Error("failed to invalidate cache after product update", zap.Error(err))
+	// }
 
 	c.JSON(http.StatusOK, gin.H{"message": "Product updated successfully"})
 }
@@ -345,6 +384,11 @@ func (ctrl *ProductController) DeleteProduct(c *gin.Context) {
 		return
 	}
 
+	// Invalidate cache after deleting a product
+	// if err := ctrl.redis.FlushDB(c.Request.Context()).Err(); err != nil {
+	// 	zap.L().Error("failed to invalidate cache after product deletion", zap.Error(err))
+	// }
+
 	c.JSON(http.StatusOK, gin.H{"message": "Product deleted successfully"})
 }
 
@@ -355,6 +399,11 @@ func (ctrl *ProductController) ValidateBulkImport(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "File is required",
 		})
+		return
+	}
+
+	if file.Size > MaxUploadSize {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "File too large (max 50MB)"})
 		return
 	}
 
@@ -388,7 +437,10 @@ func (ctrl *ProductController) CreateBulkProducts(c *gin.Context) {
 		return
 	}
 
-	autoCreate := c.DefaultQuery("auto_create_categories", "false") == "true"
+	if file.Size > MaxUploadSize {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "File too large (max 50MB)"})
+		return
+	}
 
 	fileHandle, err := file.Open()
 	if err != nil {
@@ -399,7 +451,7 @@ func (ctrl *ProductController) CreateBulkProducts(c *gin.Context) {
 	}
 	defer fileHandle.Close()
 
-	result, err := ctrl.productService.CreateBulkProducts(c.Request.Context(), fileHandle, autoCreate)
+	result, err := ctrl.productService.ProcessBulkImport(c.Request.Context(), fileHandle)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": err.Error(),
@@ -441,6 +493,59 @@ func (ctrl *ProductController) GetPresignUpload(c *gin.Context) {
 	})
 }
 
+// PostPresignUpload returns a presigned URL for PUT upload for a specific product ID.
+func (ctrl *ProductController) PostPresignUpload(c *gin.Context) {
+	id := c.Param("id")
+	productID, err := uuid.Parse(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid UUID format"})
+		return
+	}
+
+	// ensure product exists
+	_, err = ctrl.productService.GetProduct(c.Request.Context(), productID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) || strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Product not found"})
+			return
+		}
+		zap.L().Error("Service failed to get product", zap.Error(err), zap.String("id", id))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal Server Error"})
+		return
+	}
+
+	// prepare presign
+	filename := c.DefaultQuery("filename", "upload")
+	expiresStr := c.DefaultQuery("expires", "900")
+	expires, err := strconv.ParseInt(expiresStr, 10, 64)
+	if err != nil || expires <= 0 {
+		expires = 900
+	}
+
+	// load aws config and generate presign
+	cfg, err := aws_pkg.LoadAWSConfig(c.Request.Context())
+	if err != nil {
+		zap.L().Error("failed to load aws config", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "AWS config error"})
+		return
+	}
+
+	bucket := os.Getenv("S3_BUCKET_IMAGES")
+	if bucket == "" {
+		bucket = "ecommerce-product-images"
+	}
+
+	key := fmt.Sprintf("product/%s/%s", productID.String(), filename)
+	url, _, err := aws_pkg.GeneratePresignedPutURL(c.Request.Context(), cfg, bucket, key, expires)
+	if err != nil {
+		zap.L().Error("failed to generate presigned url", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate presigned upload"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"upload_url": url, "method": "PUT", "key": key, "expires_in": expires})
+}
+
 func (ctrl *ProductController) GetProductByIDInternal(c *gin.Context) {
 	id := c.Param("id")
 	productID, err := uuid.Parse(id)
@@ -451,7 +556,7 @@ func (ctrl *ProductController) GetProductByIDInternal(c *gin.Context) {
 
 	productDTO, err := ctrl.productService.GetProductInternal(c.Request.Context(), productID)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
+		if errors.Is(err, ErrNotFound) || strings.Contains(err.Error(), "not found") {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Product not found"})
 			return
 		}

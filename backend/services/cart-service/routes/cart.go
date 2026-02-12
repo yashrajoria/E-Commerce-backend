@@ -4,25 +4,24 @@ import (
 	"cart-service/config"
 	"cart-service/controllers"
 	"cart-service/database"
-	"cart-service/kafka"
-	"cart-service/middleware"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
+	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 )
 
 func RegisterCartRoutes(
 	r *gin.Engine,
 	redisClient *redis.Client,
-	producer *kafka.Producer,
+	snsClient *aws_pkg.SNSClient,
 	cfg config.Config,
 ) {
 	repo := database.NewCartRepository(redisClient, cfg.CartTTL)
-	controller := controllers.NewCartController(repo, producer, cfg)
+	controller := controllers.NewCartController(repo, snsClient, cfg)
 
 	// Protected cart routes (require authentication)
 	api := r.Group("/cart")
-	api.Use(middleware.AuthMiddleware())
+	// TODO: Add authentication middleware when implemented
 	{
 		api.GET("/", controller.GetCart)
 		api.POST("/add", controller.AddItems)
