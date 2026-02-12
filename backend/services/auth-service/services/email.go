@@ -1,9 +1,10 @@
 package services
 
 import (
+	"crypto/rand"
 	"fmt"
 	"log"
-	"math/rand"
+	"math/big"
 	"net/smtp"
 	"os"
 	"strings"
@@ -14,18 +15,24 @@ import (
 func GenerateRandomCode(length int) string {
 	code := ""
 	for i := 0; i < length; i++ {
-		code += fmt.Sprintf("%d", rand.Intn(10))
+		n, err := rand.Int(rand.Reader, big.NewInt(10))
+		if err != nil {
+			// Fallback to 0 in the unlikely event of entropy failure
+			code += "0"
+			continue
+		}
+		code += n.String()
 	}
 	return code
 }
 
 // EmailConfig holds SMTP configuration
 type EmailConfig struct {
-	SmtpServer   string
-	SmtpPort     string
-	SenderEmail  string
-	SenderPass   string
-	SenderName   string
+	SmtpServer  string
+	SmtpPort    string
+	SenderEmail string
+	SenderPass  string
+	SenderName  string
 }
 
 // LoadEmailConfig loads email configuration from environment variables
@@ -73,7 +80,7 @@ func SendVerificationEmail(to string, code string) error {
 	subject := "Email Verification - ShopSwift"
 	htmlBody := buildVerificationEmailHTML(code)
 	from := fmt.Sprintf("%s <%s>", emailConfig.SenderName, emailConfig.SenderEmail)
-	
+
 	// Create MIME headers
 	headers := map[string]string{
 		"From":                      from,
@@ -93,7 +100,7 @@ func SendVerificationEmail(to string, code string) error {
 
 	// Set up SMTP authentication
 	auth := smtp.PlainAuth("", emailConfig.SenderEmail, emailConfig.SenderPass, emailConfig.SmtpServer)
-	
+
 	// Send email
 	err = smtp.SendMail(
 		emailConfig.SmtpServer+":"+emailConfig.SmtpPort,
@@ -102,7 +109,7 @@ func SendVerificationEmail(to string, code string) error {
 		[]string{to},
 		[]byte(message),
 	)
-	
+
 	if err != nil {
 		log.Printf("Failed to send verification email to %s: %v", to, err)
 		return fmt.Errorf("failed to send verification email: %w", err)
@@ -240,7 +247,7 @@ func SendPasswordResetEmail(to, resetToken string) error {
 
 	subject := "Password Reset Request - ShopSwift"
 	resetLink := fmt.Sprintf("%s/reset-password?token=%s", os.Getenv("FRONTEND_URL"), resetToken)
-	
+
 	htmlBody := fmt.Sprintf(`
 <!DOCTYPE html>
 <html>
@@ -279,7 +286,7 @@ func SendPasswordResetEmail(to, resetToken string) error {
 	message += "\r\n" + htmlBody
 
 	auth := smtp.PlainAuth("", emailConfig.SenderEmail, emailConfig.SenderPass, emailConfig.SmtpServer)
-	
+
 	err = smtp.SendMail(
 		emailConfig.SmtpServer+":"+emailConfig.SmtpPort,
 		auth,
@@ -287,7 +294,7 @@ func SendPasswordResetEmail(to, resetToken string) error {
 		[]string{to},
 		[]byte(message),
 	)
-	
+
 	if err != nil {
 		log.Printf("Failed to send password reset email to %s: %v", to, err)
 		return fmt.Errorf("failed to send password reset email: %w", err)
