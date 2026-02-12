@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -47,8 +46,8 @@ func (ctrl *AuthController) Login(c *gin.Context) {
 	}
 
 	// Debug logging: tokens and identifiers (remove in production)
-	log.Printf("[AUTH][LOGIN] email=%s access_token=%s", req.Email, tokenPair.AccessToken)
-	log.Printf("[AUTH][LOGIN] email=%s refresh_token=%s", req.Email, tokenPair.RefreshToken)
+	// log.Printf("[AUTH][LOGIN] email=%s access_token=%s", req.Email, tokenPair.AccessToken)
+	// log.Printf("[AUTH][LOGIN] email=%s refresh_token=%s", req.Email, tokenPair.RefreshToken)
 
 	domain := os.Getenv("COOKIE_DOMAIN")
 	isSecure := os.Getenv("ENV") == "production"
