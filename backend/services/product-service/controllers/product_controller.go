@@ -323,9 +323,11 @@ func (ctrl *ProductController) CreateProduct(c *gin.Context) {
 	}
 
 	// Invalidate cache after creating a product
-	if err := ctrl.redis.FlushDB(c.Request.Context()).Err(); err != nil {
-		zap.L().Error("failed to invalidate cache after product creation", zap.Error(err))
-	}
+	// WARNING: FlushDB clears the ENTIRE Redis instance. Use specific key invalidation in production.
+	// TODO: Implement pattern-based deletion (e.g. SCAN for "products:*") or versioning.
+	// if err := ctrl.redis.FlushDB(c.Request.Context()).Err(); err != nil {
+	// 	zap.L().Error("failed to invalidate cache after product creation", zap.Error(err))
+	// }
 
 	c.JSON(http.StatusCreated, product)
 }
@@ -356,9 +358,9 @@ func (ctrl *ProductController) UpdateProduct(c *gin.Context) {
 	}
 
 	// Invalidate cache after updating a product
-	if err := ctrl.redis.FlushDB(c.Request.Context()).Err(); err != nil {
-		zap.L().Error("failed to invalidate cache after product update", zap.Error(err))
-	}
+	// if err := ctrl.redis.FlushDB(c.Request.Context()).Err(); err != nil {
+	// 	zap.L().Error("failed to invalidate cache after product update", zap.Error(err))
+	// }
 
 	c.JSON(http.StatusOK, gin.H{"message": "Product updated successfully"})
 }
@@ -383,9 +385,9 @@ func (ctrl *ProductController) DeleteProduct(c *gin.Context) {
 	}
 
 	// Invalidate cache after deleting a product
-	if err := ctrl.redis.FlushDB(c.Request.Context()).Err(); err != nil {
-		zap.L().Error("failed to invalidate cache after product deletion", zap.Error(err))
-	}
+	// if err := ctrl.redis.FlushDB(c.Request.Context()).Err(); err != nil {
+	// 	zap.L().Error("failed to invalidate cache after product deletion", zap.Error(err))
+	// }
 
 	c.JSON(http.StatusOK, gin.H{"message": "Product deleted successfully"})
 }
