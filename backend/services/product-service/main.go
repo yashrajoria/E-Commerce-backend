@@ -157,6 +157,13 @@ func main() {
 	productController := controllers.NewProductController(productService, ProductRedis)
 	categoryController := controllers.NewCategoryController(categoryService)
 
+	// Start bulk import worker (consumes persisted files from storage and processes them)
+	storageDir := os.Getenv("BULK_STORAGE_DIR")
+	if storageDir == "" {
+		storageDir = "./data/bulk_imports"
+	}
+	services.StartBulkImportWorker(context.Background(), ProductRedis, productService, storageDir)
+
 	// --- 3. HTTP Server & Middleware ---
 
 	r := gin.New()
