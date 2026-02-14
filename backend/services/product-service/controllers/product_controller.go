@@ -2,87 +2,256 @@ package controllers
 
 import (
 	"context"
-	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"log"
 	"math"
+	"mime/multipart"
 	"net/http"
+	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/cloudinary/cloudinary-go/api/uploader"
-	"github.com/google/uuid"
+	"product-service/models"
+	"product-service/services"
 
-	"github.com/cloudinary/cloudinary-go"
+	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+
 	"github.com/gin-gonic/gin"
-	"github.com/joho/godotenv"
-	"github.com/yashrajoria/product-service/database"
-	"github.com/yashrajoria/product-service/models"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"github.com/go-playground/validator/v10"
+	"github.com/go-redis/redis/v8"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
-func init() {
-	_ = godotenv.Load()
+// ErrNotFound is returned when a resource is not found
+var ErrNotFound = errors.New("not found")
+
+// Use a single instance of Validate, it caches struct info
+var validate = validator.New()
+
+// Validation constants
+const (
+	MaxPageSize   = 100
+	MaxPageNumber = 1000000
+	MaxUploadSize = 50 * 1024 * 1024 // 50MB
+)
+
+type ProductServiceAPI interface {
+	GetProduct(ctx context.Context, id uuid.UUID) (*models.Product, error)
+	ListProducts(ctx context.Context, params services.ListProductsParams) ([]*models.Product, int64, error)
+	CreateProduct(ctx context.Context, req services.ProductCreateRequest, images []*multipart.FileHeader) (*models.Product, error)
+	UpdateProduct(ctx context.Context, id uuid.UUID, updates map[string]interface{}) (int64, error)
+	DeleteProduct(ctx context.Context, id uuid.UUID) (int64, error)
+	GetProductInternal(ctx context.Context, id uuid.UUID) (*services.ProductInternalDTO, error)
+	ValidateBulkImport(ctx context.Context, file multipart.File) (*models.BulkImportValidation, error)
+	ProcessBulkImport(ctx context.Context, file multipart.File) (*models.BulkImportResult, error)
+	GeneratePresignedUpload(ctx context.Context, sku, filename, contentType string, expiresSeconds int64) (string, string, string, error)
 }
 
-// GetProducts retrieves paginated products from the database.
-func GetProducts(c *gin.Context) {
-	collection := database.DB.Collection("products")
+// CreateProductRequest defines the expected structure for creating a product via multipart-form.
+type CreateProductRequest struct {
+	Name        string  `form:"name" validate:"required"`
+	Description string  `form:"description" validate:"required"`
+	Brand       string  `form:"brand" validate:"required"`
+	SKU         string  `form:"sku" validate:"required"`
+	Price       float64 `form:"price" validate:"required,gt=0"`
+	Quantity    int     `form:"quantity" validate:"required,gte=0"`
+	IsFeatured  bool    `form:"is_featured"`
+	Categories  string  `form:"category" validate:"required"` // JSON string array
+}
 
-	// Parse query parameters
-	page, err := strconv.Atoi(c.DefaultQuery("page", "1"))
+type ProductController struct {
+	productService ProductServiceAPI
+	redis          *redis.Client
+}
+
+func NewProductController(ps ProductServiceAPI, redis *redis.Client) *ProductController {
+	return &ProductController{
+		productService: ps,
+		redis:          redis,
+	}
+}
+
+func (ctrl *ProductController) GetProductByID(c *gin.Context) {
+	id := c.Param("id")
+	productID, err := uuid.Parse(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid UUID format"})
+		return
+	}
+
+	product, err := ctrl.productService.GetProduct(c.Request.Context(), productID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) || strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Product not found"})
+			return
+		}
+		zap.L().Error("Service failed to get product", zap.Error(err), zap.String("id", id))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal Server Error"})
+		return
+	}
+	c.JSON(http.StatusOK, product)
+}
+
+func (ctrl *ProductController) GetProducts(c *gin.Context) {
+	// 1. Parse Parameters with validation
+	pageStr := c.DefaultQuery("page", "1")
+	perPageStr := c.DefaultQuery("perPage", "10")
+
+	page, err := strconv.Atoi(pageStr)
 	if err != nil || page < 1 {
-		page = 1
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid page number"})
+		return
+	}
+	if page > MaxPageNumber {
+		page = MaxPageNumber
 	}
 
-	perPage, err := strconv.Atoi(c.DefaultQuery("perPage", "10"))
-	if err != nil || perPage <= 0 {
-		perPage = 10
+	perPage, err := strconv.Atoi(perPageStr)
+	if err != nil || perPage < 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid page size"})
+		return
+	}
+	if perPage > MaxPageSize {
+		perPage = MaxPageSize
 	}
 
-	skip := (page - 1) * perPage
+	// Parse filters for the Cache Key
+	isFeatured := c.Query("is_featured")
+	normalizedIsFeatured := strings.ToLower(strings.TrimSpace(isFeatured))
+	categoryIDsParam := c.Query("categoryId")
+	normalizedCategoryKey := ""
+	var categoryIDs []uuid.UUID
+	if categoryIDsParam != "" {
+		rawIDs := strings.Split(categoryIDsParam, ",")
+		var categoryIDStrings []string
+		for _, rawID := range rawIDs {
+			trimmed := strings.TrimSpace(rawID)
+			if trimmed == "" {
+				continue
+			}
+			categoryUUID, err := uuid.Parse(trimmed)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category ID format"})
+				return
+			}
+			categoryIDs = append(categoryIDs, categoryUUID)
+			categoryIDStrings = append(categoryIDStrings, categoryUUID.String())
+		}
+		if len(categoryIDs) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category ID format"})
+			return
+		}
+		sort.Strings(categoryIDStrings)
+		normalizedCategoryKey = strings.Join(categoryIDStrings, ",")
+	}
 
-	// MongoDB query options
-	findOptions := options.Find()
-	findOptions.SetLimit(int64(perPage))
-	findOptions.SetSkip(int64(skip))
+	sortParam := strings.TrimSpace(c.Query("sort"))
+	normalizedSortParam := strings.ToLower(sortParam)
+	if sortParam != "" && !isSupportedSort(sortParam) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid sort value"})
+		return
+	}
 
-	var products []models.Product
-	cursor, err := collection.Find(c, bson.M{}, findOptions)
+	var minPrice *float64
+	minPriceStr := strings.TrimSpace(c.Query("minPrice"))
+	if minPriceStr != "" {
+		parsed, err := strconv.ParseFloat(minPriceStr, 64)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid minPrice value"})
+			return
+		}
+		minPrice = &parsed
+	}
+
+	var maxPrice *float64
+	maxPriceStr := strings.TrimSpace(c.Query("maxPrice"))
+	if maxPriceStr != "" {
+		parsed, err := strconv.ParseFloat(maxPriceStr, 64)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid maxPrice value"})
+			return
+		}
+		maxPrice = &parsed
+	}
+
+	if minPrice != nil && maxPrice != nil && *minPrice > *maxPrice {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "minPrice must be less than or equal to maxPrice"})
+		return
+	}
+
+	// 2. GENERATE A UNIQUE CACHE KEY
+	// The key MUST include every variable that changes the output
+	cacheKey := fmt.Sprintf(
+		"products:p:%d:l:%d:f:%s:c:%s:s:%s:min:%s:max:%s",
+		page,
+		perPage,
+		normalizedIsFeatured,
+		normalizedCategoryKey,
+		normalizedSortParam,
+		formatFloatForCache(minPrice),
+		formatFloatForCache(maxPrice),
+	)
+
+	// 3. TRY TO GET FROM REDIS
+	val, err := ctrl.redis.Get(c.Request.Context(), cacheKey).Result()
+
+	if err == nil {
+		// --- CACHE HIT ---
+		var cachedResponse map[string]interface{}
+
+		// Unmarshal the JSON string back into a Go map/struct
+		if err := json.Unmarshal([]byte(val), &cachedResponse); err == nil {
+			zap.L().Info("Returning data from Redis Cache")
+			c.JSON(http.StatusOK, cachedResponse)
+			return // <--- RETURN IMMEDIATELY, SKIP DB
+		}
+	} else if err != redis.Nil {
+		// Log Redis errors other than 'key not found'
+		zap.L().Error("Redis error while fetching cache", zap.Error(err), zap.String("cacheKey", cacheKey))
+	}
+
+	// --- CACHE MISS (Proceed to DB) ---
+
+	// Prepare params for Service (Same as before)
+	params := services.ListProductsParams{
+		Page:    page,
+		PerPage: perPage,
+		Sort:    sortParam,
+	}
+
+	if isFeaturedStr := c.Query("is_featured"); isFeaturedStr != "" {
+		isFeatured, err := strconv.ParseBool(isFeaturedStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid boolean value for 'is_featured'"})
+			return
+		}
+		params.IsFeatured = &isFeatured
+	}
+
+	if len(categoryIDs) > 0 {
+		params.CategoryID = categoryIDs
+	}
+	if minPrice != nil {
+		params.MinPrice = minPrice
+	}
+	if maxPrice != nil {
+		params.MaxPrice = maxPrice
+	}
+
+	products, total, err := ctrl.productService.ListProducts(c.Request.Context(), params)
 	if err != nil {
-		log.Println(c, "Error finding products", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch products"})
-		return
-	}
-	defer cursor.Close(c)
-	if err := cursor.All(c, &products); err != nil {
-		log.Println(c, "Error decoding products", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode products"})
-		return
-	}
-
-	total, err := collection.CountDocuments(c, bson.M{})
-	if err != nil {
-		log.Println(c, "Error counting products", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count products"})
 		return
 	}
 
 	totalPages := int(math.Ceil(float64(total) / float64(perPage)))
 
-	log.Println(c, "Products fetched successfully",
-		zap.Int("page", page),
-		zap.Int("perPage", perPage),
-		zap.Int64("total", total),
-		zap.Int("totalPages", totalPages))
-
-	// Respond with products and pagination metadata
-	c.JSON(http.StatusOK, gin.H{
+	// Construct Response
+	response := gin.H{
 		"products": products,
 		"meta": gin.H{
 			"page":       page,
@@ -90,537 +259,327 @@ func GetProducts(c *gin.Context) {
 			"total":      total,
 			"totalPages": totalPages,
 		},
-	})
-}
-
-// GetProductByID retrieves a single product by ID.
-func GetProductByID(c *gin.Context) {
-	id := c.Param("id")
-	productID, err := uuid.Parse(id)
-	log.Println("Fetching product by ID", productID)
-
-	if err != nil {
-		log.Println("Invalid UUID format:", id)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid UUID format"})
-		return
 	}
 
-	var product models.Product
-	err = database.DB.Collection("products").FindOne(c, bson.M{"_id": productID}).Decode(&product)
-	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			log.Println(c, "Product not found", zap.String("id", id))
-			c.JSON(http.StatusNotFound, gin.H{"message": "Product not found"})
-		} else {
-			log.Println(c, "Database error", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal Server Error"})
-		}
-		return
-	}
-
-	log.Println(c, "Product fetched successfully", zap.String("id", id))
-	c.JSON(http.StatusOK, product)
-}
-
-func GetProductByIDInternal(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		log.Println(c, "Product ID is required")
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Product ID is required"})
-		return
-	}
-	productID, err := uuid.Parse(id)
-	if err != nil {
-		log.Println("Invalid product ID format", zap.String("id", id))
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid UUID format"})
-		return
-	}
-
-	var product models.Product
-	err = database.DB.Collection("products").FindOne(c, bson.M{"_id": productID}).Decode(&product)
-	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			log.Println(c, "Product not found", zap.String("id", id))
-			c.JSON(http.StatusNotFound, gin.H{"message": "Product not found"})
-		} else {
-			log.Println(c, "Database error", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal Server Error"})
-		}
-		return
-	}
-
-	log.Println(c, "Product fetched successfully", zap.String("id", id))
-	c.JSON(http.StatusOK, gin.H{
-		"id":    product.ID,
-		"name":  product.Name,
-		"price": product.Price,
-		"stock": product.Quantity,
-	})
-}
-
-type ProductInput struct {
-	Name        string   `json:"name" binding:"required"`
-	Price       float64  `json:"price" binding:"required"`
-	Categories  []string `json:"category" binding:"required"`
-	Images      []string `json:"images"`
-	Quantity    int      `json:"quantity"`
-	Description string   `json:"description"`
-	Brand       string   `json:"brand"`
-	SKU         string   `json:"sku"`
-}
-
-func credentials() (*cloudinary.Cloudinary, context.Context, error) {
-	cld, err := cloudinary.New()
-
-	if err != nil {
-		return nil, nil, fmt.Errorf("cloudinary init error: %w", err)
-	}
-	cld.Config.URL.Secure = true
-	ctx := context.Background()
-	return cld, ctx, nil
-}
-
-func CreateProduct(c *gin.Context) {
-	log.Println("[CreateProduct] --- Starting product creation ---")
-
-	if err := c.Request.ParseMultipartForm(32 << 20); err != nil {
-		log.Println("[CreateProduct] Failed to parse multipart form:", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid multipart form"})
-		return
-	}
-	log.Println("[CreateProduct] Multipart form parsed successfully")
-
-	ctx := c.Request.Context()
-	form := c.Request.MultipartForm
-
-	name := form.Value["name"]
-	category := form.Value["category"]
-	priceStr := form.Value["price"]
-	quantityStr := form.Value["quantity"]
-	description := form.Value["description"]
-	images := form.File["images"]
-	brand := form.Value["brand"]
-	sku := form.Value["sku"]
-
-	log.Printf("[CreateProduct] Form fields received: name=%v, category=%v, price=%v, quantity=%v", name, category, priceStr, quantityStr)
-
-	requiredFields := map[string][]string{
-		"name":        name,
-		"category":    category,
-		"price":       priceStr,
-		"quantity":    quantityStr,
-		"description": description,
-		"brand":       brand,
-		"sku":         sku,
-	}
-
-	for field, value := range requiredFields {
-		if len(value) == 0 {
-			log.Printf("[CreateProduct] Missing field: %s\n", field)
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Missing required field: %s", field)})
-			return
+	// 4. SAVE TO REDIS (Serialize to JSON)
+	// We store the whole response so we can return it instantly next time
+	jsonBytes, err := json.Marshal(response)
+	if err == nil {
+		// Set TTL to 10 minutes (or whatever fits your needs)
+		if err := ctrl.redis.Set(c.Request.Context(), cacheKey, jsonBytes, 10*time.Minute).Err(); err != nil {
+			zap.L().Error("failed to cache products response in Redis", zap.Error(err), zap.String("cacheKey", cacheKey))
 		}
 	}
 
-	price, err := strconv.ParseFloat(priceStr[0], 64)
-	if err != nil || price <= 0 {
-		log.Println("[CreateProduct] Invalid price:", priceStr[0])
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid price"})
+	c.JSON(http.StatusOK, response)
+}
+
+func (ctrl *ProductController) CreateProduct(c *gin.Context) {
+	var req CreateProductRequest
+	if err := c.ShouldBind(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid form data", "details": err.Error()})
 		return
 	}
 
-	quantity, err := strconv.Atoi(quantityStr[0])
-	if err != nil || quantity < 0 {
-		log.Println("[CreateProduct] Invalid quantity:", quantityStr[0])
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid quantity"})
+	if err := validate.Struct(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": err.Error()})
 		return
 	}
 
-	// Parse categories
 	var categoryNames []string
-	if err := json.Unmarshal([]byte(category[0]), &categoryNames); err != nil || len(categoryNames) == 0 {
-		log.Println("[CreateProduct] Failed to parse category JSON:", category[0], "Error:", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or empty category format"})
+	if err := json.Unmarshal([]byte(req.Categories), &categoryNames); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category format, must be a JSON string array"})
 		return
 	}
-	log.Printf("[CreateProduct] Parsed category names: %v", categoryNames)
 
-	var categoryIDs []uuid.UUID
-	var categoryPaths []string
-	categorySet := make(map[uuid.UUID]bool)
-	pathSet := make(map[string]bool)
-
-	for _, catName := range categoryNames {
-		log.Printf("[CreateProduct] Looking up category: %s", catName)
-		var cat models.Category
-		err := database.DB.Collection("categories").FindOne(ctx, bson.M{"name": catName}).Decode(&cat)
-		if err != nil {
-			log.Printf("[CreateProduct] Category not found: %s. Error: %v", catName, err)
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Category '%s' not found", catName)})
-			return
-		}
-
-		if !categorySet[cat.ID] {
-			categoryIDs = append(categoryIDs, cat.ID)
-			categorySet[cat.ID] = true
-		}
-		for _, ancestor := range cat.Ancestors {
-			if !categorySet[ancestor] {
-				categoryIDs = append(categoryIDs, ancestor)
-				categorySet[ancestor] = true
-			}
-		}
-		for _, path := range cat.Path {
-			if !pathSet[path] {
-				categoryPaths = append(categoryPaths, path)
-				pathSet[path] = true
-			}
-		}
-	}
-	log.Printf("[CreateProduct] Final category IDs: %v", categoryIDs)
-	log.Printf("[CreateProduct] Final category paths: %v", categoryPaths)
-
-	// Cloudinary setup
-	cld, ctx, err := credentials()
+	form, err := c.MultipartForm()
 	if err != nil {
-		log.Println("[CreateProduct] Cloudinary init failed:", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Image upload service failed"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Expected multipart form data"})
 		return
 	}
-	log.Println("[CreateProduct] Cloudinary initialized successfully")
-
-	// Upload images
-	var imageURLs []string
-	for i, fileHeader := range images {
-		log.Printf("[CreateProduct] Uploading image %d: %s", i, fileHeader.Filename)
-
-		file, err := fileHeader.Open()
-		if err != nil {
-			log.Printf("[CreateProduct] Failed to open image %d: %v", i, err)
-			continue
-		}
-
-		uploadParams := uploader.UploadParams{
-			PublicID:  fmt.Sprintf("product_img_%d_%d", time.Now().Unix(), i),
-			Folder:    "ecommerce/products",
-			Overwrite: true,
-		}
-
-		uploadResp, err := cld.Upload.Upload(ctx, file, uploadParams)
-		file.Close()
-
-		if err != nil {
-			log.Printf("[CreateProduct] Image %d upload error: %v", i, err)
-			continue
-		}
-		if uploadResp == nil || uploadResp.SecureURL == "" {
-			log.Printf("[CreateProduct] Image %d upload returned empty response", i)
-			continue
-		}
-
-		log.Printf("[CreateProduct] Image %d uploaded: %s", i, uploadResp.SecureURL)
-		imageURLs = append(imageURLs, uploadResp.SecureURL)
+	images := form.File["images"]
+	if len(images) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "At least one image is required"})
+		return
 	}
 
-	log.Printf("[CreateProduct] All image uploads completed. Total: %d", len(imageURLs))
-
-	product := models.Product{
-		ID:           uuid.New(),
-		Name:         name[0],
-		Price:        price,
-		Quantity:     quantity,
-		Description:  description[0],
-		Images:       imageURLs,
-		Brand:        brand[0],
-		SKU:          sku[0],
-		CategoryID:   categoryIDs[0],
-		CategoryIDs:  categoryIDs,
-		CategoryPath: categoryPaths,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+	serviceReq := services.ProductCreateRequest{
+		Name:        req.Name,
+		Description: req.Description,
+		Brand:       req.Brand,
+		SKU:         req.SKU,
+		Price:       req.Price,
+		Quantity:    req.Quantity,
+		IsFeatured:  req.IsFeatured,
+		Categories:  categoryNames,
 	}
 
-	log.Printf("[CreateProduct] Attempting to insert product: %+v", product)
-
-	_, err = database.DB.Collection("products").InsertOne(ctx, product)
+	product, err := ctrl.productService.CreateProduct(c.Request.Context(), serviceReq, images)
 	if err != nil {
-		log.Println("[CreateProduct] Failed to insert product:", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save product"})
+		zap.L().Error("Service failed to create product", zap.Error(err))
+		// You can add more specific error checks here (e.g., for duplicate SKU)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create product"})
 		return
 	}
 
-	log.Println("[CreateProduct] Product inserted successfully:", product.ID)
-	c.JSON(http.StatusCreated, gin.H{"message": "Product created successfully", "product": product})
+	// Invalidate cache after creating a product
+	// WARNING: FlushDB clears the ENTIRE Redis instance. Use specific key invalidation in production.
+	// TODO: Implement pattern-based deletion (e.g. SCAN for "products:*") or versioning.
+	// if err := ctrl.redis.FlushDB(c.Request.Context()).Err(); err != nil {
+	// 	zap.L().Error("failed to invalidate cache after product creation", zap.Error(err))
+	// }
+
+	c.JSON(http.StatusCreated, product)
 }
 
-// DeleteProduct removes a product by ID.
-func DeleteProduct(c *gin.Context) {
+func (ctrl *ProductController) UpdateProduct(c *gin.Context) {
 	id := c.Param("id")
 	productID, err := uuid.Parse(id)
 	if err != nil {
-		log.Println("Invalid UUID format:", id)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid UUID format"})
 		return
 	}
 
-	result, err := database.DB.Collection("products").DeleteOne(c, bson.M{"_id": productID})
-	if err != nil {
-		log.Println(c, "Error deleting product", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete product"})
-		return
-	}
-
-	if result.DeletedCount == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Product not found"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Product deleted successfully"})
-}
-
-// UpdateProduct updates an existing product.
-func UpdateProduct(c *gin.Context) {
-	id := c.Param("id")
-	productID, err := uuid.Parse(id)
-	if err != nil {
-		log.Println("Invalid UUID format:", id)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid UUID format"})
-		return
-	}
-
-	var updates bson.M
+	var updates map[string]interface{}
 	if err := c.ShouldBindJSON(&updates); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON body"})
 		return
 	}
 
-	if len(updates) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No update fields provided"})
-		return
-	}
-
-	result, err := database.DB.Collection("products").UpdateOne(c, bson.M{"_id": productID}, bson.M{"$set": updates})
+	modifiedCount, err := ctrl.productService.UpdateProduct(c.Request.Context(), productID, updates)
 	if err != nil {
-		log.Println(c, "Error updating product", zap.Error(err))
+		zap.L().Error("Service failed to update product", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update product"})
 		return
 	}
-
-	if result.ModifiedCount == 0 {
+	if modifiedCount == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Product not found or no changes made"})
 		return
 	}
 
+	// Invalidate cache after updating a product
+	// if err := ctrl.redis.FlushDB(c.Request.Context()).Err(); err != nil {
+	// 	zap.L().Error("failed to invalidate cache after product update", zap.Error(err))
+	// }
+
 	c.JSON(http.StatusOK, gin.H{"message": "Product updated successfully"})
 }
 
-func CreateBulkProducts(c *gin.Context) {
-	file, err := c.FormFile("file")
+func (ctrl *ProductController) DeleteProduct(c *gin.Context) {
+	id := c.Param("id")
+	productID, err := uuid.Parse(id)
 	if err != nil {
-		log.Println(c, "Error getting file", zap.Error(err))
-		c.JSON(http.StatusBadRequest, gin.H{"error": "File upload required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid UUID format"})
 		return
 	}
 
-	src, err := file.Open()
+	modifiedCount, err := ctrl.productService.DeleteProduct(c.Request.Context(), productID)
 	if err != nil {
-		log.Println(c, "Error opening file", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open file"})
+		zap.L().Error("Service failed to delete product", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete product"})
 		return
 	}
-	defer src.Close()
-
-	r := csv.NewReader(src)
-	records, err := r.ReadAll()
-	if err != nil {
-		log.Println(c, "Error reading CSV", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read CSV"})
+	if modifiedCount == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Product not found"})
 		return
 	}
 
-	if len(records) <= 1 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No product records in CSV"})
-		return
-	}
-	records = records[1:] // Skip header
+	// Invalidate cache after deleting a product
+	// if err := ctrl.redis.FlushDB(c.Request.Context()).Err(); err != nil {
+	// 	zap.L().Error("failed to invalidate cache after product deletion", zap.Error(err))
+	// }
 
-	// category name -> category object cache
-	categoryCache := make(map[string]models.Category)
-	var products []models.Product
-
-	for _, row := range records {
-		if len(row) < 6 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Each row must include: Name, Price, Categories, Description, Quantity, ImageURL"})
-			return
-		}
-
-		name := strings.TrimSpace(row[0])
-		price, err := strconv.ParseFloat(strings.TrimSpace(row[1]), 64)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid price format"})
-			return
-		}
-
-		rawCategories := strings.Split(row[2], ",")
-		description := strings.TrimSpace(row[3])
-		quantity, err := strconv.Atoi(strings.TrimSpace(row[4]))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid quantity format"})
-			return
-		}
-		image := strings.TrimSpace(row[5])
-
-		var categoryIDs []uuid.UUID
-		var categoryPaths []string
-		categorySet := make(map[uuid.UUID]bool) // to dedupe ancestors
-
-		for _, catNameRaw := range rawCategories {
-			catName := strings.TrimSpace(catNameRaw)
-			if catName == "" {
-				continue
-			}
-
-			var cat models.Category
-			if cached, ok := categoryCache[catName]; ok {
-				cat = cached
-			} else {
-				err := database.DB.Collection("categories").FindOne(c, bson.M{"name": catName}).Decode(&cat)
-				if err != nil {
-					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Category '%s' not found", catName)})
-					return
-				}
-				categoryCache[catName] = cat
-			}
-
-			if !categorySet[cat.ID] {
-				categoryIDs = append(categoryIDs, cat.ID)
-				categorySet[cat.ID] = true
-			}
-
-			for _, ancestor := range cat.Ancestors {
-				if !categorySet[ancestor] {
-					categoryIDs = append(categoryIDs, ancestor)
-					categorySet[ancestor] = true
-				}
-			}
-
-			categoryPaths = append(categoryPaths, cat.Path...)
-		}
-
-		// Deduplicate path strings
-		pathSet := make(map[string]bool)
-		var dedupedPaths []string
-		for _, p := range categoryPaths {
-			if !pathSet[p] {
-				dedupedPaths = append(dedupedPaths, p)
-				pathSet[p] = true
-			}
-		}
-
-		product := models.Product{
-			ID:           uuid.New(),
-			Name:         name,
-			Price:        price,
-			Quantity:     quantity,
-			Description:  description,
-			Images:       []string{image},
-			CategoryID:   categoryIDs[0], // use the first as primary
-			CategoryIDs:  categoryIDs,
-			CategoryPath: dedupedPaths,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
-		}
-		products = append(products, product)
-	}
-
-	var inserts []interface{}
-	for _, p := range products {
-		inserts = append(inserts, p)
-	}
-
-	_, err = database.DB.Collection("products").InsertMany(c, inserts)
-	if err != nil {
-		log.Println(c, "Error inserting products", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Bulk insert failed"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Products inserted successfully", "count": len(products)})
+	c.JSON(http.StatusOK, gin.H{"message": "Product deleted successfully"})
 }
 
-// GetProductsByCategory retrieves all products belonging to a specific category
-func GetProductsByCategory(c *gin.Context) {
-	categoryID := c.Param("categoryId")
-	categoryUUID, err := uuid.Parse(categoryID)
+// ValidateBulkImport validates CSV before import
+func (ctrl *ProductController) ValidateBulkImport(c *gin.Context) {
+	file, err := c.FormFile("file")
 	if err != nil {
-		log.Println(c, "Invalid category ID format", zap.String("id", categoryID))
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category ID format"})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "File is required",
+		})
 		return
 	}
 
-	// Parse query parameters for pagination
-	page, err := strconv.Atoi(c.DefaultQuery("page", "1"))
-	if err != nil || page < 1 {
-		page = 1
+	if file.Size > MaxUploadSize {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "File too large (max 50MB)"})
+		return
 	}
 
-	perPage, err := strconv.Atoi(c.DefaultQuery("perPage", "10"))
-	if err != nil || perPage <= 0 {
-		perPage = 10
-	}
-
-	skip := (page - 1) * perPage
-
-	// MongoDB query options
-	findOptions := options.Find()
-	findOptions.SetLimit(int64(perPage))
-	findOptions.SetSkip(int64(skip))
-
-	// Find products that belong to this category
-	filter := bson.M{
-		"category_ids": categoryUUID,
-	}
-
-	var products []models.Product
-	cursor, err := database.DB.Collection("products").Find(c, filter, findOptions)
+	fileHandle, err := file.Open()
 	if err != nil {
-		log.Println(c, "Error finding products by category", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch products"})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to open file",
+		})
 		return
 	}
-	defer cursor.Close(c)
+	defer fileHandle.Close()
 
-	if err := cursor.All(c, &products); err != nil {
-		log.Println(c, "Error decoding products", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode products"})
-		return
-	}
-
-	// Get total count for pagination
-	total, err := database.DB.Collection("products").CountDocuments(c, filter)
+	validation, err := ctrl.productService.ValidateBulkImport(c.Request.Context(), fileHandle)
 	if err != nil {
-		log.Println(c, "Error counting products", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count products"})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
 		return
 	}
 
-	totalPages := int(math.Ceil(float64(total) / float64(perPage)))
+	c.JSON(http.StatusOK, validation)
+}
 
-	log.Println(c, "Products fetched by category successfully",
-		zap.String("categoryId", categoryID),
-		zap.Int("page", page),
-		zap.Int("perPage", perPage),
-		zap.Int64("total", total),
-		zap.Int("totalPages", totalPages))
+// CreateBulkProducts imports products from CSV
+func (ctrl *ProductController) CreateBulkProducts(c *gin.Context) {
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "File is required",
+		})
+		return
+	}
 
-	// Respond with products and pagination metadata
+	if file.Size > MaxUploadSize {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "File too large (max 50MB)"})
+		return
+	}
+
+	fileHandle, err := file.Open()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to open file",
+		})
+		return
+	}
+	defer fileHandle.Close()
+
+	result, err := ctrl.productService.ProcessBulkImport(c.Request.Context(), fileHandle)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// GetPresignUpload returns a presigned URL for direct S3 upload and the public URL
+func (ctrl *ProductController) GetPresignUpload(c *gin.Context) {
+	sku := c.Query("sku")
+	if strings.TrimSpace(sku) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sku query parameter is required"})
+		return
+	}
+
+	filename := c.DefaultQuery("filename", "upload")
+	contentType := c.DefaultQuery("content_type", "application/octet-stream")
+	expiresStr := c.DefaultQuery("expires", "900")
+	expires, err := strconv.ParseInt(expiresStr, 10, 64)
+	if err != nil || expires <= 0 {
+		expires = 900
+	}
+
+	uploadURL, key, publicURL, err := ctrl.productService.GeneratePresignedUpload(c.Request.Context(), sku, filename, contentType, expires)
+	if err != nil {
+		zap.L().Error("failed to generate presigned upload", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate presigned upload"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"products": products,
-		"meta": gin.H{
-			"page":       page,
-			"perPage":    perPage,
-			"total":      total,
-			"totalPages": totalPages,
-		},
+		"upload_url": uploadURL,
+		"method":     "PUT",
+		"key":        key,
+		"public_url": publicURL,
 	})
+}
+
+// PostPresignUpload returns a presigned URL for PUT upload for a specific product ID.
+func (ctrl *ProductController) PostPresignUpload(c *gin.Context) {
+	id := c.Param("id")
+	productID, err := uuid.Parse(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid UUID format"})
+		return
+	}
+
+	// ensure product exists
+	_, err = ctrl.productService.GetProduct(c.Request.Context(), productID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) || strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Product not found"})
+			return
+		}
+		zap.L().Error("Service failed to get product", zap.Error(err), zap.String("id", id))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal Server Error"})
+		return
+	}
+
+	// prepare presign
+	filename := c.DefaultQuery("filename", "upload")
+	expiresStr := c.DefaultQuery("expires", "900")
+	expires, err := strconv.ParseInt(expiresStr, 10, 64)
+	if err != nil || expires <= 0 {
+		expires = 900
+	}
+
+	// load aws config and generate presign
+	cfg, err := aws_pkg.LoadAWSConfig(c.Request.Context())
+	if err != nil {
+		zap.L().Error("failed to load aws config", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "AWS config error"})
+		return
+	}
+
+	bucket := os.Getenv("S3_BUCKET_IMAGES")
+	if bucket == "" {
+		bucket = "ecommerce-product-images"
+	}
+
+	key := fmt.Sprintf("product/%s/%s", productID.String(), filename)
+	url, _, err := aws_pkg.GeneratePresignedPutURL(c.Request.Context(), cfg, bucket, key, expires)
+	if err != nil {
+		zap.L().Error("failed to generate presigned url", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate presigned upload"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"upload_url": url, "method": "PUT", "key": key, "expires_in": expires})
+}
+
+func (ctrl *ProductController) GetProductByIDInternal(c *gin.Context) {
+	id := c.Param("id")
+	productID, err := uuid.Parse(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid UUID format"})
+		return
+	}
+
+	productDTO, err := ctrl.productService.GetProductInternal(c.Request.Context(), productID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) || strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Product not found"})
+			return
+		}
+		zap.L().Error("Service failed to get internal product", zap.Error(err), zap.String("id", id))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal Server Error"})
+		return
+	}
+
+	c.JSON(http.StatusOK, productDTO)
+}
+
+func isSupportedSort(sortParam string) bool {
+	switch sortParam {
+	case "price_asc", "price_desc", "created_at_asc", "created_at_desc", "name_asc", "name_desc":
+		return true
+	default:
+		return false
+	}
+}
+
+func formatFloatForCache(value *float64) string {
+	if value == nil {
+		return ""
+	}
+	return strconv.FormatFloat(*value, 'f', -1, 64)
 }

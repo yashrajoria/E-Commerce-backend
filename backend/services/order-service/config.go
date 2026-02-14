@@ -1,71 +1,89 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
-	"log"
 	"os"
+
+	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 )
 
-// Config holds all environment variables for the auth-service.
 type Config struct {
-	PostgresUser     string // PostgreSQL username
-	PostgresPassword string // PostgreSQL password
-	PostgresDB       string // PostgreSQL database name
-	PostgresHost     string // PostgreSQL host
-	PostgresPort     string // PostgreSQL port
-	PostgresSSLMode  string // PostgreSQL SSL mode
-	PostgresTimeZone string // PostgreSQL timezone
-	JWTSecret        string // JWT secret for authentication
-	SMTPEmail        string // SMTP email for sending mail
-	SMTPPassword     string // SMTP password for sending mail
-	Port             string // Service port (default: 8081)
+	Port              string
+	PostgresUser      string
+	PostgresPassword  string
+	PostgresDB        string
+	PostgresHost      string
+	PostgresPort      string
+	PostgresSSLMode   string
+	PostgresTimeZone  string
+	ProductServiceURL string
+	// SQS/SNS config (replaces Kafka)
+	CheckoutQueueURL       string
+	PaymentEventsQueueURL  string
+	PaymentRequestQueueURL string
+	OrderSNSTopicARN       string
+	PaymentSNSTopicARN     string
 }
 
-// LoadConfig loads environment variables into Config struct and validates them.
 func LoadConfig() (*Config, error) {
 	cfg := &Config{
-		PostgresUser:     os.Getenv("POSTGRES_USER"),
-		PostgresPassword: os.Getenv("POSTGRES_PASSWORD"),
-		PostgresDB:       os.Getenv("POSTGRES_DB"),
-		PostgresHost:     os.Getenv("POSTGRES_HOST"),
-		PostgresPort:     os.Getenv("POSTGRES_PORT"),
-		PostgresSSLMode:  os.Getenv("POSTGRES_SSLMODE"),
-		PostgresTimeZone: os.Getenv("POSTGRES_TIMEZONE"),
-		JWTSecret:        os.Getenv("JWT_SECRET"),
-		SMTPEmail:        os.Getenv("SMTP_EMAIL"),
-		SMTPPassword:     os.Getenv("SMTP_PASSWORD"),
-		Port:             os.Getenv("PORT"),
-	}
-	log.Println("Config loaded:", cfg)
-	if cfg.Port == "" {
-		cfg.Port = "8081"
-	}
-
-	// Validate required fields
-	if cfg.PostgresUser == "" {
-		return nil, fmt.Errorf("POSTGRES_USER is required")
-	}
-	if cfg.PostgresPassword == "" {
-		return nil, fmt.Errorf("POSTGRES_PASSWORD is required")
-	}
-	if cfg.PostgresDB == "" {
-		return nil, fmt.Errorf("POSTGRES_DB is required")
-	}
-	if cfg.PostgresHost == "" {
-		return nil, fmt.Errorf("POSTGRES_HOST is required")
-	}
-	if cfg.PostgresPort == "" {
-		return nil, fmt.Errorf("POSTGRES_PORT is required")
-	}
-	if cfg.JWTSecret == "" {
-		return nil, fmt.Errorf("JWT_SECRET is required")
-	}
-	if cfg.SMTPEmail == "" {
-		return nil, fmt.Errorf("SMTP_EMAIL is required")
-	}
-	if cfg.SMTPPassword == "" {
-		return nil, fmt.Errorf("SMTP_PASSWORD is required")
+		Port:                   getEnv("PORT", "8083"),
+		PostgresUser:           os.Getenv("POSTGRES_USER"),
+		PostgresPassword:       os.Getenv("POSTGRES_PASSWORD"),
+		PostgresDB:             os.Getenv("POSTGRES_DB"),
+		PostgresHost:           os.Getenv("POSTGRES_HOST"),
+		PostgresPort:           getEnv("POSTGRES_PORT", "5432"),
+		PostgresSSLMode:        getEnv("POSTGRES_SSLMODE", "disable"),
+		PostgresTimeZone:       getEnv("POSTGRES_TIMEZONE", "Asia/Kolkata"),
+		ProductServiceURL:      getEnv("PRODUCT_SERVICE_URL", "http://product-service:8082"),
+		CheckoutQueueURL:       os.Getenv("CHECKOUT_QUEUE_URL"),
+		PaymentEventsQueueURL:  os.Getenv("PAYMENT_EVENTS_QUEUE_URL"),
+		PaymentRequestQueueURL: os.Getenv("PAYMENT_REQUEST_QUEUE_URL"),
+		OrderSNSTopicARN:       os.Getenv("ORDER_SNS_TOPIC_ARN"),
+		PaymentSNSTopicARN:     os.Getenv("PAYMENT_SNS_TOPIC_ARN"),
 	}
 
+	if os.Getenv("AWS_USE_SECRETS") == "true" {
+		if awsCfg, err := aws_pkg.LoadAWSConfig(context.Background()); err == nil {
+			sm := aws_pkg.NewSecretsClient(awsCfg)
+
+			if dbjson, err := sm.GetSecret(context.Background(), "order/DB_CREDENTIALS"); err == nil && dbjson != "" {
+				var m map[string]string
+				if err := json.Unmarshal([]byte(dbjson), &m); err == nil {
+					if v, ok := m["POSTGRES_USER"]; ok && v != "" {
+						cfg.PostgresUser = v
+					}
+					if v, ok := m["POSTGRES_PASSWORD"]; ok && v != "" {
+						cfg.PostgresPassword = v
+					}
+					if v, ok := m["POSTGRES_DB"]; ok && v != "" {
+						cfg.PostgresDB = v
+					}
+					if v, ok := m["POSTGRES_HOST"]; ok && v != "" {
+						cfg.PostgresHost = v
+					}
+					if v, ok := m["POSTGRES_PORT"]; ok && v != "" {
+						cfg.PostgresPort = v
+					}
+				}
+			}
+		}
+	}
+
+	if cfg.PostgresUser == "" || cfg.PostgresPassword == "" || cfg.PostgresDB == "" || cfg.PostgresHost == "" {
+		return nil, fmt.Errorf("database config incomplete")
+	}
+	if cfg.ProductServiceURL == "" {
+		return nil, fmt.Errorf("PRODUCT_SERVICE_URL is required")
+	}
 	return cfg, nil
+}
+
+func getEnv(key, fallback string) string {
+	if val := os.Getenv(key); val != "" {
+		return val
+	}
+	return fallback
 }

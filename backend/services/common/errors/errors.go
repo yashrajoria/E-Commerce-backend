@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"github.com/gin-gonic/gin"
 )
 
 // Error represents an application error
@@ -43,8 +45,8 @@ func New(code int, message string, err error) *Error {
 
 // Common error types
 var (
-	ErrBadRequest          = New(http.StatusBadRequest, "Bad request", nil)
-	ErrUnauthorized        = New(http.StatusUnauthorized, "Unauthorized", nil)
+	ErrBadRequest         = New(http.StatusBadRequest, "Bad request", nil)
+	ErrUnauthorized       = New(http.StatusUnauthorized, "Unauthorized", nil)
 	ErrForbidden          = New(http.StatusForbidden, "Forbidden", nil)
 	ErrNotFound           = New(http.StatusNotFound, "Not found", nil)
 	ErrMethodNotAllowed   = New(http.StatusMethodNotAllowed, "Method not allowed", nil)
@@ -91,22 +93,22 @@ func ErrorMiddleware() gin.HandlerFunc {
 
 // Database error types
 var (
-	ErrDatabaseConnection = New(http.StatusServiceUnavailable, "Database connection error", nil)
-	ErrDatabaseQuery     = New(http.StatusInternalServerError, "Database query error", nil)
+	ErrDatabaseConnection  = New(http.StatusServiceUnavailable, "Database connection error", nil)
+	ErrDatabaseQuery       = New(http.StatusInternalServerError, "Database query error", nil)
 	ErrDatabaseTransaction = New(http.StatusInternalServerError, "Database transaction error", nil)
 )
 
 // Validation error types
 var (
-	ErrValidation = New(http.StatusBadRequest, "Validation error", nil)
+	ErrValidation   = New(http.StatusBadRequest, "Validation error", nil)
 	ErrInvalidInput = New(http.StatusBadRequest, "Invalid input", nil)
 )
 
 // Authentication error types
 var (
 	ErrInvalidCredentials = New(http.StatusUnauthorized, "Invalid credentials", nil)
-	ErrTokenExpired      = New(http.StatusUnauthorized, "Token expired", nil)
-	ErrInvalidToken      = New(http.StatusUnauthorized, "Invalid token", nil)
+	ErrTokenExpired       = New(http.StatusUnauthorized, "Token expired", nil)
+	ErrInvalidToken       = New(http.StatusUnauthorized, "Invalid token", nil)
 )
 
 // Business logic error types
@@ -114,4 +116,4 @@ var (
 	ErrInsufficientStock = New(http.StatusBadRequest, "Insufficient stock", nil)
 	ErrInvalidOrder      = New(http.StatusBadRequest, "Invalid order", nil)
 	ErrPaymentFailed     = New(http.StatusBadRequest, "Payment failed", nil)
-) 
+)

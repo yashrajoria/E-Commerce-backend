@@ -1,158 +1,129 @@
 package main
 
 import (
-	"io"
-	"log"
+	"api-gateway/logger"
+	"api-gateway/routes"
+	"context"
 	"net/http"
-	"strings"
+	"os"
+	"os/signal"
+	"runtime/debug"
+	"syscall"
 	"time"
 
-	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"github.com/yashrajoria/api-gateway/middlewares"
+	"github.com/gin-contrib/cors"
+	"go.uber.org/zap"
+	"strings"
 )
 
-func forwardRequest(c *gin.Context, targetBase string) {
-	log.Println("Forwarding request to:", targetBase+c.Param("any"))
-	targetURL := targetBase + c.Param("any")
-
-	// Append query string if present
-	queryString := c.Request.URL.RawQuery
-	if queryString != "" {
-		targetURL = targetURL + "?" + queryString
-	}
-
-	req, err := http.NewRequest(c.Request.Method, targetURL, c.Request.Body)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
-		return
-	}
-
-	// Copy headers
-	for k, v := range c.Request.Header {
-		req.Header[k] = v
-	}
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Println("Error forwarding request:", err)
-		c.JSON(http.StatusBadGateway, gin.H{"error": "Failed to reach target service"})
-		return
-	}
-	defer resp.Body.Close()
-
-	// Copy response headers
-	for k, v := range resp.Header {
-		c.Header(k, strings.Join(v, ","))
-	}
-
-	c.Status(resp.StatusCode)
-	io.Copy(c.Writer, resp.Body)
-}
-func main() {
-	r := gin.Default()
-	log.Println("Applying CORS middleware...")
-
-	// CORS Configuration
-	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000"}, // Ensure this matches frontend
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
-		ExposeHeaders:    []string{"Content-Length"},
+// CORS Middleware - Apply this globally
+func CORSMiddleware() gin.HandlerFunc {
+	// Use gin-contrib/cors with configuration from ALLOWED_ORIGINS
+	allowed := os.Getenv("ALLOWED_ORIGINS")
+	config := cors.Config{
 		AllowCredentials: true,
-		MaxAge:           12 * time.Hour,
-	}))
+		AllowMethods:     []string{"POST", "HEAD", "PATCH", "OPTIONS", "GET", "PUT", "DELETE"},
+		AllowHeaders:     []string{"Content-Type", "Content-Length", "Accept-Encoding", "X-CSRF-Token", "Authorization", "Accept", "Origin", "Cache-Control", "X-Requested-With"},
+	}
 
-	// Public route (no authentication needed)
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "API Gateway Running"})
-	})
-
-	// Forward requests to Auth Service (No authentication needed for login/signup)
-	authGroup := r.Group("/auth")
-	authGroup.OPTIONS("/*any", func(c *gin.Context) {
-		log.Println("Handling OPTIONS request for:", c.Request.URL.Path)
-		origin := c.Request.Header.Get("Origin")
-		if origin == "" {
-			origin = "http://localhost:3000"
+	if allowed == "*" {
+		config.AllowAllOrigins = true
+	} else if allowed != "" {
+		var origins []string
+		for _, o := range strings.Split(allowed, ",") {
+			origins = append(origins, strings.TrimSpace(o))
 		}
-		c.Header("Access-Control-Allow-Origin", origin)
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
-		c.Header("Access-Control-Allow-Credentials", "true")
-		c.Status(http.StatusOK)
-	})
-	authGroup.GET("/*any", func(c *gin.Context) {
-		forwardRequest(c, "http://auth-service:8081"+c.Param("any"))
-	})
-	authGroup.POST("/*any", func(c *gin.Context) {
-		forwardRequest(c, "http://auth-service:8081")
+		config.AllowOrigins = origins
+	} else {
+		config.AllowOrigins = []string{"http://localhost:3000", "http://localhost:3001"}
+	}
 
-	})
-	authGroup.PUT("/*any", func(c *gin.Context) {
-		forwardRequest(c, "http://auth-service:8081")
+	return cors.New(config)
+}
 
-	})
+// CustomRecovery recovers from panics and logs them
+func CustomRecovery(logger *zap.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		defer func() {
+			if err := recover(); err != nil {
+				stack := debug.Stack()
+				logger.Error("Panic recovered", zap.Any("error", err), zap.ByteString("stack", stack))
+				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+			}
+		}()
+		c.Next()
+	}
+}
 
-	// Protected routes (Require JWT authentication)
-	protected := r.Group("/")
-	protected.Use(middlewares.JWTMiddleware())
+func main() {
+	// Initialize logger
+	logger.InitLogger()
+	defer logger.Sync()
+	logger.Log.Info("Starting API Gateway...")
 
-	protected.GET("/users/*any", func(ctx *gin.Context) {
-		forwardRequest(ctx, "http://user-service:8085/users")
-	})
-	protected.PUT("/users/*any", func(ctx *gin.Context) {
-		forwardRequest(ctx, "http://user-service:8085/users")
-	})
-	protected.POST("/users/*any", func(ctx *gin.Context) {
-		forwardRequest(ctx, "http://user-service:8085/users")
-	})
+	r := gin.New()
 
-	// Forward requests to Product Service (Protected)
-	protected.GET("/products/*any", func(c *gin.Context) {
-		forwardRequest(c, "http://product-service:8082/products")
-	})
+	// Configure Gin to handle trailing slashes
+	r.RedirectTrailingSlash = true
 
-	protected.POST("/products/*any", func(c *gin.Context) {
-		forwardRequest(c, "http://product-service:8082/products")
-	})
+	r.Use(gin.Logger())
+	r.Use(CustomRecovery(logger.Log))
 
-	protected.DELETE("/products/*any", func(c *gin.Context) {
-		forwardRequest(c, "http://product-service:8082/products")
+	r.Use(CORSMiddleware())
+
+	// Health check / Test route for CORS
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "message": "API Gateway is running"})
 	})
 
-	protected.PUT("/products/*any", func(c *gin.Context) {
-		forwardRequest(c, "http://product-service:8082/products")
+	r.GET("/test-cors", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"message": "CORS is working!"})
+	})
+	// Add this debug middleware
+	r.Use(func(c *gin.Context) {
+		logger.Log.Info("🔍 DEBUG: Request received",
+			zap.String("method", c.Request.Method),
+			zap.String("path", c.Request.URL.Path),
+			zap.String("full_url", c.Request.URL.String()),
+		)
+		c.Next()
+		logger.Log.Info("🔍 DEBUG: Response sent",
+			zap.Int("status", c.Writer.Status()),
+		)
 	})
 
-	protected.GET("/categories/*any", func(c *gin.Context) {
-		forwardRequest(c, "http://product-service:8082/categories")
-	})
+	routes.RegisterAllRoutes(r)
 
-	protected.POST("/categories/*any", func(c *gin.Context) {
-		forwardRequest(c, "http://product-service:8082/categories")
-	})
+	// Server setup
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: r,
+	}
 
-	protected.PUT("/categories/*any", func(c *gin.Context) {
-		forwardRequest(c, "http://product-service:8082/categories")
-	})
+	// Start server
+	go func() {
+		logger.Log.Info("API Gateway listening on port", zap.String("port", port))
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Log.Fatal("Failed to start server", zap.Error(err))
+		}
+	}()
 
-	protected.DELETE("/categories/*any", func(c *gin.Context) {
-		forwardRequest(c, "http://product-service:8082/categories")
-	})
+	// Graceful shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	logger.Log.Info("Shutting down API Gateway...")
 
-	protected.GET("/inventory/*any", func(c *gin.Context) {
-		forwardRequest(c, "http://localhost:8084"+c.Param("any"))
-	})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		logger.Log.Fatal("API Gateway forced to shutdown:", zap.Error(err))
+	}
 
-	protected.POST("/orders/*any", func(c *gin.Context) {
-		forwardRequest(c, "http://order-service:8083/orders")
-	})
-
-	protected.GET("/orders/*any", func(c *gin.Context) {
-		forwardRequest(c, "http://order-service:8083/orders")
-	})
-
-	r.Run(":8080") // API Gateway runs on port 8080
+	logger.Log.Info("API Gateway exited gracefully")
 }

@@ -1,14 +1,13 @@
 package database
 
 import (
-	"user-service/models"
 	"fmt"
 	"log"
 	"os"
 	"time"
+	"user-service/models"
 
 	"github.com/joho/godotenv"
-
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -16,7 +15,7 @@ import (
 var DB *gorm.DB
 
 func ConnectPostgres(autoMigrateModels ...interface{}) (*gorm.DB, error) {
-	_ = godotenv.Load() // Only load if not already loaded
+	_ = godotenv.Load()
 
 	dbUser := os.Getenv("POSTGRES_USER")
 	dbPassword := os.Getenv("POSTGRES_PASSWORD")
@@ -26,6 +25,18 @@ func ConnectPostgres(autoMigrateModels ...interface{}) (*gorm.DB, error) {
 	dbSSLMode := os.Getenv("POSTGRES_SSLMODE")
 	dbTimeZone := os.Getenv("POSTGRES_TIMEZONE")
 
+	// Validate required environment variables
+	if dbUser == "" {
+		return nil, fmt.Errorf("POSTGRES_USER environment variable not set")
+	}
+	if dbPassword == "" {
+		return nil, fmt.Errorf("POSTGRES_PASSWORD environment variable not set")
+	}
+	if dbName == "" {
+		return nil, fmt.Errorf("POSTGRES_DB environment variable not set")
+	}
+
+	// Set defaults for optional variables
 	if dbHost == "" {
 		dbHost = "localhost"
 	}
@@ -65,10 +76,22 @@ func ConnectPostgres(autoMigrateModels ...interface{}) (*gorm.DB, error) {
 
 func Connect() error {
 	var err error
-	DB, err = ConnectPostgres(&models.User{})
+	DB, err = ConnectPostgres(&models.User{}, &models.Address{})
 	if err != nil {
 		log.Println("❌ Failed to connect to PostgreSQL:", err)
 		return err
 	}
 	return nil
+}
+
+// Close closes the database connection gracefully
+func Close() error {
+	if DB == nil {
+		return nil
+	}
+	sqlDB, err := DB.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get database instance: %w", err)
+	}
+	return sqlDB.Close()
 }

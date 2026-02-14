@@ -7,13 +7,18 @@ import (
 )
 
 type Category struct {
-	ID        uuid.UUID   `json:"_id" bson:"_id"`
-	Name      string      `json:"name" bson:"name"`
-	ParentIDs []uuid.UUID `json:"parent_ids,omitempty" bson:"parent_ids,omitempty"`
-	Ancestors []uuid.UUID `json:"ancestors,omitempty" bson:"ancestors,omitempty"`
-	Slug      string      `json:"slug" bson:"slug"`                       // You might want to slugify the name
-	Path      []string    `json:"path,omitempty" bson:"path,omitempty"`   // e.g. ["Electronics", "Mobile", "Apple"]
-	Level     int         `json:"level,omitempty" bson:"level,omitempty"` // Useful for sorting
-	CreatedAt time.Time   `json:"created_at" bson:"created_at"`
-	UpdatedAt time.Time   `json:"updated_at" bson:"updated_at"`
+	ID        uuid.UUID   `bson:"_id" json:"_id"`
+	Name      string      `bson:"name" json:"name"`
+	ParentIDs []uuid.UUID `bson:"parent_ids,omitempty" json:"parent_ids,omitempty"`
+	Image     string      `bson:"image,omitempty" json:"image,omitempty"`
+	Ancestors []uuid.UUID `bson:"ancestors,omitempty" json:"ancestors,omitempty"`
+	Slug      string      `bson:"slug" json:"slug"`
+	Path      []string    `bson:"path,omitempty" json:"path,omitempty"`
+	Level     int         `bson:"level,omitempty" json:"level,omitempty"`
+	IsActive  bool        `bson:"is_active" json:"is_active"`
+	CreatedAt time.Time   `bson:"created_at" json:"created_at"`
+	UpdatedAt time.Time   `bson:"updated_at" json:"updated_at"`
+	DeletedAt *time.Time  `bson:"deleted_at,omitempty" json:"deleted_at,omitempty"`
+
+	Children []*Category `bson:"-" json:"children,omitempty"` // transient field for frontend
 }

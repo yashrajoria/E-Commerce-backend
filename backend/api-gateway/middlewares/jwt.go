@@ -6,116 +6,121 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time"
+
+	"api-gateway/logger"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/joho/godotenv"
 )
 
-// JWTMiddleware checks and validates JWT token from cookies
+var (
+	secretKey    []byte
+	isProduction bool
+	cookieDomain string
+)
+
+func init() {
+	_ = godotenv.Load()
+	secret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
+	if secret == "" {
+		logger.Log.Fatal("JWT_SECRET is not set in env")
+	}
+	secretKey = []byte(secret)
+	isProduction = os.Getenv("ENV") == "production"
+	cookieDomain = os.Getenv("COOKIE_DOMAIN")
+}
+
+// JWTMiddleware validates JWT access token and refreshes when needed
 func JWTMiddleware() gin.HandlerFunc {
-	if err := godotenv.Load(); err != nil {
-		log.Println("⚠️ No .env file found, falling back to system environment variables")
-	}
-	secretKey := strings.TrimSpace(os.Getenv("JWT_SECRET"))
-	if secretKey == "" {
-		log.Fatalln("JWT_SECRET not set in environment variables")
-	}
 	return func(c *gin.Context) {
-		// Try to get access token first
-		tokenString, err := c.Cookie("token")
-		if err != nil || tokenString == "" {
-			// If access token is missing, try refresh token
-			refreshToken, err := c.Cookie("refresh_token")
-			if err != nil || refreshToken == "" {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing authentication token"})
-				c.Abort()
-				return
-			}
-
-			// Validate refresh token
-			token, err := jwt.Parse(refreshToken, func(token *jwt.Token) (interface{}, error) {
-				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-					return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-				}
-				return []byte(secretKey), nil
-			})
-
-			if err != nil || !token.Valid {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid refresh token"})
-				c.Abort()
-				return
-			}
-
-			// Extract claims from refresh token
-			claims, ok := token.Claims.(jwt.MapClaims)
-			if !ok {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token claims"})
-				c.Abort()
-				return
-			}
-
-			// Generate new token pair
-			userID := claims["user_id"].(string)
-			email := claims["email"].(string)
-			role := claims["role"].(string)
-
-			// Generate new access token (15 minutes)
-			accessToken, err := generateToken(userID, email, role, 15*time.Minute)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate new access token"})
-				c.Abort()
-				return
-			}
-
-			// Set new access token in cookie
-			c.SetCookie("token", accessToken, 900, "/", "", false, true) // 15 minutes
-			tokenString = accessToken
+		// Log incoming cookies and headers for debugging
+		if v, err := c.Cookie("__session"); err == nil {
+			log.Printf("[GATEWAY][JWT] cookie __session=%s", v)
+		} else {
+			log.Printf("[GATEWAY][JWT] cookie __session not present: %v", err)
+		}
+		if v, err := c.Cookie("token"); err == nil {
+			log.Printf("[GATEWAY][JWT] cookie token=%s", v)
+		}
+		if auth := c.GetHeader("Authorization"); auth != "" {
+			log.Printf("[GATEWAY][JWT] Authorization header=%s", auth)
 		}
 
-		// Validate access token
-		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-			}
-			return []byte(secretKey), nil
-		})
+		// Accept either __session (set by auth service) or token cookie
+		tokenString, err := c.Cookie("__session")
+		if err != nil || tokenString == "" {
+			tokenString, _ = c.Cookie("token")
+		}
+		if tokenString == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing authentication token"})
+			c.Abort()
+			return
+		}
 
-		if err != nil || !token.Valid {
+		// validate final access token
+		claims, err := parseToken(tokenString, "access")
+		if err != nil {
+			log.Printf("[GATEWAY][JWT] token parse error: %v", err)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
 			c.Abort()
 			return
 		}
 
-		if claims, ok := token.Claims.(jwt.MapClaims); ok {
-			c.Set("user_id", claims["user_id"])
-			c.Set("email", claims["email"])
-			c.Set("role", claims["role"])
+		userID, _ := claims["sub"].(string)
+		email, _ := claims["email"].(string)
+		role, _ := claims["role"].(string)
 
-			c.Request.Header.Set("X-User-ID", claims["user_id"].(string))
+		// log claims for debugging
+		log.Printf("[GATEWAY][JWT] token claims: %+v", claims)
 
-		}
+		c.Set("user_id", userID)
+		c.Set("email", email)
+		c.Set("role", role)
+
+		c.Request.Header.Set("X-User-ID", userID)
+		c.Request.Header.Set("X-User-Email", email)
+		c.Request.Header.Set("X-User-Role", role)
 
 		c.Next()
 	}
 }
 
-// generateToken creates a JWT token with the given claims and expiration
-func generateToken(userID string, email string, role string, expiration time.Duration) (string, error) {
-	secretKey := []byte(os.Getenv("JWT_SECRET"))
-	if len(secretKey) == 0 {
-		return "", fmt.Errorf("JWT_SECRET not set")
+// AdminRoleMiddleware restricts access to users with role admin
+func AdminRoleMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		role, exists := c.Get("role")
+		if !exists || role != "admin" {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Admin role required"})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+// parseToken validates and extracts claims
+func parseToken(tokenStr, expectedType string) (jwt.MapClaims, error) {
+	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return secretKey, nil
+	})
+
+	if err != nil || token == nil || !token.Valid {
+		return nil, fmt.Errorf("invalid or expired token")
 	}
 
-	claims := jwt.MapClaims{
-		"user_id": userID,
-		"email":   email,
-		"role":    role,
-		"exp":     time.Now().Add(expiration).Unix(),
-		"iat":     time.Now().Unix(),
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, fmt.Errorf("invalid token claims")
+	}
+	if expectedType != "" {
+		if typ, ok := claims["typ"].(string); !ok || typ != expectedType {
+			return nil, fmt.Errorf("invalid token type")
+		}
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(secretKey)
+	return claims, nil
 }

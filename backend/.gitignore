@@ -1,0 +1,68 @@
+.env
+Dockerfile
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Docker
+docker-compose.override.yml
+.docker/
+
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Build directories
+/bin/
+/build/
+/dist/
+/pkg/
+
+# Go dependency directories
+/vendor/
+Godeps/
+
+# Go workspace
+go.work
+go.work.sum
+
+# Logs
+logs/
+*.log
+
+# Coverage
+coverage.out
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Generated files
+*.gen.go
+
+# Test output
+/test_output/
+
+# Misc
+node_modules/
+
+# Ignore local Dockerfile overrides in service folders
+**/Dockerfile.local
+
+Dockerfile
+Dockerfile.prod
+docker-compose.yml
+.dockerignore
+*.toml
+docker-compose.prod.yml
+.air.toml
+/tmp/

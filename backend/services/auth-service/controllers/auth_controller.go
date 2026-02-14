@@ -1,180 +1,233 @@
 package controllers
 
 import (
-	"auth-service/database"
-	"auth-service/models"
-	"auth-service/services"
-	"auth-service/types"
-	"errors"
-	"log"
+	"context"
 	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	"auth-service/services"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
-	"golang.org/x/crypto/bcrypt"
-	"gorm.io/gorm"
 )
 
-// Struct to represent the login request body
+type IAuthService interface {
+	Login(ctx context.Context, email, password string) (*services.TokenPair, error)
+	Register(ctx context.Context, name, email, password, role string) error
+	VerifyEmail(ctx context.Context, email, code string) error
+	RefreshTokens(ctx context.Context, refreshToken string) (*services.TokenPair, error)
+	Logout(ctx context.Context, refreshToken string) error
+	ResendVerificationEmail(ctx context.Context, email string) error
+}
 
-func Login(c *gin.Context) {
-	var loginReq types.LoginRequest
+type AuthController struct {
+	service IAuthService
+}
 
-	// 1. Validate JSON body
-	if err := c.ShouldBindJSON(&loginReq); err != nil {
-		log.Println(c, "Invalid login request body", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+func NewAuthController(s IAuthService) *AuthController {
+	return &AuthController{service: s}
+}
+
+func (ctrl *AuthController) Login(c *gin.Context) {
+	var req struct {
+		Email    string `json:"email" binding:"required,email"`
+		Password string `json:"password" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body", "details": err.Error()})
 		return
 	}
 
-	var user models.User
-
-	// 2. Fetch user by email
-	err := database.DB.Where("email = ?", loginReq.Email).First(&user).Error
+	tokenPair, err := ctrl.service.Login(c.Request.Context(), req.Email, req.Password)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			// Avoid leaking user existence
-			log.Println(c, "Login attempt with non-existent email", "email", loginReq.Email)
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
-		} else {
-			log.Println(c, "Database error during login", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
-		}
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
 
-	// 3. Check role match
-	if user.Role != loginReq.Role {
-		log.Println(c, "Login attempt with wrong role",
-			"email", loginReq.Email,
-			"attempted_role", loginReq.Role,
-			"actual_role", user.Role)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "You are not authorized to access this resource"})
-		return
-	}
+	// Debug logging: tokens and identifiers (remove in production)
+	// log.Printf("[AUTH][LOGIN] email=%s access_token=%s", req.Email, tokenPair.AccessToken)
+	// log.Printf("[AUTH][LOGIN] email=%s refresh_token=%s", req.Email, tokenPair.RefreshToken)
 
-	// Check if email is verified
-	if !user.EmailVerified {
-		log.Println(c, "Login attempt with unverified email", "email", loginReq.Email)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Email not verified"})
-		return
-	}
+	domain := os.Getenv("COOKIE_DOMAIN")
+	isSecure := os.Getenv("ENV") == "production"
 
-	// 4. Validate password
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(loginReq.Password)); err != nil {
-		log.Println(c, "Invalid password attempt", "email", loginReq.Email)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
-		return
-	}
+	// Set cookies. Use SameSite=None for refresh cookie to allow cross-site refresh requests.
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie("__session", tokenPair.AccessToken, 900, "/", domain, isSecure, true)
 
-	// 5. Generate JWT token
-	token, err := services.GenerateJWT(user.ID.String(), user.Email, user.Role)
-	if err != nil {
-		log.Println(c, "Failed to generate JWT token", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
-		return
-	}
+	// Refresh cookie must be SameSite=None and Secure in cross-site contexts
+	c.SetSameSite(http.SameSiteNoneMode)
+	c.SetCookie("refresh_token", tokenPair.RefreshToken, 604800, "/", domain, isSecure, true)
 
-	// 6. Set token in HTTP-only cookie (adjust domain in production)
-	c.SetCookie("token", token, 86400, "/", "localhost", false, true)
-
-	log.Println(c, "User logged in successfully", "email", user.Email, "role", user.Role)
-	// 7. Respond with success (omit token in response for security)
 	c.JSON(http.StatusOK, gin.H{"message": "Logged in successfully"})
 }
 
-// Register a new user
-func Register(c *gin.Context) {
-	var registerReq types.RegisterRequest
-
-	// 1. Bind JSON request
-	if err := c.ShouldBindJSON(&registerReq); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON body"})
+func (ctrl *AuthController) Register(c *gin.Context) {
+	var req struct {
+		Name     string `json:"name" binding:"required"`
+		Email    string `json:"email" binding:"required,email"`
+		Password string `json:"password" binding:"required,min=8"`
+		Role     string `json:"role" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body", "details": err.Error()})
 		return
 	}
 
-	// 2. Validate password strength
-	validator := services.NewPasswordValidator()
-	if err := validator.ValidatePassword(registerReq.Password); err != nil {
+	// Validate password strength before proceeding
+	pwValidator := services.NewPasswordValidator()
+	if err := pwValidator.ValidatePassword(req.Password); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// 3. Check if email already exists
-	var existingUser models.User
-	if err := database.DB.Where("email = ?", registerReq.Email).First(&existingUser).Error; err == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "Email already exists"})
-		return
-	}
-
-	// 4. Hash the password
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(registerReq.Password), bcrypt.DefaultCost)
+	err := ctrl.service.Register(c.Request.Context(), req.Name, req.Email, req.Password, req.Role)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+		if strings.Contains(err.Error(), "already exists") {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		if strings.Contains(err.Error(), "failed to send verification email") {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Account created, but failed to send verification email. Please try verifying later."})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create account at this time."})
 		return
 	}
 
-	// 5. Create new user
-	newUser := models.User{
-		ID:       uuid.New(),
-		Email:    registerReq.Email,
-		Password: string(hashedPassword),
-		Role:     registerReq.Role,
-	}
-	newUser.VerificationCode = services.GenerateRandomCode(6)
-
-	// 6. Send verification email
-	if err := services.SendVerificationEmail(newUser.Email, newUser.VerificationCode); err != nil {
-		log.Println("Error sending verification email:", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send verification email"})
-		return
-	}
-
-	// 7. Insert into PostgreSQL
-	if err := database.DB.Create(&newUser).Error; err != nil {
-		log.Println("Error inserting user:", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create account"})
-		return
-	}
-
-	// 8. Success response
-	c.JSON(http.StatusCreated, gin.H{
-		"message": "Account created successfully",
-	})
+	c.JSON(http.StatusCreated, gin.H{"message": "Account created successfully. Please verify your email.", "email": req.Email})
 }
 
-// Verify email with the code
-func VerifyEmail(c *gin.Context) {
-	type VerifyRequest struct {
-		Email string `json:"email"`
-		Code  string `json:"code"`
+func (ctrl *AuthController) VerifyEmail(c *gin.Context) {
+	var req struct {
+		Email string `json:"email" binding:"required,email"`
+		Code  string `json:"code" binding:"required"`
 	}
-
-	var req VerifyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid data"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 		return
 	}
 
-	var user models.User
-	if err := database.DB.Where("email = ?", req.Email).First(&user).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
-		return
-	}
-
-	// Check if the verification code matches
-	if user.VerificationCode != req.Code {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid verification code"})
-		return
-	}
-
-	// Mark email as verified
-	user.EmailVerified = true
-	user.VerificationCode = "" // Clear the verification code after success
-	if err := database.DB.Save(&user).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user"})
+	err := ctrl.service.VerifyEmail(c.Request.Context(), req.Email, req.Code)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		if strings.Contains(err.Error(), "invalid") {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify email"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Email verified successfully"})
+}
+
+func (ctrl *AuthController) Logout(c *gin.Context) {
+	// try to revoke server-side refresh token if present
+	refreshToken, _ := c.Cookie("refresh_token")
+	_ = ctrl.service.Logout(c.Request.Context(), refreshToken)
+
+	domain := os.Getenv("COOKIE_DOMAIN")
+	isSecure := os.Getenv("ENV") == "production"
+
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie("__session", "", -1, "/", domain, isSecure, true)
+
+	// Clear refresh cookie with SameSite=None to match how it was set
+	c.SetSameSite(http.SameSiteNoneMode)
+	c.SetCookie("refresh_token", "", -1, "/", domain, isSecure, true)
+
+	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
+}
+
+func (ctrl *AuthController) Refresh(c *gin.Context) {
+	refreshToken, err := c.Cookie("refresh_token")
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Refresh token not found"})
+		return
+	}
+
+	newTokenPair, err := ctrl.service.RefreshTokens(c.Request.Context(), refreshToken)
+	if err != nil {
+		ctrl.Logout(c)
+		return
+	}
+
+	domain := os.Getenv("COOKIE_DOMAIN")
+	isSecure := os.Getenv("ENV") == "production"
+
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie("__session", newTokenPair.AccessToken, 900, "/", domain, isSecure, true)
+
+	// Refresh cookie must be SameSite=None
+	c.SetSameSite(http.SameSiteNoneMode)
+	c.SetCookie("refresh_token", newTokenPair.RefreshToken, 604800, "/", domain, isSecure, true)
+
+	c.JSON(http.StatusOK, gin.H{"message": "Token refreshed successfully"})
+}
+
+func (ctrl *AuthController) GetAuthStatus(c *gin.Context) {
+	u, exists := c.Get("user_id")
+	var userID string
+	if exists {
+		if s, ok := u.(string); ok {
+			userID = s
+		}
+	}
+	if userID == "" {
+		// If not in context, try headers (forwarded by API gateway)
+		userID = c.GetHeader("X-User-ID")
+	}
+
+	email := c.GetHeader("X-User-Email")
+	role := c.GetHeader("X-User-Role")
+
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Not authenticated"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"authenticated": true,
+		"user": gin.H{
+			"id":    userID,
+			"email": email,
+			"role":  role,
+		},
+		"timestamp": time.Now().UTC(),
+	})
+}
+
+func (ctrl *AuthController) ResendVerificationEmail(c *gin.Context) {
+	var req struct {
+		Email string `json:"email" binding:"required,email"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body", "details": err.Error()})
+		return
+	}
+
+	err := ctrl.service.ResendVerificationEmail(c.Request.Context(), req.Email)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
+		if strings.Contains(err.Error(), "already verified") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Email already verified"})
+			return
+		}
+		if strings.Contains(err.Error(), "failed to send") {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send verification email. Please try again later."})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not resend verification email"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Verification email sent successfully"})
 }
