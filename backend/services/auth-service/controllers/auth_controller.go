@@ -29,6 +29,15 @@ func NewAuthController(s IAuthService) *AuthController {
 	return &AuthController{service: s}
 }
 
+func cookieSettings() (http.SameSite, bool) {
+	crossOrigin := os.Getenv("COOKIE_CROSS_ORIGIN") == "true"
+	prod := os.Getenv("ENV") == "production"
+	if crossOrigin || prod {
+		return http.SameSiteNoneMode, true
+	}
+	return http.SameSiteLaxMode, false
+}
+
 func (ctrl *AuthController) Login(c *gin.Context) {
 	var req struct {
 		Email    string `json:"email" binding:"required,email"`
@@ -50,15 +59,11 @@ func (ctrl *AuthController) Login(c *gin.Context) {
 	// log.Printf("[AUTH][LOGIN] email=%s refresh_token=%s", req.Email, tokenPair.RefreshToken)
 
 	domain := os.Getenv("COOKIE_DOMAIN")
-	isSecure := os.Getenv("ENV") == "production"
+	sameSite, secure := cookieSettings()
 
-	// Set cookies. Use SameSite=None for refresh cookie to allow cross-site refresh requests.
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie("__session", tokenPair.AccessToken, 900, "/", domain, isSecure, true)
-
-	// Refresh cookie must be SameSite=None and Secure in cross-site contexts
-	c.SetSameSite(http.SameSiteNoneMode)
-	c.SetCookie("refresh_token", tokenPair.RefreshToken, 604800, "/", domain, isSecure, true)
+	c.SetSameSite(sameSite)
+	c.SetCookie("__session", tokenPair.AccessToken, 900, "/", domain, secure, true)
+	c.SetCookie("refresh_token", tokenPair.RefreshToken, 604800, "/", domain, secure, true)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Logged in successfully"})
 }
@@ -132,14 +137,11 @@ func (ctrl *AuthController) Logout(c *gin.Context) {
 	_ = ctrl.service.Logout(c.Request.Context(), refreshToken)
 
 	domain := os.Getenv("COOKIE_DOMAIN")
-	isSecure := os.Getenv("ENV") == "production"
+	sameSite, secure := cookieSettings()
 
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie("__session", "", -1, "/", domain, isSecure, true)
-
-	// Clear refresh cookie with SameSite=None to match how it was set
-	c.SetSameSite(http.SameSiteNoneMode)
-	c.SetCookie("refresh_token", "", -1, "/", domain, isSecure, true)
+	c.SetSameSite(sameSite)
+	c.SetCookie("__session", "", -1, "/", domain, secure, true)
+	c.SetCookie("refresh_token", "", -1, "/", domain, secure, true)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
 }
@@ -158,14 +160,11 @@ func (ctrl *AuthController) Refresh(c *gin.Context) {
 	}
 
 	domain := os.Getenv("COOKIE_DOMAIN")
-	isSecure := os.Getenv("ENV") == "production"
+	sameSite, secure := cookieSettings()
 
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie("__session", newTokenPair.AccessToken, 900, "/", domain, isSecure, true)
-
-	// Refresh cookie must be SameSite=None
-	c.SetSameSite(http.SameSiteNoneMode)
-	c.SetCookie("refresh_token", newTokenPair.RefreshToken, 604800, "/", domain, isSecure, true)
+	c.SetSameSite(sameSite)
+	c.SetCookie("__session", newTokenPair.AccessToken, 900, "/", domain, secure, true)
+	c.SetCookie("refresh_token", newTokenPair.RefreshToken, 604800, "/", domain, secure, true)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Token refreshed successfully"})
 }
