@@ -11,10 +11,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	"github.com/gin-contrib/cors"
-	"go.uber.org/zap"
 	"strings"
+
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 // CORS Middleware - Apply this globally
@@ -36,19 +37,19 @@ func CORSMiddleware() gin.HandlerFunc {
 		}
 		config.AllowOrigins = origins
 	} else {
-		config.AllowOrigins = []string{"http://localhost:3000", "http://localhost:3001"}
+		config.AllowOrigins = []string{"http://localhost:3000", "http://localhost:3001", "https://shopswift-storefront.vercel.app", "https://shopswift-admin.vercel.app"}
 	}
 
 	return cors.New(config)
 }
 
 // CustomRecovery recovers from panics and logs them
-func CustomRecovery(logger *zap.Logger) gin.HandlerFunc {
+func CustomRecovery(zlogger *zap.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
 			if err := recover(); err != nil {
 				stack := debug.Stack()
-				logger.Error("Panic recovered", zap.Any("error", err), zap.ByteString("stack", stack))
+				zlogger.Error("Panic recovered", zap.Any("error", err), zap.ByteString("stack", stack))
 				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 			}
 		}()
