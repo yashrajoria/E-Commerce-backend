@@ -2,6 +2,8 @@ package middleware
 
 import (
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,8 +45,13 @@ func SecurityHeaders() gin.HandlerFunc {
 }
 
 // RateLimiter stores rate limiters for different IPs
+type limiterEntry struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
+}
+
 type RateLimiter struct {
-	ips   map[string]*rate.Limiter
+	ips   map[string]*limiterEntry
 	mu    *sync.RWMutex
 	rate  rate.Limit
 	burst int
@@ -53,33 +60,68 @@ type RateLimiter struct {
 
 // NewRateLimiter creates a new rate limiter
 func NewRateLimiter(r rate.Limit, b int, ttl time.Duration) *RateLimiter {
-	return &RateLimiter{
-		ips:   make(map[string]*rate.Limiter),
+	rl := &RateLimiter{
+		ips:   make(map[string]*limiterEntry),
 		mu:    &sync.RWMutex{},
 		rate:  r,
 		burst: b,
 		ttl:   ttl,
 	}
+
+	// Periodic cleanup of stale entries to avoid unbounded map growth
+	go func() {
+		ticker := time.NewTicker(ttl)
+		defer ticker.Stop()
+		for range ticker.C {
+			rl.mu.Lock()
+			now := time.Now()
+			for ip, e := range rl.ips {
+				if now.Sub(e.lastSeen) > rl.ttl {
+					delete(rl.ips, ip)
+				}
+			}
+			rl.mu.Unlock()
+		}
+	}()
+
+	return rl
 }
 
 // GetLimiter returns the rate limiter for the given IP
 func (rl *RateLimiter) GetLimiter(ip string) *rate.Limiter {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-
-	limiter, exists := rl.ips[ip]
-	if !exists {
-		limiter = rate.NewLimiter(rl.rate, rl.burst)
-		rl.ips[ip] = limiter
+	rl.mu.RLock()
+	entry, exists := rl.ips[ip]
+	rl.mu.RUnlock()
+	if exists {
+		// update lastSeen
+		rl.mu.Lock()
+		entry.lastSeen = time.Now()
+		rl.mu.Unlock()
+		return entry.limiter
 	}
 
-	return limiter
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	// double-check in case another goroutine created it
+	entry, exists = rl.ips[ip]
+	if !exists {
+		entry = &limiterEntry{
+			limiter:  rate.NewLimiter(rl.rate, rl.burst),
+			lastSeen: time.Now(),
+		}
+		rl.ips[ip] = entry
+	} else {
+		entry.lastSeen = time.Now()
+	}
+	return entry.limiter
 }
 
 // RateLimitMiddleware creates a rate limiting middleware
 func RateLimitMiddleware() gin.HandlerFunc {
 	// Create a rate limiter: 100 requests per minute with burst of 50
-	limiter := NewRateLimiter(rate.Limit(100), 50, time.Minute*5)
+	// Use rate.Every to express "per minute" correctly
+	perMinute := rate.Every(time.Minute / 100)
+	limiter := NewRateLimiter(perMinute, 50, time.Minute*5)
 
 	return func(c *gin.Context) {
 		ip := c.ClientIP()
@@ -96,15 +138,48 @@ func RateLimitMiddleware() gin.HandlerFunc {
 
 // CORSMiddleware creates a CORS middleware
 func CORSMiddleware() gin.HandlerFunc {
+	// Build allowlist from env var or fallbacks
+	allowedEnv := os.Getenv("ALLOWED_ORIGINS")
+	var allowed []string
+	if allowedEnv == "*" {
+		allowed = []string{"*"}
+	} else if allowedEnv != "" {
+		for _, o := range strings.Split(allowedEnv, ",") {
+			allowed = append(allowed, strings.TrimSpace(strings.TrimSuffix(o, "/")))
+		}
+	} else {
+		allowed = []string{"http://localhost:3000", "http://localhost:3001", "https://shopswift-storefront.vercel.app", "https://shopswift-admin.vercel.app"}
+	}
+
+	allowAll := len(allowed) == 1 && allowed[0] == "*"
+
 	return func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
 		if origin == "" {
-			origin = "http://localhost:3000" // Default origin
+			c.Next()
+			return
 		}
-		if origin == "" {
-			origin = "http://localhost:3001"
+
+		normalized := strings.TrimSuffix(origin, "/")
+		allowedOrigin := ""
+		if allowAll {
+			allowedOrigin = origin
+		} else {
+			for _, a := range allowed {
+				if a == normalized {
+					allowedOrigin = origin
+					break
+				}
+			}
 		}
-		c.Header("Access-Control-Allow-Origin", origin)
+
+		if allowedOrigin == "" {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Origin not allowed"})
+			return
+		}
+
+		c.Header("Access-Control-Allow-Origin", allowedOrigin)
+		c.Header("Vary", "Origin")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
 		c.Header("Access-Control-Allow-Credentials", "true")
@@ -113,6 +188,7 @@ func CORSMiddleware() gin.HandlerFunc {
 			c.AbortWithStatus(http.StatusOK)
 			return
 		}
+
 		c.Next()
 	}
 }
