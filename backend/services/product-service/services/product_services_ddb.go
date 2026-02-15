@@ -20,18 +20,20 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 // ProductServiceDDB is a DynamoDB-backed product service
 type ProductServiceDDB struct {
-	productRepo   repository.ProductRepo
-	categoryRepo  repository.CategoryRepo
-	s3Client      *s3.Client
-	presignClient *s3.PresignClient
-	bucket        string
-	prefix        string
-	endpoint      string
-	cdnDomain     string
+	productRepo     repository.ProductRepo
+	categoryRepo    repository.CategoryRepo
+	s3Client        *s3.Client
+	presignClient   *s3.PresignClient
+	bucket          string
+	prefix          string
+	endpoint        string
+	cdnDomain       string
+	inventoryClient *InventoryClient
 }
 
 func NewProductServiceDDB(
@@ -40,16 +42,18 @@ func NewProductServiceDDB(
 	s3Client *s3.Client,
 	presignClient *s3.PresignClient,
 	bucket, prefix, endpoint, cdnDomain string,
+	inventoryClient *InventoryClient,
 ) *ProductServiceDDB {
 	return &ProductServiceDDB{
-		productRepo:   pr,
-		categoryRepo:  cr,
-		s3Client:      s3Client,
-		presignClient: presignClient,
-		bucket:        bucket,
-		prefix:        prefix,
-		endpoint:      endpoint,
-		cdnDomain:     cdnDomain,
+		productRepo:     pr,
+		categoryRepo:    cr,
+		s3Client:        s3Client,
+		presignClient:   presignClient,
+		bucket:          bucket,
+		prefix:          prefix,
+		endpoint:        endpoint,
+		cdnDomain:       cdnDomain,
+		inventoryClient: inventoryClient,
 	}
 }
 
@@ -197,6 +201,17 @@ func (s *ProductServiceDDB) CreateProduct(ctx context.Context, req ProductCreate
 	err = s.productRepo.Create(ctx, product)
 	if err != nil {
 		return nil, err
+	}
+
+	// Step 5: Sync inventory (fire-and-forget; log errors but don't fail the product creation)
+	if s.inventoryClient != nil && product.Quantity > 0 {
+		if invErr := s.inventoryClient.SetStock(ctx, product.ID.String(), product.Quantity); invErr != nil {
+			zap.L().Warn("Failed to sync inventory for new product",
+				zap.String("product_id", product.ID.String()),
+				zap.Int("quantity", product.Quantity),
+				zap.Error(invErr),
+			)
+		}
 	}
 
 	return product, nil
@@ -618,6 +633,17 @@ func (s *ProductServiceDDB) ProcessBulkImport(ctx context.Context, file multipar
 					}
 				}
 				rowResults = append(rowResults, map[string]interface{}{"row": rowNumForSKU, "sku": p.SKU, "status": "inserted"})
+
+				// Sync inventory for each inserted product
+				if s.inventoryClient != nil && p.Quantity > 0 {
+					if invErr := s.inventoryClient.SetStock(ctx, p.ID.String(), p.Quantity); invErr != nil {
+						zap.L().Warn("Failed to sync inventory for bulk product",
+							zap.String("product_id", p.ID.String()),
+							zap.Int("quantity", p.Quantity),
+							zap.Error(invErr),
+						)
+					}
+				}
 			}
 		}
 	}
