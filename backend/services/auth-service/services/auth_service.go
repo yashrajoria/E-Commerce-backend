@@ -81,7 +81,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*Token
 	return tokenPair, nil
 }
 
-func (s *AuthService) Register(ctx context.Context, name, email, password, role, storeName string) error {
+func (s *AuthService) Register(ctx context.Context, name, email, password, role string) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		txRepo := repository.NewUserRepository(tx)
 
@@ -105,7 +105,7 @@ func (s *AuthService) Register(ctx context.Context, name, email, password, role,
 			Name:             name,
 			Password:         string(hashedPassword),
 			Role:             role,
-			StoreName:        storeName,
+			StoreName:        "",
 			EmailVerified:    false,
 			VerificationCode: verificationCode,
 		}
@@ -232,6 +232,7 @@ func (s *AuthService) Logout(ctx context.Context, refreshToken string) error {
 	}
 	return s.userRepo.RevokeRefreshTokenByTokenID(ctx, jti)
 }
+
 // ResendVerificationEmail generates a new verification code and sends it to the user
 func (s *AuthService) ResendVerificationEmail(ctx context.Context, email string) error {
 	user, err := s.userRepo.FindByEmail(ctx, email)

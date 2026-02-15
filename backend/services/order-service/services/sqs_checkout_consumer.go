@@ -15,17 +15,19 @@ import (
 
 // SQSCheckoutConsumer consumes checkout events from SQS and creates orders
 type SQSCheckoutConsumer struct {
-	sqsConsumer    *aws_pkg.SQSConsumer
-	sqsPublisher   *aws_pkg.SQSConsumer // For sending payment requests
-	db             *gorm.DB
+	sqsConsumer     *aws_pkg.SQSConsumer
+	sqsPublisher    *aws_pkg.SQSConsumer // For sending payment requests
+	db              *gorm.DB
+	inventoryClient *InventoryClient
 }
 
 // NewSQSCheckoutConsumer creates a new SQS-based checkout consumer
-func NewSQSCheckoutConsumer(sqsConsumer *aws_pkg.SQSConsumer, sqsPublisher *aws_pkg.SQSConsumer, db *gorm.DB) *SQSCheckoutConsumer {
+func NewSQSCheckoutConsumer(sqsConsumer *aws_pkg.SQSConsumer, sqsPublisher *aws_pkg.SQSConsumer, db *gorm.DB, inventoryClient *InventoryClient) *SQSCheckoutConsumer {
 	return &SQSCheckoutConsumer{
-		sqsConsumer:  sqsConsumer,
-		sqsPublisher: sqsPublisher,
-		db:           db,
+		sqsConsumer:     sqsConsumer,
+		sqsPublisher:    sqsPublisher,
+		db:              db,
+		inventoryClient: inventoryClient,
 	}
 }
 
@@ -78,6 +80,7 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 	totalAmount := 0
 	validItems := 0
 	productServiceURL := os.Getenv("PRODUCT_SERVICE_URL")
+	inventoryItems := make([]ReserveItem, 0, len(evt.Items))
 
 	for _, it := range evt.Items {
 		pid, err := uuid.Parse(it.ProductID)
@@ -97,11 +100,6 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 			continue
 		}
 
-		if product.Stock < it.Quantity {
-			log.Printf("⚠️ insufficient stock for product_id=%s: available=%d requested=%d", it.ProductID, product.Stock, it.Quantity)
-			continue
-		}
-
 		orderItem := models.OrderItem{
 			ID:        uuid.New(),
 			ProductID: pid,
@@ -111,12 +109,27 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 
 		totalAmount += it.Quantity * int(product.Price)
 		orderItems = append(orderItems, orderItem)
+		inventoryItems = append(inventoryItems, ReserveItem{
+			ProductID: it.ProductID,
+			Quantity:  it.Quantity,
+		})
 		validItems++
 	}
 
 	if validItems == 0 {
 		log.Printf("❌ no valid items for user=%s, skipping order", evt.UserID)
 		return nil
+	}
+
+	// Reserve inventory via inventory service
+	if c.inventoryClient != nil {
+		if err := c.inventoryClient.ReserveStock(ctx, orderIDUUID.String(), inventoryItems); err != nil {
+			log.Printf("❌ inventory reservation failed for order=%s: %v", orderIDUUID.String(), err)
+			return nil // Don't retry — stock is insufficient or service is down
+		}
+		log.Printf("✅ inventory reserved for order=%s items=%d", orderIDUUID.String(), len(inventoryItems))
+	} else {
+		log.Printf("⚠️ inventory client not configured, skipping reservation")
 	}
 
 	order := models.Order{

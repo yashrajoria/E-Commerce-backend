@@ -1,41 +1,115 @@
 package main
 
 import (
-	"log"
+	"context"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awscfg "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/gin-gonic/gin"
 	"github.com/yashrajoria/inventory-service/controllers"
-	db "github.com/yashrajoria/inventory-service/database"
+	"github.com/yashrajoria/inventory-service/repository"
+	"github.com/yashrajoria/inventory-service/routes"
+	"github.com/yashrajoria/inventory-service/services"
 	"go.uber.org/zap"
 )
 
 func main() {
-	// Initialize logger
-	// 	logger.Initialize(os.Getenv("ENV"))
+	logger, err := zap.NewProduction()
+	if err != nil {
+		panic("failed to initialize logger: " + err.Error())
+	}
+	defer logger.Sync()
 
-	// Load configuration from environment variables
 	cfg, err := LoadConfig()
 	if err != nil {
-		log.Println("Config error", zap.Error(err))
+		logger.Fatal("Config load failed", zap.Error(err))
 	}
 
-	err = db.Connect()
+	// --- AWS / DynamoDB setup ---
+	awsRegion := os.Getenv("AWS_REGION")
+	if awsRegion == "" {
+		awsRegion = "us-east-1"
+	}
+	awsEndpoint := os.Getenv("AWS_ENDPOINT")
+	awsAccessKey := os.Getenv("AWS_ACCESS_KEY_ID")
+	awsSecret := os.Getenv("AWS_SECRET_ACCESS_KEY")
+
+	cfgOpts := []func(*awscfg.LoadOptions) error{
+		awscfg.WithRegion(awsRegion),
+	}
+	if awsAccessKey != "" || awsSecret != "" {
+		cfgOpts = append(cfgOpts, awscfg.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider(awsAccessKey, awsSecret, ""),
+		))
+	}
+	if awsEndpoint != "" {
+		cfgOpts = append(cfgOpts, awscfg.WithEndpointResolverWithOptions(
+			aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
+				return aws.Endpoint{URL: awsEndpoint, SigningRegion: awsRegion}, nil
+			}),
+		))
+	}
+
+	awsCfg, err := awscfg.LoadDefaultConfig(context.Background(), cfgOpts...)
 	if err != nil {
-		log.Println("Error connecting to database", zap.Error(err))
+		logger.Fatal("Failed to load AWS config", zap.Error(err))
 	}
 
-	r := gin.Default()
+	ddbClient := dynamodb.NewFromConfig(awsCfg, func(o *dynamodb.Options) {
+		if awsEndpoint != "" {
+			o.BaseEndpoint = aws.String(awsEndpoint)
+		}
+	})
 
-	// Apply request logging
-	//	r.Use(logger.RequestLogger())
+	// --- Service wiring ---
+	inventoryRepo := repository.NewDynamoInventoryRepository(ddbClient, cfg.DDBTable)
+	inventoryService := services.NewInventoryService(inventoryRepo)
+	inventoryController := controllers.NewInventoryController(inventoryService)
 
-	r.GET("/inventory/:productId", controllers.GetInventory)
-	// r.POST("/inventory", controllers.AddInventory)
-	// r.PUT("/inventory/:productId", controllers.UpdateInventory)
+	// --- HTTP router ---
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.Use(func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+		defer cancel()
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
 
-	//logger.Log.Info("Inventory Service started", zap.String("port", cfg.Port))
-	// Start server on configured port
-	if err := r.Run(":" + cfg.Port); err != nil {
-		log.Println("Error starting server", zap.Error(err))
+	routes.RegisterRoutes(r, inventoryController)
+
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "OK"})
+	})
+
+	srv := &http.Server{Addr: ":" + cfg.Port, Handler: r}
+
+	go func() {
+		logger.Info("Inventory Service starting", zap.String("port", cfg.Port))
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Fatal("Failed to start server", zap.Error(err))
+		}
+	}()
+
+	// --- Graceful shutdown ---
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	logger.Info("Shutting down Inventory Service...")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		logger.Fatal("Server forced to shutdown", zap.Error(err))
 	}
+
+	logger.Info("Inventory Service stopped gracefully")
 }

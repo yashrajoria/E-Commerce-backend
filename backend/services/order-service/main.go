@@ -109,12 +109,16 @@ func main() {
 		}
 	}
 
+	// Inventory client for stock management
+	inventoryClient := services.NewInventoryClient(cfg.InventoryServiceURL)
+
 	// Start SQS consumers
 	if checkoutQueueURL != "" && paymentRequestQueueURL != "" {
 		checkoutConsumer := services.NewSQSCheckoutConsumer(
 			aws_pkg.NewSQSConsumer(awsCfg, checkoutQueueURL),
 			aws_pkg.NewSQSConsumer(awsCfg, paymentRequestQueueURL), // For sending payment requests
 			database.DB,
+			inventoryClient,
 		)
 		go checkoutConsumer.Start(shutdownCtx)
 		logger.Info("Started SQS checkout consumer", zap.String("queue", checkoutQueueURL))
@@ -126,6 +130,7 @@ func main() {
 		paymentConsumer := services.NewSQSPaymentConsumer(
 			aws_pkg.NewSQSConsumer(awsCfg, paymentEventsQueueURL),
 			database.DB,
+			inventoryClient,
 		)
 		go paymentConsumer.Start(shutdownCtx)
 		logger.Info("Started SQS payment events consumer", zap.String("queue", paymentEventsQueueURL))
