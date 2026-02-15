@@ -15,6 +15,7 @@ type User struct {
 	Name             string    `gorm:"not null"`
 	EmailVerified    bool      `gorm:"default:false"`
 	VerificationCode string    `gorm:"size:6"`
+	StoreName        string    `gorm:"size:100"`
 	Role             string    `gorm:"type:varchar(50);default:'user'"`
 	CreatedAt        time.Time `gorm:"autoCreateTime"`
 	UpdatedAt        time.Time `gorm:"autoUpdateTime"`
