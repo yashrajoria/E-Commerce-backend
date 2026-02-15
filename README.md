@@ -3,8 +3,18 @@
   <p><strong>Scalable, production-ready e-commerce backend built with Go and modern microservices architecture</strong></p>
   
   ![Go](https://img.shields.io/badge/Go-100%25-00ADD8?style=flat&logo=go&logoColor=white)
-  ![Commits](https://img.shields.io/badge/Commits-401-orange?style=flat)
-  ![Status](https://img.shields.io/badge/Status-Active-success?style=flat)
+![Commits](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/yashrajoria/68669c1c711655a41895753490af2898/raw/commits-badge.json)
+![Status](https://img.shields.io/badge/Status-Active-success?style=flat)
+
+### 🛠️ Tech Stack
+
+![Go](https://img.shields.io/badge/Go-1.20+-00ADD8?logo=go&logoColor=white)
+![Microservices](https://img.shields.io/badge/Architecture-Microservices-blue)
+![REST API](https://img.shields.io/badge/API-RESTful-green)
+![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL-336791?logo=postgresql&logoColor=white)
+![MongoDB](https://img.shields.io/badge/DB-MongoDB-47A248?logo=mongodb&logoColor=white)
+![Docker](https://img.shields.io/badge/Deploy-Docker-2496ED?logo=docker&logoColor=white)
+![Kubernetes](https://img.shields.io/badge/Deploy-Kubernetes-326CE5?logo=kubernetes&logoColor=white)
 </div>
 
 ---
