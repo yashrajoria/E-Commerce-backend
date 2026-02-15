@@ -10,15 +10,16 @@ import (
 )
 
 type Config struct {
-	Port              string
-	PostgresUser      string
-	PostgresPassword  string
-	PostgresDB        string
-	PostgresHost      string
-	PostgresPort      string
-	PostgresSSLMode   string
-	PostgresTimeZone  string
-	ProductServiceURL string
+	Port                string
+	PostgresUser        string
+	PostgresPassword    string
+	PostgresDB          string
+	PostgresHost        string
+	PostgresPort        string
+	PostgresSSLMode     string
+	PostgresTimeZone    string
+	ProductServiceURL   string
+	InventoryServiceURL string
 	// SQS/SNS config (replaces Kafka)
 	CheckoutQueueURL       string
 	PaymentEventsQueueURL  string
@@ -38,6 +39,7 @@ func LoadConfig() (*Config, error) {
 		PostgresSSLMode:        getEnv("POSTGRES_SSLMODE", "disable"),
 		PostgresTimeZone:       getEnv("POSTGRES_TIMEZONE", "Asia/Kolkata"),
 		ProductServiceURL:      getEnv("PRODUCT_SERVICE_URL", "http://product-service:8082"),
+		InventoryServiceURL:    getEnv("INVENTORY_SERVICE_URL", "http://inventory-service:8084"),
 		CheckoutQueueURL:       os.Getenv("CHECKOUT_QUEUE_URL"),
 		PaymentEventsQueueURL:  os.Getenv("PAYMENT_EVENTS_QUEUE_URL"),
 		PaymentRequestQueueURL: os.Getenv("PAYMENT_REQUEST_QUEUE_URL"),
