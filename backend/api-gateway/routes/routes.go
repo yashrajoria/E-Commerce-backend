@@ -89,6 +89,18 @@ func RegisterAllRoutes(r *gin.Engine) {
 	protected.POST("/payment/*any", payment)
 	protected.GET("/payment/*any", payment)
 
+	// Inventory routes
+	inventory := forwardTo("http://inventory-service:8084/inventory")
+	// Protected: read & operations
+	protected.GET("/inventory/:productId", inventory)
+	protected.POST("/inventory/check", inventory)
+	protected.POST("/inventory/reserve", inventory)
+	protected.POST("/inventory/confirm", inventory)
+	protected.POST("/inventory/release", inventory)
+	// Admin: create & update stock
+	admin.POST("/inventory", inventory)
+	admin.PUT("/inventory/:productId", inventory)
+
 	// Stripe webhook (public)
 	public.POST("/stripe/webhook", forwardTo("http://payment-service:8087/stripe/webhook"))
 }
