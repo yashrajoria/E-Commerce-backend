@@ -255,6 +255,14 @@ func (s *ProductServiceDDB) ValidateBulkImport(ctx context.Context, file multipa
 		index[strings.ToLower(strings.TrimSpace(h))] = i
 	}
 
+	// Ensure required headers exist to avoid panics on indexing
+	requiredHeaders := []string{"name", "sku", "price", "quantity", "is_featured", "categories", "imageurl"}
+	for _, h := range requiredHeaders {
+		if _, ok := index[h]; !ok {
+			return nil, fmt.Errorf("missing required CSV header: %s", h)
+		}
+	}
+
 	type pendingProduct struct {
 		Row           []string
 		RowNum        int
@@ -283,11 +291,19 @@ func (s *ProductServiceDDB) ValidateBulkImport(ctx context.Context, file multipa
 			continue
 		}
 
-		name := strings.TrimSpace(row[index["name"]])
-		sku := strings.TrimSpace(row[index["sku"]])
-		priceStr := strings.TrimSpace(row[index["price"]])
-		quantityStr := strings.TrimSpace(row[index["quantity"]])
-		isFeaturedStr := strings.TrimSpace(row[index["is_featured"]])
+		// Safe access helper in case the row is malformed or short
+		get := func(key string) string {
+			if idx, ok := index[key]; ok && idx < len(row) {
+				return strings.TrimSpace(row[idx])
+			}
+			return ""
+		}
+
+		name := get("name")
+		sku := get("sku")
+		priceStr := get("price")
+		quantityStr := get("quantity")
+		isFeaturedStr := get("is_featured")
 
 		hasError := false
 
@@ -321,7 +337,7 @@ func (s *ProductServiceDDB) ValidateBulkImport(ctx context.Context, file multipa
 			hasError = true
 		}
 
-		imageURL := strings.TrimSpace(row[index["imageurl"]])
+		imageURL := get("imageurl")
 		if imageURL != "" {
 			if u, err := url.Parse(imageURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 				warningsList = append(warningsList, map[string]interface{}{"row": rowNum, "warning": "Invalid image URL - product will be created without image"})
@@ -406,6 +422,14 @@ func (s *ProductServiceDDB) ProcessBulkImport(ctx context.Context, file multipar
 		index[strings.ToLower(strings.TrimSpace(h))] = i
 	}
 
+	// Ensure required headers exist
+	requiredHeaders := []string{"name", "sku", "price", "quantity", "is_featured", "categories", "imageurl"}
+	for _, h := range requiredHeaders {
+		if _, ok := index[h]; !ok {
+			return nil, fmt.Errorf("missing required CSV header: %s", h)
+		}
+	}
+
 	type pendingProduct struct {
 		Row           []string
 		RowNum        int
@@ -428,9 +452,16 @@ func (s *ProductServiceDDB) ProcessBulkImport(ctx context.Context, file multipar
 			rowNum++
 			continue
 		}
+		// Safe access helper
+		get := func(key string) string {
+			if idx, ok := index[key]; ok && idx < len(row) {
+				return strings.TrimSpace(row[idx])
+			}
+			return ""
+		}
 
-		sku := strings.TrimSpace(row[index["sku"]])
-		rawCategories := strings.Split(row[index["categories"]], ",")
+		sku := get("sku")
+		rawCategories := strings.Split(get("categories"), ",")
 		var catNames []string
 		for _, cName := range rawCategories {
 			trimmed := strings.TrimSpace(cName)
@@ -463,11 +494,19 @@ func (s *ProductServiceDDB) ProcessBulkImport(ctx context.Context, file multipar
 
 	var productsToInsert []models.Product
 	for _, pp := range pendingProducts {
-		name := strings.TrimSpace(pp.Row[index["name"]])
-		sku := strings.TrimSpace(pp.Row[index["sku"]])
-		price, _ := strconv.ParseFloat(strings.TrimSpace(pp.Row[index["price"]]), 64)
-		quantity, _ := strconv.Atoi(strings.TrimSpace(pp.Row[index["quantity"]]))
-		isFeatured, _ := strconv.ParseBool(strings.TrimSpace(pp.Row[index["is_featured"]]))
+		// Safe getters for fields
+		get := func(key string) string {
+			if idx, ok := index[key]; ok && idx < len(pp.Row) {
+				return strings.TrimSpace(pp.Row[idx])
+			}
+			return ""
+		}
+
+		name := get("name")
+		sku := get("sku")
+		price, _ := strconv.ParseFloat(get("price"), 64)
+		quantity, _ := strconv.Atoi(get("quantity"))
+		isFeatured, _ := strconv.ParseBool(get("is_featured"))
 
 		categorySet := make(map[uuid.UUID]bool)
 		for _, catName := range pp.CategoryNames {
@@ -482,7 +521,7 @@ func (s *ProductServiceDDB) ProcessBulkImport(ctx context.Context, file multipar
 			categoryIDs = append(categoryIDs, id)
 		}
 
-		imageURL := strings.TrimSpace(pp.Row[index["imageurl"]])
+		imageURL := get("imageurl")
 		var imageURLs []string
 		if imageURL != "" {
 			uploadedURL, err := s.uploadImageFromURL(ctx, imageURL, sku, 0)
@@ -497,9 +536,9 @@ func (s *ProductServiceDDB) ProcessBulkImport(ctx context.Context, file multipar
 			Name:        name,
 			Price:       price,
 			Quantity:    quantity,
-			Description: strings.TrimSpace(pp.Row[index["description"]]),
+			Description: get("description"),
 			Images:      imageURLs,
-			Brand:       strings.TrimSpace(pp.Row[index["brand"]]),
+			Brand:       get("brand"),
 			SKU:         sku,
 			IsFeatured:  isFeatured,
 			CategoryIDs: categoryIDs,
@@ -509,23 +548,97 @@ func (s *ProductServiceDDB) ProcessBulkImport(ctx context.Context, file multipar
 		productsToInsert = append(productsToInsert, product)
 	}
 
-	if len(productsToInsert) > 0 {
-		err := s.productRepo.CreateMany(ctx, productsToInsert)
+	// Insert in chunks and skip duplicates by SKU
+	insertedCount := 0
+	var rowResults []map[string]interface{}
+	const chunkSize = 25
+	for i := 0; i < len(productsToInsert); i += chunkSize {
+		end := i + chunkSize
+		if end > len(productsToInsert) {
+			end = len(productsToInsert)
+		}
+		chunk := productsToInsert[i:end]
+
+		// Build SKU list for this chunk and check existing SKUs
+		var skus []string
+		for _, p := range chunk {
+			skus = append(skus, p.SKU)
+		}
+		existing, err := s.productRepo.FindBySKUs(ctx, skus)
 		if err != nil {
 			return nil, err
+		}
+		existingSet := make(map[string]bool)
+		for _, ep := range existing {
+			existingSet[ep.SKU] = true
+		}
+
+		var toInsert []models.Product
+		for _, p := range chunk {
+			// find corresponding pendingProducts rowNum for SKU
+			rowNumForSKU := -1
+			for _, pp := range pendingProducts {
+				if pp.SKU == p.SKU {
+					rowNumForSKU = pp.RowNum
+					break
+				}
+			}
+			if p.SKU != "" && existingSet[p.SKU] {
+				// record duplicate SKU as an error and row result
+				errorsList = append(errorsList, map[string]interface{}{"row": rowNumForSKU, "sku": p.SKU, "error": "duplicate SKU - already exists"})
+				rowResults = append(rowResults, map[string]interface{}{"row": rowNumForSKU, "sku": p.SKU, "status": "skipped", "reason": "duplicate SKU"})
+				continue
+			}
+			toInsert = append(toInsert, p)
+		}
+
+		if len(toInsert) > 0 {
+			if err := s.productRepo.CreateMany(ctx, toInsert); err != nil {
+				// mark all rows in this toInsert as failed
+				for _, p := range toInsert {
+					rowNumForSKU := -1
+					for _, pp := range pendingProducts {
+						if pp.SKU == p.SKU {
+							rowNumForSKU = pp.RowNum
+							break
+						}
+					}
+					errorsList = append(errorsList, map[string]interface{}{"row": rowNumForSKU, "sku": p.SKU, "error": err.Error()})
+					rowResults = append(rowResults, map[string]interface{}{"row": rowNumForSKU, "sku": p.SKU, "status": "failed", "reason": err.Error()})
+				}
+				return nil, err
+			}
+			insertedCount += len(toInsert)
+			for _, p := range toInsert {
+				rowNumForSKU := -1
+				for _, pp := range pendingProducts {
+					if pp.SKU == p.SKU {
+						rowNumForSKU = pp.RowNum
+						break
+					}
+				}
+				rowResults = append(rowResults, map[string]interface{}{"row": rowNumForSKU, "sku": p.SKU, "status": "inserted"})
+			}
 		}
 	}
 
 	return &models.BulkImportResult{
-		InsertedCount: len(productsToInsert),
+		InsertedCount: insertedCount,
 		ErrorsCount:   len(errorsList),
 		Errors:        errorsList,
 		Message:       "Bulk import process completed",
+		RowResults:    rowResults,
 	}, nil
 }
 
 func (s *ProductServiceDDB) uploadImageFromURL(ctx context.Context, imageURL, sku string, index int) (string, error) {
-	resp, err := http.Get(imageURL)
+	// Use a context-aware HTTP client with a timeout to avoid hanging
+	client := &http.Client{Timeout: 15 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request for image download: %w", err)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to download image: %w", err)
 	}

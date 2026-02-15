@@ -81,7 +81,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*Token
 	return tokenPair, nil
 }
 
-func (s *AuthService) Register(ctx context.Context, name, email, password, role string) error {
+func (s *AuthService) Register(ctx context.Context, name, email, password, role, storeName string) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		txRepo := repository.NewUserRepository(tx)
 
@@ -105,6 +105,7 @@ func (s *AuthService) Register(ctx context.Context, name, email, password, role 
 			Name:             name,
 			Password:         string(hashedPassword),
 			Role:             role,
+			StoreName:        storeName,
 			EmailVerified:    false,
 			VerificationCode: verificationCode,
 		}

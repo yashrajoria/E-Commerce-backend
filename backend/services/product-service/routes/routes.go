@@ -23,6 +23,7 @@ func RegisterRoutes(r *gin.Engine, productController *controllers.ProductControl
 		productRoutes.POST("/bulk/validate", productController.ValidateBulkImport)
 
 		productRoutes.POST("/bulk", productController.CreateBulkProducts)
+		productRoutes.GET("/bulk/jobs/:id", productController.GetBulkImportJobStatus)
 		// Update a product
 		productRoutes.PUT("/:id", productController.UpdateProduct)
 		// Delete a product

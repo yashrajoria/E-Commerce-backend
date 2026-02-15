@@ -245,8 +245,29 @@ func (d *DynamoAdapter) CreateMany(ctx context.Context, products []models.Produc
 			writeReqs = append(writeReqs, types.WriteRequest{PutRequest: &types.PutRequest{Item: item}})
 		}
 		req := &dynamodb.BatchWriteItemInput{RequestItems: map[string][]types.WriteRequest{d.table: writeReqs}}
-		if _, err := d.client.BatchWriteItem(ctx, req); err != nil {
-			return fmt.Errorf("batch write failed: %w", err)
+		// Retry unprocessed items with exponential backoff (simple strategy)
+		attempts := 0
+		for {
+			out, err := d.client.BatchWriteItem(ctx, req)
+			if err != nil {
+				return fmt.Errorf("batch write failed: %w", err)
+			}
+			// If there are no unprocessed items, we're done for this chunk
+			if len(out.UnprocessedItems) == 0 {
+				break
+			}
+			// Prepare to retry only the unprocessed items for this table
+			if unp, ok := out.UnprocessedItems[d.table]; ok && len(unp) > 0 {
+				req.RequestItems[d.table] = unp
+			} else {
+				break
+			}
+			attempts++
+			if attempts >= 3 {
+				return fmt.Errorf("batch write had unprocessed items after retries")
+			}
+			// simple backoff
+			time.Sleep(time.Duration(attempts*300) * time.Millisecond)
 		}
 	}
 	return nil
