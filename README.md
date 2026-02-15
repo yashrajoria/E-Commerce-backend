@@ -3,7 +3,7 @@
   <p><strong>Scalable, production-ready e-commerce backend built with Go and modern microservices architecture</strong></p>
   
   ![Go](https://img.shields.io/badge/Go-100%25-00ADD8?style=flat&logo=go&logoColor=white)
-  ![Commits](https://img.shields.io/badge/Commits-107-orange?style=flat)
+  ![Commits](https://img.shields.io/badge/Commits-401-orange?style=flat)
   ![Status](https://img.shields.io/badge/Status-Active-success?style=flat)
 </div>
 
