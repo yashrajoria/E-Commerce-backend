@@ -19,10 +19,36 @@ type ForwardOptions struct {
 }
 
 func ForwardRequest(c *gin.Context, opts ForwardOptions) {
-	// Get the path - handle case where there's no wildcard parameter
+	// Build the path suffix to append to TargetBase.
+	// 1. Try the wildcard param (*any) used by most routes.
+	// 2. Fall back to deriving it from the full request path by stripping
+	//    the gateway-level prefix that mirrors the TargetBase tail segment.
+	//    e.g. TargetBase="http://inventory-service:8084/inventory"
+	//         request path="/inventory/check"  →  suffix="/check"
 	targetPath := ""
 	if any := c.Param("any"); any != "" {
 		targetPath = any
+	} else {
+		// Derive the gateway prefix from the last path segment of TargetBase.
+		// For "http://host:port/inventory" the prefix is "/inventory".
+		basePath := opts.TargetBase
+		if idx := strings.Index(basePath, "://"); idx != -1 {
+			// strip scheme+host → "/inventory"
+			after := basePath[idx+3:]
+			if si := strings.Index(after, "/"); si != -1 {
+				basePath = after[si:]
+			} else {
+				basePath = ""
+			}
+		}
+		reqPath := c.Request.URL.Path
+		if basePath != "" && strings.HasPrefix(reqPath, basePath) {
+			targetPath = strings.TrimPrefix(reqPath, basePath)
+		}
+		// Also check for named params (e.g. :productId) and append them
+		if productId := c.Param("productId"); productId != "" && targetPath == "" {
+			targetPath = "/" + productId
+		}
 	}
 
 	if opts.StripPrefix != "" && strings.HasPrefix(targetPath, opts.StripPrefix) {
@@ -71,6 +97,9 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 
 	client := &http.Client{
 		Timeout: 30 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
 	}
 	resp, err := client.Do(req)
 	if err != nil {
