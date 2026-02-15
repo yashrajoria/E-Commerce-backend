@@ -127,7 +127,7 @@ echo "Secrets created (or already exist)"
 # Create service-specific secrets
 echo "Creating service secrets: product, order, user, inventory"
 _aws secretsmanager create-secret --name product/JWT_SECRET --secret-string "product-jwt-secret" || true
-_aws secretsmanager create-secret --name product/DB_CREDENTIALS --secret-string '{"MONGO_DB_URL":"mongodb://mongo:27017","MONGO_DB_NAME":"product_db"}' || true
+_aws secretsmanager create-secret --name product/DB_CREDENTIALS --secret-string '{"DDB_TABLE_PRODUCTS":"Products","DDB_TABLE_CATEGORIES":"Categories"}' || true
 
 _aws secretsmanager create-secret --name order/JWT_SECRET --secret-string "order-jwt-secret" || true
 _aws secretsmanager create-secret --name order/DB_CREDENTIALS --secret-string '{"POSTGRES_USER":"order_user","POSTGRES_PASSWORD":"order_pass","POSTGRES_DB":"order_db","POSTGRES_HOST":"postgres","POSTGRES_PORT":"5432"}' || true
@@ -136,6 +136,6 @@ _aws secretsmanager create-secret --name user/JWT_SECRET --secret-string "user-j
 _aws secretsmanager create-secret --name user/DB_CREDENTIALS --secret-string '{"POSTGRES_USER":"user_user","POSTGRES_PASSWORD":"user_pass","POSTGRES_DB":"user_db","POSTGRES_HOST":"postgres","POSTGRES_PORT":"5432"}' || true
 
 _aws secretsmanager create-secret --name inventory/JWT_SECRET --secret-string "inventory-jwt-secret" || true
-_aws secretsmanager create-secret --name inventory/DB_CREDENTIALS --secret-string '{"MONGO_DB_URL":"mongodb://mongo:27017","MONGO_DB_NAME":"inventory_db"}' || true
+_aws secretsmanager create-secret --name inventory/DB_CREDENTIALS --secret-string '{"DDB_TABLE":"Inventory"}' || true
 
 echo "Service secrets created"
