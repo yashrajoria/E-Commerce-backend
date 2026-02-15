@@ -149,8 +149,15 @@ func main() {
 	}
 	categoryRepo := repository.NewDynamoCategoryAdapter(ddbClient, ddbCategoryTable, ddbTable)
 
+	// Inventory client for syncing stock on product creation
+	inventoryURL := os.Getenv("INVENTORY_SERVICE_URL")
+	if inventoryURL == "" {
+		inventoryURL = "http://inventory-service:8084"
+	}
+	inventoryClient := services.NewInventoryClient(inventoryURL)
+
 	// Initialize Services using DynamoDB repositories
-	productService := services.NewProductServiceDDB(productRepo, categoryRepo, s3Client, presignClient, bucket, prefix, endpoint, cloudfrontDomain)
+	productService := services.NewProductServiceDDB(productRepo, categoryRepo, s3Client, presignClient, bucket, prefix, endpoint, cloudfrontDomain, inventoryClient)
 	categoryService := services.NewCategoryServiceDDB(categoryRepo, productRepo)
 
 	// Initialize Controllers, injecting services
