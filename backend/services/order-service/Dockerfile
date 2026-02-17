@@ -1,8 +1,11 @@
 FROM golang:1.25-alpine AS builder
 WORKDIR /src
 
-# Copy module files first
-COPY backend/services/order-service/go.mod backend/services/order-service/go.sum ./
+# Copy go.mod first
+COPY backend/services/order-service/go.mod ./
+
+# Copy go.sum if it exists, otherwise it will be generated
+COPY backend/services/order-service/go.su[m] ./ 2>/dev/null || true
 
 # Ensure local replace path is present for go mod download (monorepo local module)
 # The go.mod in this repo uses: replace github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws => ../../pkg/aws
