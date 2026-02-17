@@ -84,18 +84,28 @@ jobs:
   deploy-to-ec2:
     name: Deploy to EC2 (optional)
     needs: docker-build-and-push
-    if: ${{ secrets.EC2_HOST != '' && secrets.EC2_SSH_KEY != '' }}
     runs-on: ubuntu-latest
+    env:
+      EC2_HOST: ${{ secrets.EC2_HOST }}
+      EC2_USER: ${{ secrets.EC2_USER }}
+      EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
     steps:
+      - name: Check deploy secrets
+        run: |
+          if [ -z "${EC2_HOST}" ] || [ -z "${EC2_SSH_KEY}" ]; then
+            echo "Skipping EC2 deploy - EC2_HOST or EC2_SSH_KEY not set"
+            exit 0
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Deploy to EC2 via SSH
         uses: appleboy/ssh-action@v0.1.8
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          host: ${{ env.EC2_HOST }}
+          username: ${{ env.EC2_USER }}
+          key: ${{ env.EC2_SSH_KEY }}
           script: |
             set -euo pipefail
             echo "Running remote deploy script (if present)"
