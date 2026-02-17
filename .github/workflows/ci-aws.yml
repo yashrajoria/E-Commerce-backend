@@ -63,29 +63,33 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
-  deploy-to-ec2:
-    name: Deploy to EC2 (optional)
-    needs: docker-build-and-push
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    if: ${{ secrets.EC2_HOST && secrets.EC2_SSH_KEY }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+  # deploy-to-ec2:
+  #   name: Deploy to EC2 (optional)
+  #   needs: docker-build-and-push
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 15
+  #   env:
+  #     EC2_HOST: ${{ secrets.EC2_HOST }}
+  #     EC2_USER: ${{ secrets.EC2_USER }}
+  #     EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+  #   if: secrets.EC2_HOST != '' && secrets.EC2_SSH_KEY != ''
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
 
-      - name: Deploy to EC2 via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            set -euo pipefail
-            DEPLOY_SCRIPT="$HOME/deploy_to_ec2.sh"
-            if [ -f "${DEPLOY_SCRIPT}" ]; then
-              echo "Running deploy script on EC2..."
-              bash "${DEPLOY_SCRIPT}"
-            else
-              echo "ERROR: ${DEPLOY_SCRIPT} not found on host. Aborting." >&2
-              exit 1
-            fi
+  #     - name: Deploy to EC2 via SSH
+  #       uses: appleboy/ssh-action@v1.0.3
+  #       with:
+  #         host: ${{ env.EC2_HOST }}
+  #         username: ${{ env.EC2_USER }}
+  #         key: ${{ env.EC2_SSH_KEY }}
+  #         script: |
+  #           set -euo pipefail
+  #           DEPLOY_SCRIPT="$HOME/deploy_to_ec2.sh"
+  #           if [ -f "${DEPLOY_SCRIPT}" ]; then
+  #             echo "Running deploy script on EC2..."
+  #             bash "${DEPLOY_SCRIPT}"
+  #           else
+  #             echo "ERROR: ${DEPLOY_SCRIPT} not found on host. Aborting." >&2
+  #             exit 1
+  #           fi
