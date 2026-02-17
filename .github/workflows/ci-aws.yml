@@ -1,0 +1,108 @@
+# CI for AWS deployments — build/test, build Docker images, and optionally deploy to EC2.
+# Required GitHub Secrets (placeholders):
+# - DOCKERHUB_USERNAME
+# - DOCKERHUB_TOKEN
+# - AWS_ACCESS_KEY_ID
+# - AWS_SECRET_ACCESS_KEY
+# - EC2_HOST (optional)
+# - EC2_USER (optional)
+# - EC2_SSH_KEY (optional, private key)
+#
+# Notes:
+# - Place deploy scripts in `backend/infrastructure/aws/` (for example `deploy_to_ec2.sh`).
+# - Migrations can be run via SSH to hosts with DB access or via separate migration runners.
+# - After deploy, test health endpoints (e.g., `GET /health`) against the public endpoint or EC2 host.
+
+name: CI - aws-deployment
+
+on:
+  push:
+    branches: [ aws-deployment ]
+
+env:
+  SERVICES: auth-service bff-service cart-service inventory-service order-service payment-service product-service user-service
+
+jobs:
+  build-and-test:
+    name: Build and test services
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [auth-service, bff-service, cart-service, inventory-service, order-service, payment-service, product-service, user-service]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.20'
+
+      - name: Download modules
+        run: go mod download
+        working-directory: backend/services/${{ matrix.service }}
+
+      - name: Run tests
+        run: go test ./... -v
+        working-directory: backend/services/${{ matrix.service }}
+
+  docker-build-and-push:
+    name: Build and push Docker images
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [auth-service, bff-service, cart-service, inventory-service, order-service, payment-service, product-service, user-service]
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./backend/services/${{ matrix.service }}
+          file: ./backend/services/${{ matrix.service }}/Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:${{ github.sha }}
+
+  deploy-to-ec2:
+    name: Deploy to EC2 (optional)
+    needs: docker-build-and-push
+    if: ${{ secrets.EC2_HOST != '' && secrets.EC2_SSH_KEY != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v0.1.8
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            echo "Running remote deploy script (if present)"
+            if [ -f ~/deploy_to_ec2.sh ]; then
+              bash ~/deploy_to_ec2.sh
+            else
+              echo "No ~/deploy_to_ec2.sh found — attempting to pull from repo and run template script"
+              curl -fsS --retry 3 https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/backend/infrastructure/aws/deploy_to_ec2.sh -o /tmp/deploy_to_ec2.sh || true
+              bash /tmp/deploy_to_ec2.sh || true
+            fi

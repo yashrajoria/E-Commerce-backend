@@ -1,0 +1,36 @@
+# CI for the `main` branch — run tests for each microservice (local/dev checks)
+#
+# Secrets: none required for this workflow. This runs Go tests per-service.
+
+name: CI - main
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test services
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [auth-service, bff-service, cart-service, inventory-service, order-service, payment-service, product-service, user-service]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.20'
+
+      - name: Download modules
+        run: go mod download
+        working-directory: backend/services/${{ matrix.service }}
+
+      - name: Run tests
+        run: go test ./... -v
+        working-directory: backend/services/${{ matrix.service }}
