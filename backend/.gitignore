@@ -21,7 +21,7 @@ docker-compose.override.yml
 /bin/
 /build/
 /dist/
-/pkg/
+
 
 # Go dependency directories
 /vendor/
