@@ -1,18 +1,3 @@
-# CI for AWS deployments — build/test, build Docker images, and optionally deploy to EC2.
-# Required GitHub Secrets (placeholders):
-# - DOCKERHUB_USERNAME
-# - DOCKERHUB_TOKEN
-# - AWS_ACCESS_KEY_ID
-# - AWS_SECRET_ACCESS_KEY
-# - EC2_HOST (optional)
-# - EC2_USER (optional)
-# - EC2_SSH_KEY (optional, private key)
-#
-# Notes:
-# - Place deploy scripts in `backend/infrastructure/aws/` (for example `deploy_to_ec2.sh`).
-# - Migrations can be run via SSH to hosts with DB access or via separate migration runners.
-# - After deploy, test health endpoints (e.g., `GET /health`) against the public endpoint or EC2 host.
-
 name: CI - aws-deployment
 
 on:
@@ -26,15 +11,7 @@ jobs:
     timeout-minutes: 15
     strategy:
       matrix:
-        service:
-          - auth-service
-          - bff-service
-          - cart-service
-          - inventory-service
-          - order-service
-          - payment-service
-          - product-service
-          - user-service
+        service: [auth-service, bff-service, cart-service, inventory-service, order-service, payment-service, product-service, user-service]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -60,15 +37,7 @@ jobs:
     timeout-minutes: 20
     strategy:
       matrix:
-        service:
-          - auth-service
-          - bff-service
-          - cart-service
-          - inventory-service
-          - order-service
-          - payment-service
-          - product-service
-          - user-service
+        service: [auth-service, bff-service, cart-service, inventory-service, order-service, payment-service, product-service, user-service]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -82,7 +51,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push image
+      - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: ./backend/services/${{ matrix.service }}
@@ -99,7 +68,7 @@ jobs:
     needs: docker-build-and-push
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: ${{ secrets.EC2_HOST != '' && secrets.EC2_SSH_KEY != '' }}
+    if: ${{ secrets.EC2_HOST && secrets.EC2_SSH_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -114,6 +83,7 @@ jobs:
             set -euo pipefail
             DEPLOY_SCRIPT="$HOME/deploy_to_ec2.sh"
             if [ -f "${DEPLOY_SCRIPT}" ]; then
+              echo "Running deploy script on EC2..."
               bash "${DEPLOY_SCRIPT}"
             else
               echo "ERROR: ${DEPLOY_SCRIPT} not found on host. Aborting." >&2
