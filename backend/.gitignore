@@ -58,6 +58,10 @@ node_modules/
 # Ignore local Dockerfile overrides in service folders
 **/Dockerfile.local
 
+# Allow service-level Dockerfiles and dockerignore files (we commit these)
+!services/*/Dockerfile
+!services/*/.dockerignore
+
 Dockerfile
 Dockerfile.prod
 docker-compose.yml
