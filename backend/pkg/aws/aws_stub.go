@@ -1,77 +1,163 @@
 package aws
 
-import "context"
+import (
+	"context"
+	"errors"
+	"os"
+	"time"
 
-// aws_stub.go
-// Minimal placeholder to satisfy imports during CI when local replace points to ../../pkg/aws.
-// These are no-op implementations — replace with real AWS integration when ready.
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
+	"github.com/aws/aws-sdk-go-v2/service/sns"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
+)
 
-type AWSConfig struct{}
+// LoadAWSConfig loads AWS SDK v2 configuration, honoring AWS_REGION and
+// optional AWS_ENDPOINT_URL (for LocalStack). Returns an aws.Config.
+func LoadAWSConfig(ctx context.Context) (aws.Config, error) {
+	region := os.Getenv("AWS_REGION")
+	opts := []func(*awsconfig.LoadOptions) error{}
+	if region != "" {
+		opts = append(opts, awsconfig.WithRegion(region))
+	}
 
-// LoadAWSConfig returns a minimal AWSConfig placeholder.
-func LoadAWSConfig(ctx context.Context) (*AWSConfig, error) {
-	return &AWSConfig{}, nil
+	// If an explicit endpoint URL is provided (e.g. LocalStack), configure
+	// a custom endpoint resolver that points every service to that URL.
+	if ep := os.Getenv("AWS_ENDPOINT_URL"); ep != "" {
+		resolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, _ ...interface{}) (aws.Endpoint, error) {
+			return aws.Endpoint{PartitionID: "aws", URL: ep, SigningRegion: region}, nil
+		})
+		opts = append(opts, awsconfig.WithEndpointResolverWithOptions(resolver))
+	}
+
+	cfg, err := awsconfig.LoadDefaultConfig(ctx, opts...)
+	if err != nil {
+		return aws.Config{}, err
+	}
+	return cfg, nil
 }
 
-type SecretsClient struct{}
+// SecretsClient wraps AWS Secrets Manager client.
+type SecretsClient struct{ client *secretsmanager.Client }
 
-// NewSecretsClient returns a minimal SecretsClient placeholder.
-func NewSecretsClient(cfg *AWSConfig) *SecretsClient {
-	return &SecretsClient{}
+func NewSecretsClient(cfg aws.Config) *SecretsClient {
+	return &SecretsClient{client: secretsmanager.NewFromConfig(cfg)}
 }
 
-// GetSecret is a no-op that returns an empty value and no error.
+// GetSecret retrieves a secret string from AWS Secrets Manager.
 func (s *SecretsClient) GetSecret(ctx context.Context, name string) (string, error) {
+	if s == nil || s.client == nil {
+		return "", errors.New("secrets client not configured")
+	}
+	out, err := s.client.GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{SecretId: aws.String(name)})
+	if err != nil {
+		return "", err
+	}
+	if out.SecretString != nil {
+		return *out.SecretString, nil
+	}
 	return "", nil
 }
 
-// SNSPublisher is a minimal interface used by services to publish SNS messages.
+// SNSPublisher is the interface services use for publishing SNS messages.
 type SNSPublisher interface {
 	Publish(ctx context.Context, topicArn string, payload []byte) error
 }
 
-// SNSClient is a no-op SNS publisher used during CI/local development.
-type SNSClient struct{}
+// SNSClient wraps AWS SNS client.
+type SNSClient struct{ client *sns.Client }
 
-// NewSNSClient returns a minimal SNSClient placeholder.
-func NewSNSClient(cfg *AWSConfig) *SNSClient {
-	return &SNSClient{}
+func NewSNSClient(cfg aws.Config) *SNSClient {
+	return &SNSClient{client: sns.NewFromConfig(cfg)}
 }
 
-// Publish is a no-op that simulates publishing to SNS and returns no error.
 func (s *SNSClient) Publish(ctx context.Context, topicArn string, payload []byte) error {
-	return nil
+	if s == nil || s.client == nil {
+		return errors.New("sns client not configured")
+	}
+	msg := string(payload)
+	_, err := s.client.Publish(ctx, &sns.PublishInput{TopicArn: aws.String(topicArn), Message: aws.String(msg)})
+	return err
 }
 
-// SQSConsumer is a minimal no-op SQS helper used by services to poll/send messages.
-type SQSConsumer struct {
-	QueueURL string
+// SQSConsumer is a simple wrapper around AWS SQS used for send/receive.
+type SQSConsumer struct{ client *sqs.Client; QueueURL string }
+
+func NewSQSConsumer(cfg aws.Config, queueURL string) *SQSConsumer {
+	return &SQSConsumer{client: sqs.NewFromConfig(cfg), QueueURL: queueURL}
 }
 
-// NewSQSConsumer returns a minimal SQSConsumer placeholder.
-func NewSQSConsumer(cfg *AWSConfig, queueURL string) *SQSConsumer {
-	return &SQSConsumer{QueueURL: queueURL}
-}
-
-// StartPolling is a no-op implementation that should start polling in a real implementation.
-// It accepts a callback which would be invoked for each received message.
+// StartPolling starts a simple polling loop that calls handler for each message.
+// This implementation is intentionally minimal; it should be enhanced for
+// production (visibility timeout, backoff, batching, long-poll, delete on success).
 func (s *SQSConsumer) StartPolling(ctx context.Context, handler func(ctx context.Context, body string) error) error {
+	if s == nil || s.client == nil || s.QueueURL == "" {
+		return errors.New("sqs consumer not configured")
+	}
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			out, err := s.client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{QueueUrl: aws.String(s.QueueURL), MaxNumberOfMessages: 5, WaitTimeSeconds: 10})
+			if err != nil || out == nil || len(out.Messages) == 0 {
+				time.Sleep(1 * time.Second)
+				continue
+			}
+			for _, m := range out.Messages {
+				_ = handler(ctx, aws.ToString(m.Body))
+				// Best-effort delete (ignore errors)
+				if m.ReceiptHandle != nil {
+					_, _ = s.client.DeleteMessage(ctx, &sqs.DeleteMessageInput{QueueUrl: aws.String(s.QueueURL), ReceiptHandle: m.ReceiptHandle})
+				}
+			}
+		}
+	}()
 	return nil
 }
 
-// SendMessage is a no-op that simulates sending a message to SQS.
 func (s *SQSConsumer) SendMessage(ctx context.Context, body string) error {
-	return nil
+	if s == nil || s.client == nil || s.QueueURL == "" {
+		return errors.New("sqs consumer not configured")
+	}
+	_, err := s.client.SendMessage(ctx, &sqs.SendMessageInput{QueueUrl: aws.String(s.QueueURL), MessageBody: aws.String(body)})
+	return err
 }
 
-// GetQueueURL is a helper that would normally resolve a queue name to its URL.
-// In this stub it returns an empty string and no error.
-func GetQueueURL(ctx context.Context, cfg *AWSConfig, queueName string) (string, error) {
-	return "", nil
+// GetQueueURL resolves a queue name to its URL.
+func GetQueueURL(ctx context.Context, cfg aws.Config, queueName string) (string, error) {
+	client := sqs.NewFromConfig(cfg)
+	out, err := client.GetQueueUrl(ctx, &sqs.GetQueueUrlInput{QueueName: aws.String(queueName)})
+	if err != nil {
+		return "", err
+	}
+	return aws.ToString(out.QueueUrl), nil
 }
 
-// GeneratePresignedPutURL returns a presigned S3 PUT URL and the HTTP method to use.
-// This is a stub and returns an empty URL and "PUT" as method.
-func GeneratePresignedPutURL(ctx context.Context, cfg *AWSConfig, bucket, key string, expires int64) (string, string, error) {
-	return "", "PUT", nil
+// GeneratePresignedPutURL creates a presigned S3 PUT URL with expiry seconds.
+func GeneratePresignedPutURL(ctx context.Context, cfg aws.Config, bucket, key string, expires int64) (string, string, error) {
+	client := s3.NewFromConfig(cfg)
+	presigner := s3.NewPresignClient(client)
+	dur := time.Duration(expires) * time.Second
+	req, err := presigner.PresignPutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(bucket), Key: aws.String(key)}, s3.WithPresignExpires(dur))
+	if err != nil {
+		return "", "", err
+	}
+	return req.URL, "PUT", nil
 }
+
+// NewDynamoClient returns a DynamoDB client from config.
+func NewDynamoClient(cfg aws.Config) *dynamodb.Client { return dynamodb.NewFromConfig(cfg) }
+
+// NewCloudWatchClient returns a CloudWatch client from config.
+func NewCloudWatchClient(cfg aws.Config) *cloudwatch.Client { return cloudwatch.NewFromConfig(cfg) }
+
+// NewS3Uploader returns a simple S3 uploader using manager.Uploader.
+func NewS3Uploader(cfg aws.Config) *manager.Uploader { return manager.NewUploader(s3.NewFromConfig(cfg)) }
