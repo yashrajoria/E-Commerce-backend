@@ -4,8 +4,8 @@ WORKDIR /src
 # Copy go.mod first
 COPY backend/services/order-service/go.mod ./
 
-# Copy go.sum if it exists, otherwise it will be generated
-COPY backend/services/order-service/go.su[m] ./ 2>/dev/null || true
+# Copy go.sum
+COPY backend/services/order-service/go.sum ./
 
 # Ensure local replace path is present for go mod download (monorepo local module)
 # The go.mod in this repo uses: replace github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws => ../../pkg/aws
