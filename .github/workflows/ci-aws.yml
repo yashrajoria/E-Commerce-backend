@@ -19,25 +19,31 @@ on:
   push:
     branches: [ aws-deployment ]
 
-env:
-  SERVICES: auth-service bff-service cart-service inventory-service order-service payment-service product-service user-service
-
 jobs:
   build-and-test:
     name: Build and test services
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       matrix:
-        service: [auth-service, bff-service, cart-service, inventory-service, order-service, payment-service, product-service, user-service]
-
+        service:
+          - auth-service
+          - bff-service
+          - cart-service
+          - inventory-service
+          - order-service
+          - payment-service
+          - product-service
+          - user-service
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
           go-version: '1.25'
+          cache-dependency-path: backend/services/${{ matrix.service }}/go.sum
 
       - name: Download modules
         run: go mod download
@@ -51,28 +57,33 @@ jobs:
     name: Build and push Docker images
     needs: build-and-test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       matrix:
-        service: [auth-service, bff-service, cart-service, inventory-service, order-service, payment-service, product-service, user-service]
-    env:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-
+        service:
+          - auth-service
+          - bff-service
+          - cart-service
+          - inventory-service
+          - order-service
+          - payment-service
+          - product-service
+          - user-service
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push image
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v6
         with:
           context: ./backend/services/${{ matrix.service }}
           file: ./backend/services/${{ matrix.service }}/Dockerfile
@@ -80,39 +91,31 @@ jobs:
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:latest
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
   deploy-to-ec2:
     name: Deploy to EC2 (optional)
     needs: docker-build-and-push
     runs-on: ubuntu-latest
-    env:
-      EC2_HOST: ${{ secrets.EC2_HOST }}
-      EC2_USER: ${{ secrets.EC2_USER }}
-      EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+    timeout-minutes: 15
+    if: ${{ secrets.EC2_HOST != '' && secrets.EC2_SSH_KEY != '' }}
     steps:
-      - name: Check deploy secrets
-        run: |
-          if [ -z "${EC2_HOST}" ] || [ -z "${EC2_SSH_KEY}" ]; then
-            echo "Skipping EC2 deploy - EC2_HOST or EC2_SSH_KEY not set"
-            exit 0
-          fi
-
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Deploy to EC2 via SSH
-        uses: appleboy/ssh-action@v0.1.8
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ env.EC2_HOST }}
-          username: ${{ env.EC2_USER }}
-          key: ${{ env.EC2_SSH_KEY }}
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set -euo pipefail
-            echo "Running remote deploy script (if present)"
-            if [ -f ~/deploy_to_ec2.sh ]; then
-              bash ~/deploy_to_ec2.sh
+            DEPLOY_SCRIPT="$HOME/deploy_to_ec2.sh"
+            if [ -f "${DEPLOY_SCRIPT}" ]; then
+              bash "${DEPLOY_SCRIPT}"
             else
-              echo "No ~/deploy_to_ec2.sh found — attempting to pull from repo and run template script"
-              curl -fsS --retry 3 https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/backend/infrastructure/aws/deploy_to_ec2.sh -o /tmp/deploy_to_ec2.sh || true
-              bash /tmp/deploy_to_ec2.sh || true
+              echo "ERROR: ${DEPLOY_SCRIPT} not found on host. Aborting." >&2
+              exit 1
             fi
