@@ -85,7 +85,9 @@ jobs:
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
-          context: ./backend/services/${{ matrix.service }}
+          # Use repository root as build context so service Dockerfiles
+          # can COPY files elsewhere in the repo (e.g., backend/pkg/aws).
+          context: .
           file: ./backend/services/${{ matrix.service }}/Dockerfile
           push: true
           tags: |
