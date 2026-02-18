@@ -97,30 +97,44 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
   deploy-to-ec2:
-    name: Deploy to EC2 (optional)
+    name: Deploy to EC2
     needs: docker-build-and-push
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      EC2_HOST: ${{ secrets.INPUT_HOST }}
-      EC2_USER: ${{ secrets.INPUT_USERNAME }}
-      EC2_SSH_KEY: ${{ secrets.INPUT_KEY }}
     steps:
-      - name: Checkout
+      - name: Checkout Code
         uses: actions/checkout@v4
 
+      # 1. Copy the script from your Repo to the EC2 Server
+      - name: Copy deploy script to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "backend/infrastructure/aws/deploy_to_ec2.sh"
+          target: "/home/${{ secrets.EC2_USERNAME }}"
+          strip_components: 3 # Removes 'backend/infrastructure/aws/' so it lands cleanly in HOME
+
+      # 2. Log in and run the script
       - name: Deploy to EC2 via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.INPUT_HOST }}
-          username: ${{ secrets.INPUT_USERNAME }}
-          key: ${{ secrets.INPUT_KEY }}
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set -euo pipefail
-            DEPLOY_SCRIPT="$HOME/deploy_to_ec2.sh"
+            
+            # The script is now exactly where we expect it
+            DEPLOY_SCRIPT="/home/${{ secrets.EC2_USERNAME }}/deploy_to_ec2.sh"
+            
+            echo "🚀 Starting deployment script..."
             if [ -f "${DEPLOY_SCRIPT}" ]; then
+              chmod +x "${DEPLOY_SCRIPT}"
               bash "${DEPLOY_SCRIPT}"
             else
-              echo "ERROR: ${DEPLOY_SCRIPT} not found on host. Aborting." >&2
+              echo "❌ Error: Script not found at ${DEPLOY_SCRIPT}"
+              ls -la /home/${{ secrets.EC2_USERNAME }} # Debugging: show what IS there
               exit 1
             fi
