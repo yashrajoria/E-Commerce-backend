@@ -4,9 +4,9 @@
 # - DOCKERHUB_TOKEN
 # - AWS_ACCESS_KEY_ID
 # - AWS_SECRET_ACCESS_KEY
-# - EC2_HOST (optional)
-# - EC2_USER (optional)
-# - EC2_SSH_KEY (optional, private key)
+# - INPUT_HOST (optional)
+# - INPUT_USERNAME (optional)
+# - INPUT_KEY (optional, private key)
 #
 # Notes:
 # - Place deploy scripts in `backend/infrastructure/aws/` (for example `deploy_to_ec2.sh`).
@@ -109,25 +109,25 @@ jobs:
       - name: Copy deploy script to EC2
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USERNAME }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          host: ${{ secrets.INPUT_HOST }}
+          username: ${{ secrets.INPUT_USERNAMENAME }}
+          key: ${{ secrets.INPUT_KEY }}
           source: "backend/infrastructure/aws/deploy_to_ec2.sh"
-          target: "/home/${{ secrets.EC2_USERNAME }}"
+          target: "/home/${{ secrets.INPUT_USERNAMENAME }}"
           strip_components: 3 # Removes 'backend/infrastructure/aws/' so it lands cleanly in HOME
 
       # 2. Log in and run the script
       - name: Deploy to EC2 via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USERNAME }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          host: ${{ secrets.INPUT_HOST }}
+          username: ${{ secrets.INPUT_USERNAMENAME }}
+          key: ${{ secrets.INPUT_KEY }}
           script: |
             set -euo pipefail
             
             # The script is now exactly where we expect it
-            DEPLOY_SCRIPT="/home/${{ secrets.EC2_USERNAME }}/deploy_to_ec2.sh"
+            DEPLOY_SCRIPT="/home/${{ secrets.INPUT_USERNAMENAME }}/deploy_to_ec2.sh"
             
             echo "🚀 Starting deployment script..."
             if [ -f "${DEPLOY_SCRIPT}" ]; then
@@ -135,6 +135,6 @@ jobs:
               bash "${DEPLOY_SCRIPT}"
             else
               echo "❌ Error: Script not found at ${DEPLOY_SCRIPT}"
-              ls -la /home/${{ secrets.EC2_USERNAME }} # Debugging: show what IS there
+              ls -la /home/${{ secrets.INPUT_USERNAMENAME }} # Debugging: show what IS there
               exit 1
             fi
