@@ -110,10 +110,10 @@ jobs:
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.INPUT_HOST }}
-          username: ${{ secrets.INPUT_USERNAMENAME }}
+          username: ${{ secrets.INPUT_USERNAME }}
           key: ${{ secrets.INPUT_KEY }}
           source: "backend/infrastructure/aws/deploy_to_ec2.sh"
-          target: "/home/${{ secrets.INPUT_USERNAMENAME }}"
+          target: "/home/${{ secrets.INPUT_USERNAME }}"
           strip_components: 3 # Removes 'backend/infrastructure/aws/' so it lands cleanly in HOME
 
       # 2. Log in and run the script
@@ -121,13 +121,13 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.INPUT_HOST }}
-          username: ${{ secrets.INPUT_USERNAMENAME }}
+          username: ${{ secrets.INPUT_USERNAME }}
           key: ${{ secrets.INPUT_KEY }}
           script: |
             set -euo pipefail
             
             # The script is now exactly where we expect it
-            DEPLOY_SCRIPT="/home/${{ secrets.INPUT_USERNAMENAME }}/deploy_to_ec2.sh"
+            DEPLOY_SCRIPT="/home/${{ secrets.INPUT_USERNAME }}/deploy_to_ec2.sh"
             
             echo "🚀 Starting deployment script..."
             if [ -f "${DEPLOY_SCRIPT}" ]; then
@@ -135,6 +135,6 @@ jobs:
               bash "${DEPLOY_SCRIPT}"
             else
               echo "❌ Error: Script not found at ${DEPLOY_SCRIPT}"
-              ls -la /home/${{ secrets.INPUT_USERNAMENAME }} # Debugging: show what IS there
+              ls -la /home/${{ secrets.INPUT_USERNAME }} # Debugging: show what IS there
               exit 1
             fi
