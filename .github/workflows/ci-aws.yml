@@ -1,23 +1,12 @@
-# CI for AWS deployments — build/test, build Docker images, and optionally deploy to EC2.
-# Required GitHub Secrets (placeholders):
-# - DOCKERHUB_USERNAME
-# - DOCKERHUB_TOKEN
-# - AWS_ACCESS_KEY_ID
-# - AWS_SECRET_ACCESS_KEY
-# - INPUT_HOST (optional)
-# - INPUT_USERNAME (optional)
-# - INPUT_KEY (optional, private key)
-#
-# Notes:
-# - Place deploy scripts in `backend/infrastructure/aws/` (for example `deploy_to_ec2.sh`).
-# - Migrations can be run via SSH to hosts with DB access or via separate migration runners.
-# - After deploy, test health endpoints (e.g., `GET /health`) against the public endpoint or EC2 host.
-
-name: CI - aws-deployment
+name: CI - ShopSwift Backend
 
 on:
   push:
-    branches: [ aws-deployment ]
+    branches: [main]
+  workflow_run:
+    workflows: ["Terraform"]
+    types:
+      - completed
 
 jobs:
   build-and-test:
@@ -42,7 +31,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: "1.25"
           cache-dependency-path: backend/services/${{ matrix.service }}/go.sum
 
       - name: Download modules
@@ -105,7 +94,54 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. Copy the script from your Repo to the EC2 Server
+      # Sync .env from Terraform outputs
+      - name: Populate .env from Terraform outputs
+        run: |
+          chmod +x backend/infrastructure/aws/populate_env_from_terraform.sh
+          backend/infrastructure/aws/populate_env_from_terraform.sh
+
+      # Copy backend code and configs to EC2 for compose build
+      - name: Copy backend/services to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.INPUT_HOST }}
+          username: ${{ secrets.INPUT_USERNAME }}
+          key: ${{ secrets.INPUT_KEY }}
+          source: "backend/services"
+          target: "/home/${{ secrets.INPUT_USERNAME }}/E-Commerce-backend/backend"
+          strip_components: 1
+
+      - name: Copy backend/api-gateway to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.INPUT_HOST }}
+          username: ${{ secrets.INPUT_USERNAME }}
+          key: ${{ secrets.INPUT_KEY }}
+          source: "backend/api-gateway"
+          target: "/home/${{ secrets.INPUT_USERNAME }}/E-Commerce-backend/backend"
+          strip_components: 1
+
+      - name: Copy backend/docker-compose.yml to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.INPUT_HOST }}
+          username: ${{ secrets.INPUT_USERNAME }}
+          key: ${{ secrets.INPUT_KEY }}
+          source: "backend/docker-compose.yml"
+          target: "/home/${{ secrets.INPUT_USERNAME }}/E-Commerce-backend/backend"
+          strip_components: 1
+
+      - name: Copy backend/.env to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.INPUT_HOST }}
+          username: ${{ secrets.INPUT_USERNAME }}
+          key: ${{ secrets.INPUT_KEY }}
+          source: "backend/.env"
+          target: "/home/${{ secrets.INPUT_USERNAME }}/E-Commerce-backend/backend"
+          strip_components: 1
+
+      # Copy deploy script to EC2
       - name: Copy deploy script to EC2
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -114,7 +150,7 @@ jobs:
           key: ${{ secrets.INPUT_KEY }}
           source: "backend/infrastructure/aws/deploy_to_ec2.sh"
           target: "/home/${{ secrets.INPUT_USERNAME }}"
-          strip_components: 3 # Removes 'backend/infrastructure/aws/' so it lands cleanly in HOME
+          strip_components: 3
 
       # 2. Log in and run the script
       - name: Deploy to EC2 via SSH
@@ -125,10 +161,10 @@ jobs:
           key: ${{ secrets.INPUT_KEY }}
           script: |
             set -euo pipefail
-            
+
             # The script is now exactly where we expect it
             DEPLOY_SCRIPT="/home/${{ secrets.INPUT_USERNAME }}/deploy_to_ec2.sh"
-            
+
             echo "🚀 Starting deployment script..."
             if [ -f "${DEPLOY_SCRIPT}" ]; then
               chmod +x "${DEPLOY_SCRIPT}"
@@ -139,3 +175,20 @@ jobs:
               exit 1
             fi
 
+      # 3. Run remote health checks (api-gateway /health on the host)
+      - name: Post-deploy health check (remote)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.INPUT_HOST }}
+          username: ${{ secrets.INPUT_USERNAME }}
+          key: ${{ secrets.INPUT_KEY }}
+          script: |
+            set -euo pipefail
+            echo "[healthcheck] checking api-gateway at http://localhost:8080/health"
+            if curl -fS --max-time 10 http://localhost:8080/health; then
+              echo "[healthcheck] OK"
+            else
+              echo "[healthcheck] FAILED — dumping docker ps and logs for debugging"
+              docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+              exit 2
+            fi
