@@ -5,6 +5,14 @@ Dockerfile
 .env.*
 !.env.example
 
+# Local env for LocalStack (do NOT commit real secrets)
+.env.local
+
+# Terraform local vars and state
+infrastructure/aws/terraform/terraform.tfvars
+infrastructure/aws/terraform/terraform.tfstate*
+infrastructure/aws/terraform/.terraform/
+
 # Docker
 docker-compose.override.yml
 .docker/
