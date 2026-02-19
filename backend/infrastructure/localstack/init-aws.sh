@@ -117,6 +117,11 @@ _aws dynamodb put-item --table-name Categories --item '{"category_id": {"S": "ca
 
 echo "LocalStack resources provisioned"
 
+# CloudWatch Logs
+echo "Creating CloudWatch Log Groups"
+_aws logs create-log-group --log-group-name /ecommerce/services || true
+echo "CloudWatch log groups created"
+
 # Create placeholder Secrets Manager secrets for auth-service (idempotent)
 echo "Creating Secrets Manager secrets (auth)"
 _aws secretsmanager create-secret --name auth/JWT_SECRET --secret-string "supersecret-jwt" || true

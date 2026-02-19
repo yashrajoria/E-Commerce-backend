@@ -14,10 +14,32 @@ import (
 	"bff-service/routes"
 
 	"github.com/gin-gonic/gin"
+	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"go.uber.org/zap"
 )
 
 func main() {
 	cfg := config.Load()
+
+	// ── CloudWatch Logs + Metrics ──
+	var metricsClient *awspkg.MetricsClient
+	if os.Getenv("CLOUDWATCH_ENABLED") == "true" {
+		cwCtx := context.Background()
+		cwLogs, err := awspkg.NewCloudWatchLogsClient(cwCtx, "bff-service")
+		if err != nil {
+			log.Printf("[BFF] CloudWatch Logs init failed: %v", err)
+		} else {
+			log.Println("[BFF] CloudWatch Logs enabled")
+			_ = cwLogs // writes happen via logger; keep reference
+		}
+		mc, err := awspkg.NewMetricsClient(cwCtx)
+		if err != nil {
+			log.Printf("[BFF] CloudWatch Metrics init failed: %v", err)
+		} else {
+			metricsClient = mc
+			log.Println("[BFF] CloudWatch Metrics enabled")
+		}
+	}
 
 	timeout, err := time.ParseDuration(cfg.RequestTimeout)
 	if err != nil {
@@ -29,6 +51,54 @@ func main() {
 
 	r := gin.New()
 	r.Use(gin.Recovery())
+
+	// Initialize structured logger for request logging
+	zapLogger, _ := zap.NewProduction()
+	defer zapLogger.Sync()
+
+	// Structured HTTP request logging → CloudWatch
+	r.Use(func(c *gin.Context) {
+		start := time.Now()
+		path := c.Request.URL.Path
+		method := c.Request.Method
+		c.Next()
+		latency := time.Since(start)
+		status := c.Writer.Status()
+		fields := []zap.Field{
+			zap.String("method", method),
+			zap.String("path", path),
+			zap.Int("status", status),
+			zap.Duration("latency", latency),
+			zap.String("client_ip", c.ClientIP()),
+			zap.Int("body_size", c.Writer.Size()),
+		}
+		switch {
+		case status >= 500:
+			zapLogger.Error("http_request", fields...)
+		case status >= 400:
+			zapLogger.Warn("http_request", fields...)
+		default:
+			zapLogger.Info("http_request", fields...)
+		}
+	})
+
+	// ── HTTP metrics middleware (inline) ──
+	r.Use(func(c *gin.Context) {
+		start := time.Now()
+		c.Next()
+		if metricsClient != nil {
+			go func(path, method string, status int, dur time.Duration) {
+				mctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				dims := map[string]string{"Service": "bff-service", "Method": method, "Path": path}
+				_ = metricsClient.RecordCount(mctx, awspkg.MetricHTTPRequests, dims)
+				_ = metricsClient.RecordLatency(mctx, awspkg.MetricHTTPLatency, dur, dims)
+				if status >= 500 {
+					_ = metricsClient.RecordCount(mctx, awspkg.MetricHTTPErrors, dims)
+				}
+			}(c.Request.URL.Path, c.Request.Method, c.Writer.Status(), time.Since(start))
+		}
+	})
 
 	r.GET("/docs", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")

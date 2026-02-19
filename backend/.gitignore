@@ -66,3 +66,18 @@ docker-compose.yml
 docker-compose.prod.yml
 .air.toml
 /tmp/
+.env.example
+*.tmp
+# ...existing code...
+
+# Ignore temporary files
+*.tmp
+*.temp
+tmp/
+tmp-*/
+*~        # editor backup files
+*.swp
+*.swx
+*.bak
+# optional logs
+*.log

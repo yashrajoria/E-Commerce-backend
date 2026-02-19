@@ -3,6 +3,7 @@ package logger
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -21,6 +22,11 @@ const RequestIDKey = "request_id"
 
 // Initialize sets up the logger with the specified environment
 func Initialize(env string) {
+	InitializeWithWriter(env, nil)
+}
+
+// InitializeWithWriter sets up the logger with the specified environment and optional CloudWatch writer
+func InitializeWithWriter(env string, cloudWatchWriter io.Writer) {
 	var config zap.Config
 
 	if env == "production" {
@@ -33,10 +39,33 @@ func Initialize(env string) {
 	}
 
 	var err error
-	Log, err = config.Build()
-	if err != nil {
-		fmt.Printf("Failed to initialize logger: %v\n", err)
-		os.Exit(1)
+
+	// If CloudWatch writer is provided, add it as a sink
+	if cloudWatchWriter != nil {
+		// Create encoder
+		encoder := zapcore.NewJSONEncoder(config.EncoderConfig)
+
+		// Create console syncer (stdout/stderr)
+		consoleEncoder := zapcore.NewConsoleEncoder(config.EncoderConfig)
+		consoleLevel := zap.NewAtomicLevelAt(config.Level.Level())
+		consoleSyncer := zapcore.AddSync(os.Stdout)
+		consoleCore := zapcore.NewCore(consoleEncoder, consoleSyncer, consoleLevel)
+
+		// Create CloudWatch syncer
+		cwLevel := zap.NewAtomicLevelAt(config.Level.Level())
+		cwSyncer := zapcore.AddSync(cloudWatchWriter)
+		cwCore := zapcore.NewCore(encoder, cwSyncer, cwLevel)
+
+		// Combine both cores
+		core := zapcore.NewTee(consoleCore, cwCore)
+		Log = zap.New(core, zap.AddCaller(), zap.AddStacktrace(zapcore.ErrorLevel))
+	} else {
+		// Standard initialization without CloudWatch
+		Log, err = config.Build()
+		if err != nil {
+			fmt.Printf("Failed to initialize logger: %v\n", err)
+			os.Exit(1)
+		}
 	}
 }
 
@@ -120,4 +149,4 @@ func getRequestID(ctx context.Context) string {
 // WithContext creates a new context with the given request ID
 func WithContext(ctx context.Context, requestID string) context.Context {
 	return context.WithValue(ctx, RequestIDKey, requestID)
-} 
+}

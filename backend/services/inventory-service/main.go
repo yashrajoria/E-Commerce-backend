@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/gin-gonic/gin"
+	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"github.com/yashrajoria/inventory-service/controllers"
 	"github.com/yashrajoria/inventory-service/repository"
 	"github.com/yashrajoria/inventory-service/routes"
@@ -69,13 +70,69 @@ func main() {
 	})
 
 	// --- Service wiring ---
+	// CloudWatch (Logs + Metrics)
+	cwLogsClient, err := awspkg.NewCloudWatchLogsClient(context.Background(), "inventory-service")
+	if err != nil {
+		logger.Warn("CloudWatch logs client init failed (non-fatal)", zap.Error(err))
+	}
+	metricsClient, err := awspkg.NewMetricsClient(context.Background())
+	if err != nil {
+		logger.Warn("CloudWatch metrics client init failed (non-fatal)", zap.Error(err))
+	}
+	_ = cwLogsClient // logs client available for future Zap integration
+
 	inventoryRepo := repository.NewDynamoInventoryRepository(ddbClient, cfg.DDBTable)
-	inventoryService := services.NewInventoryService(inventoryRepo)
+	inventoryService := services.NewInventoryService(inventoryRepo, metricsClient)
 	inventoryController := controllers.NewInventoryController(inventoryService)
 
 	// --- HTTP router ---
 	r := gin.New()
 	r.Use(gin.Recovery())
+
+	// CloudWatch HTTP metrics middleware
+	if metricsClient != nil && metricsClient.IsEnabled() {
+		r.Use(func(c *gin.Context) {
+			start := time.Now()
+			c.Next()
+			go func(path, method string, status int, dur time.Duration) {
+				mctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				dims := map[string]string{"Service": "inventory-service", "Method": method, "Path": path}
+				_ = metricsClient.RecordCount(mctx, awspkg.MetricHTTPRequests, dims)
+				_ = metricsClient.RecordLatency(mctx, awspkg.MetricHTTPLatency, dur, dims)
+				if status >= 400 {
+					_ = metricsClient.RecordCount(mctx, awspkg.MetricHTTPErrors, dims)
+				}
+			}(c.Request.URL.Path, c.Request.Method, c.Writer.Status(), time.Since(start))
+		})
+	}
+
+	// Structured HTTP request logging → CloudWatch via Zap writer
+	r.Use(func(c *gin.Context) {
+		start := time.Now()
+		path := c.Request.URL.Path
+		method := c.Request.Method
+		c.Next()
+		latency := time.Since(start)
+		status := c.Writer.Status()
+		fields := []zap.Field{
+			zap.String("method", method),
+			zap.String("path", path),
+			zap.Int("status", status),
+			zap.Duration("latency", latency),
+			zap.String("client_ip", c.ClientIP()),
+			zap.Int("body_size", c.Writer.Size()),
+		}
+		switch {
+		case status >= 500:
+			logger.Error("http_request", fields...)
+		case status >= 400:
+			logger.Warn("http_request", fields...)
+		default:
+			logger.Info("http_request", fields...)
+		}
+	})
+
 	r.Use(func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 		defer cancel()

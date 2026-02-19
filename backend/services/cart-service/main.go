@@ -10,12 +10,14 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"cart-service/config"
 	"cart-service/database"
 	"cart-service/routes"
 
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	commonmw "github.com/yashrajoria/common/middleware"
 )
 
 func main() {
@@ -33,8 +35,32 @@ func main() {
 	}
 	snsClient := aws_pkg.NewSNSClient(awsCfg)
 
+	// --- CloudWatch (Logs + Metrics) ---
+	cwLogsClient, err := aws_pkg.NewCloudWatchLogsClient(context.Background(), "cart-service")
+	if err != nil {
+		log.Printf("CloudWatch logs client init failed (non-fatal): %v", err)
+	}
+	_ = cwLogsClient
+
+	metricsClient, err := aws_pkg.NewMetricsClient(context.Background())
+	if err != nil {
+		log.Printf("CloudWatch metrics client init failed (non-fatal): %v", err)
+	}
+
 	// Initialize Gin router
 	router := gin.Default()
+
+	// Initialize structured logger for request logging
+	zapLogger, _ := zap.NewProduction()
+	defer zapLogger.Sync()
+
+	// CloudWatch HTTP metrics middleware
+	if metricsClient != nil {
+		router.Use(commonmw.MetricsMiddleware(metricsClient, "cart-service"))
+	}
+
+	// Structured HTTP request logging → CloudWatch via Zap writer
+	router.Use(commonmw.RequestLogger(zapLogger))
 
 	// Register routes
 	routes.RegisterCartRoutes(router, redisClient, snsClient, cfg)

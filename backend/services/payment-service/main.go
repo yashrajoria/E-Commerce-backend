@@ -19,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	commonmw "github.com/yashrajoria/common/middleware"
 	"go.uber.org/zap"
 )
 
@@ -92,9 +93,29 @@ func main() {
 	// Start consuming payment requests in the background
 	go paymentRequestConsumer.Start(shutdownCtx)
 
+	// --- CloudWatch (Logs + Metrics) ---
+	cwLogsClient, err := aws_pkg.NewCloudWatchLogsClient(context.Background(), "payment-service")
+	if err != nil {
+		logger.Warn("CloudWatch logs client init failed (non-fatal)", zap.Error(err))
+	}
+	_ = cwLogsClient
+
+	metricsClient, err := aws_pkg.NewMetricsClient(context.Background())
+	if err != nil {
+		logger.Warn("CloudWatch metrics client init failed (non-fatal)", zap.Error(err))
+	}
+
 	// HTTP server
 	r := gin.New()
 	r.Use(gin.Recovery())
+
+	// CloudWatch HTTP metrics middleware
+	if metricsClient != nil {
+		r.Use(commonmw.MetricsMiddleware(metricsClient, "payment-service"))
+	}
+
+	// Structured HTTP request logging → CloudWatch via Zap writer
+	r.Use(commonmw.RequestLogger(logger))
 
 	// Add request timeout middleware
 	r.Use(func(c *gin.Context) {
