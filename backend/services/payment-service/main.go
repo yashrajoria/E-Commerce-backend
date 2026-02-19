@@ -65,14 +65,12 @@ func main() {
 	// SQS consumer for payment requests
 	paymentQueueURL := os.Getenv("PAYMENT_REQUEST_QUEUE_URL")
 	if paymentQueueURL == "" {
-		// Get queue URL from LocalStack
+		// Attempt to discover the queue URL from AWS; require configuration if discovery fails.
 		queueURL, err := aws_pkg.GetQueueURL(context.Background(), awsCfg, "payment-request-queue")
 		if err != nil {
-			logger.Warn("Could not get payment queue URL", zap.Error(err))
-			paymentQueueURL = "http://localhost:4566/000000000000/payment-request-queue"
-		} else {
-			paymentQueueURL = queueURL
+			logger.Fatal("Payment queue URL not configured and could not be discovered; set PAYMENT_REQUEST_QUEUE_URL", zap.Error(err))
 		}
+		paymentQueueURL = queueURL
 	}
 
 	stripeSvc := services.NewStripeService(cfg.StripeSecretKey, cfg.StripeWebhookKey)

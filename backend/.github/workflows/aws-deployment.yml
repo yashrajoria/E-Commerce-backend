@@ -2,7 +2,11 @@ name: CI - aws-deployment
 
 on:
   push:
-    branches: [aws-deployment]
+    branches: [main]
+  workflow_run:
+    workflows: ["Terraform"]
+    types:
+      - completed
 
 jobs:
   build-and-test:
@@ -90,7 +94,13 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. Copy the script from your Repo to the EC2 Server
+      # Sync .env from Terraform outputs
+      - name: Populate .env from Terraform outputs
+        run: |
+          chmod +x backend/infrastructure/aws/populate_env_from_terraform.sh
+          backend/infrastructure/aws/populate_env_from_terraform.sh
+
+      # Copy deploy script to EC2
       - name: Copy deploy script to EC2
         uses: appleboy/scp-action@v0.1.7
         with:

@@ -9,7 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 )
 
-// NewClient loads AWS config and returns a DynamoDB client. It supports LocalStack when AWS_ENDPOINT is set.
+// NewClient loads AWS config and returns a DynamoDB client.
 func NewClient(ctx context.Context) (*dynamodb.Client, error) {
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {

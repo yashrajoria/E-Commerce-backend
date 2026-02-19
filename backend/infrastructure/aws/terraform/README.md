@@ -68,3 +68,15 @@ terraform destroy
 Security
 
 - Do NOT commit `terraform.tfvars` with real credentials. Use CI secrets or AWS roles.
+
+Populate application env after apply
+
+After `terraform apply` the helper writes outputs to `infrastructure/aws/terraform-outputs.json`.
+To copy relevant outputs into your application `.env` file run the helper script:
+
+```bash
+cd infrastructure/aws
+./populate_env_from_terraform.sh
+```
+
+This script requires `jq` and will update `.env` in the repository root, creating a timestamped backup first. It only writes outputs that are present in `terraform-outputs.json` and will print instructions for any missing env values (for example SNS ARNs or extra SQS URLs).

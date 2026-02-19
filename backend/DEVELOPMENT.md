@@ -1,7 +1,7 @@
 Development — Local vs AWS
 
 This document explains how to run the backend locally (against real AWS resources)
-and how the previous LocalStack-based workflow was migrated to use AWS.
+and how the previous local development workflow was migrated to use AWS.
 
 Local development (recommended)
 
@@ -13,11 +13,11 @@ cp .env.local .env
 docker compose -f docker-compose.yml up --build
 ```
 
-Note: The repository previously included a LocalStack-based compose override
-(`docker-compose.local.yml`) and an init script under `infrastructure/localstack/`.
-Those were removed to simplify testing against real AWS. If you need an
-offline/local testing setup, reintroduce LocalStack and the init script with
-caution.
+Note: The repository previously included a compose override
+(for example a local override file) and optional init scripts under a
+local `infrastructure/` folder. Those were removed to simplify testing
+against real AWS. If you need an offline/local testing setup, reintroduce
+local tooling and any init scripts with caution.
 
 Development against real AWS (staging / integration)
 

@@ -5,7 +5,7 @@ Dockerfile
 .env.*
 !.env.example
 
-# Local env for LocalStack (do NOT commit real secrets)
+# Local env for local development (do NOT commit real secrets)
 .env.local
 
 # Terraform local vars and state

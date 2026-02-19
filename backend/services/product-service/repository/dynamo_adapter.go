@@ -390,6 +390,6 @@ func (d *DynamoAdapter) FindBySKUs(ctx context.Context, skus []string) ([]models
 }
 
 func (d *DynamoAdapter) EnsureIndexes(ctx context.Context) error {
-	// Dynamo table / GSI creation should be handled by infra (LocalStack init or IaC).
+	// Dynamo table / GSI creation should be handled by infrastructure init or IaC.
 	return nil
 }

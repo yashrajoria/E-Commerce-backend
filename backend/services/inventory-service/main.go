@@ -8,9 +8,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	awscfg "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/gin-gonic/gin"
 	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
@@ -34,40 +31,12 @@ func main() {
 	}
 
 	// --- AWS / DynamoDB setup ---
-	awsRegion := os.Getenv("AWS_REGION")
-	if awsRegion == "" {
-		awsRegion = "us-east-1"
-	}
-	awsEndpoint := os.Getenv("AWS_ENDPOINT")
-	awsAccessKey := os.Getenv("AWS_ACCESS_KEY_ID")
-	awsSecret := os.Getenv("AWS_SECRET_ACCESS_KEY")
-
-	cfgOpts := []func(*awscfg.LoadOptions) error{
-		awscfg.WithRegion(awsRegion),
-	}
-	if awsAccessKey != "" || awsSecret != "" {
-		cfgOpts = append(cfgOpts, awscfg.WithCredentialsProvider(
-			credentials.NewStaticCredentialsProvider(awsAccessKey, awsSecret, ""),
-		))
-	}
-	if awsEndpoint != "" {
-		cfgOpts = append(cfgOpts, awscfg.WithEndpointResolverWithOptions(
-			aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
-				return aws.Endpoint{URL: awsEndpoint, SigningRegion: awsRegion}, nil
-			}),
-		))
-	}
-
-	awsCfg, err := awscfg.LoadDefaultConfig(context.Background(), cfgOpts...)
+	awsCfg, err := awspkg.LoadAWSConfig(context.Background())
 	if err != nil {
 		logger.Fatal("Failed to load AWS config", zap.Error(err))
 	}
 
-	ddbClient := dynamodb.NewFromConfig(awsCfg, func(o *dynamodb.Options) {
-		if awsEndpoint != "" {
-			o.BaseEndpoint = aws.String(awsEndpoint)
-		}
-	})
+	ddbClient := dynamodb.NewFromConfig(awsCfg)
 
 	// --- Service wiring ---
 	// CloudWatch (Logs + Metrics)
