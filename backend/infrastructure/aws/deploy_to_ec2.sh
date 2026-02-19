@@ -6,7 +6,7 @@
 set -euo pipefail
 
 # Configuration (can be provided via environment variables)
-DOCKERHUB_USERNAME="${DOCKERHUB_USERNAME:-your-dockerhub-username}"
+DOCKERHUB_USERNAME="${DOCKERHUB_USERNAME:-yash263}"
 GIT_SHA="${GIT_SHA:-latest}"
 SERVICES=(auth-service bff-service cart-service inventory-service order-service payment-service product-service user-service)
 COMPOSE_FILE="docker-compose.prod.yml"
