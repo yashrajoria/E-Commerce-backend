@@ -1,4 +1,4 @@
-name: CI - aws-deployment
+name: CI - ShopSwift Backend
 
 on:
   push:
@@ -100,6 +100,47 @@ jobs:
           chmod +x backend/infrastructure/aws/populate_env_from_terraform.sh
           backend/infrastructure/aws/populate_env_from_terraform.sh
 
+      # Copy backend code and configs to EC2 for compose build
+      - name: Copy backend/services to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.INPUT_HOST }}
+          username: ${{ secrets.INPUT_USERNAME }}
+          key: ${{ secrets.INPUT_KEY }}
+          source: "backend/services"
+          target: "/home/${{ secrets.INPUT_USERNAME }}/E-Commerce-backend/backend"
+          strip_components: 1
+
+      - name: Copy backend/api-gateway to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.INPUT_HOST }}
+          username: ${{ secrets.INPUT_USERNAME }}
+          key: ${{ secrets.INPUT_KEY }}
+          source: "backend/api-gateway"
+          target: "/home/${{ secrets.INPUT_USERNAME }}/E-Commerce-backend/backend"
+          strip_components: 1
+
+      - name: Copy backend/docker-compose.yml to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.INPUT_HOST }}
+          username: ${{ secrets.INPUT_USERNAME }}
+          key: ${{ secrets.INPUT_KEY }}
+          source: "backend/docker-compose.yml"
+          target: "/home/${{ secrets.INPUT_USERNAME }}/E-Commerce-backend/backend"
+          strip_components: 1
+
+      - name: Copy backend/.env to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.INPUT_HOST }}
+          username: ${{ secrets.INPUT_USERNAME }}
+          key: ${{ secrets.INPUT_KEY }}
+          source: "backend/.env"
+          target: "/home/${{ secrets.INPUT_USERNAME }}/E-Commerce-backend/backend"
+          strip_components: 1
+
       # Copy deploy script to EC2
       - name: Copy deploy script to EC2
         uses: appleboy/scp-action@v0.1.7
@@ -109,7 +150,7 @@ jobs:
           key: ${{ secrets.INPUT_KEY }}
           source: "backend/infrastructure/aws/deploy_to_ec2.sh"
           target: "/home/${{ secrets.INPUT_USERNAME }}"
-          strip_components: 3 # Removes 'backend/infrastructure/aws/' so it lands cleanly in HOME
+          strip_components: 3
 
       # 2. Log in and run the script
       - name: Deploy to EC2 via SSH
