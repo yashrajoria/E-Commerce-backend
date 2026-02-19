@@ -36,7 +36,12 @@ else
       docker rm "${CONTAINER_NAME}" || true
     fi
     # Example run command — replace ports/env/volumes with real values for your host
-    docker run -d --env-file /home/ec2-user/.env --name "${CONTAINER_NAME}" "${IMG}" || docker run -d --env-file /home/ec2-user/.env --name "${CONTAINER_NAME}" "${DOCKERHUB_USERNAME}/${svc}:latest"
+    docker run -d --env-file /home/ec2-user/E-Commerce-backend/backend/.env --name "${CONTAINER_NAME}" "${IMG}" || docker run -d --env-file /home/ec2-user/E-Commerce-backend/backend/.env --name "${CONTAINER_NAME}" "${DOCKERHUB_USERNAME}/${svc}:latest"
+  # Redis installation instructions (run once on EC2):
+  # sudo yum update -y
+  # sudo yum install -y redis
+  # sudo systemctl start redis
+  # sudo systemctl enable redis
   done
 fi
 
