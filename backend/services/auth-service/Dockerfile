@@ -4,8 +4,10 @@ WORKDIR /src
 # Copy module files first (use repo-root paths because CI builds from repo root)
 COPY backend/services/auth-service/go.mod backend/services/auth-service/go.sum ./
 
+
 # Provide local module referenced by replace directive
 COPY backend/pkg/aws /pkg/aws
+COPY backend/common /common
 
 RUN go mod download
 

@@ -4,8 +4,10 @@ WORKDIR /src
 # Copy module files first
 COPY backend/services/payment-service/go.mod backend/services/payment-service/go.sum ./
 
+
 # Provide local module referenced by replace
 COPY backend/pkg/aws /pkg/aws
+COPY backend/common /common
 
 RUN go mod download
 

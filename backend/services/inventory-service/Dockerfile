@@ -4,8 +4,10 @@ WORKDIR /src
 # Copy module files first
 COPY backend/services/inventory-service/go.mod backend/services/inventory-service/go.sum ./
 
+
 # Provide local module referenced by replace
 COPY backend/pkg/aws /pkg/aws
+COPY backend/common /common
 
 RUN go mod download
 
