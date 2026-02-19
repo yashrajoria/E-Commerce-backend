@@ -10,6 +10,12 @@ DOCKERHUB_USERNAME="${DOCKERHUB_USERNAME:-yash263}"
 GIT_SHA="${GIT_SHA:-latest}"
 SERVICES=(auth-service bff-service cart-service inventory-service order-service payment-service product-service user-service)
 COMPOSE_FILE="docker-compose.prod.yml"
+# Ensure Docker and Docker Compose are installed
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! command -v docker &> /dev/null || ! command -v docker-compose &> /dev/null; then
+  echo "[deploy] Installing Docker and Docker Compose..."
+  bash "$SCRIPT_DIR/install-docker.sh"
+fi
 
 echo "[deploy] pulling images from Docker Hub"
 for svc in "${SERVICES[@]}"; do
