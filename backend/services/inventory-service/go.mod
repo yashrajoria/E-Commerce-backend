@@ -4,10 +4,10 @@ go 1.25
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.41.1
-	github.com/aws/aws-sdk-go-v2/config v1.31.20
-	github.com/aws/aws-sdk-go-v2/credentials v1.18.24
+	github.com/aws/aws-sdk-go-v2/config v1.32.7
+	github.com/aws/aws-sdk-go-v2/credentials v1.19.7
 	github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue v1.20.31
-	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.54.0
+	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.55.0
 	github.com/gin-gonic/gin v1.10.1
 	github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws v0.0.0
 	go.uber.org/zap v1.27.0
@@ -15,8 +15,6 @@ require (
 
 require (
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.4 // indirect
-	github.com/aws/aws-sdk-go-v2/config v1.32.7 // indirect
-	github.com/aws/aws-sdk-go-v2/credentials v1.19.7 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.17 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.22.0 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.17 // indirect
@@ -24,7 +22,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/internal/ini v1.8.4 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.17 // indirect
 	github.com/aws/aws-sdk-go-v2/service/cloudwatch v1.54.0 // indirect
-	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.55.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs v1.63.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/dynamodbstreams v1.32.10 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.4 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.9.8 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/endpoint-discovery v1.11.17 // indirect
