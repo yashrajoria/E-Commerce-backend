@@ -5,9 +5,10 @@ WORKDIR /src
 COPY backend/services/bff-service/go.mod backend/services/bff-service/go.sum ./
 
 
+
 # Provide local module if referenced
 COPY backend/pkg/aws /pkg/aws
-COPY backend/common /common
+COPY backend/services/common /common
 
 RUN go mod download
 

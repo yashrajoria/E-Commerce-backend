@@ -5,9 +5,10 @@ WORKDIR /src
 COPY backend/services/auth-service/go.mod backend/services/auth-service/go.sum ./
 
 
+
 # Provide local module referenced by replace directive
 COPY backend/pkg/aws /pkg/aws
-COPY backend/common /common
+COPY backend/services/common /common
 
 RUN go mod download
 
