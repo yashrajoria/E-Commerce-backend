@@ -14,7 +14,11 @@ COMPOSE_FILE="docker-compose.prod.yml"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if ! command -v docker &> /dev/null || ! command -v docker-compose &> /dev/null; then
   echo "[deploy] Installing Docker and Docker Compose..."
-  bash "$SCRIPT_DIR/install-docker.sh"
+  if grep -qi 'amazon linux' /etc/os-release; then
+    bash "$SCRIPT_DIR/install-docker-amazon-linux.sh"
+  else
+    bash "$SCRIPT_DIR/install-docker.sh"
+  fi
 fi
 
 echo "[deploy] pulling images from Docker Hub"
