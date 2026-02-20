@@ -19,6 +19,14 @@ if ! command -v docker &> /dev/null || ! command -v docker-compose &> /dev/null;
   else
     bash "$SCRIPT_DIR/install-docker.sh"
   fi
+   # Ensure docker compose v2 plugin is available
+   if ! docker compose version &> /dev/null; then
+     echo "[deploy] Installing Docker Compose v2 plugin..."
+     DOCKER_COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep 'tag_name' | cut -d '"' -f4)
+     sudo curl -L "https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/libexec/docker/cli-plugins/docker-compose
+     sudo chmod +x /usr/local/libexec/docker/cli-plugins/docker-compose
+     docker compose version
+   fi
 fi
 
 echo "[deploy] pulling images from Docker Hub"
