@@ -1,0 +1,297 @@
+services:
+  postgres:
+    image: postgres:latest
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ecommerce
+      POSTGRES_HOST_AUTH_METHOD: md5
+    ports:
+      - "5432:5432"
+    command: ["postgres", "-c", "listen_addresses=*"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ecommerce-network
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    volumes:
+      - redis_data:/data
+    networks:
+      - ecommerce-network
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: services/auth-service/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./services/auth-service:/app
+      - ./services/common:/common
+    ports:
+      - "8081:8081"
+    env_file:
+      - .env
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_EC2_METADATA_DISABLED=true
+      - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED}
+      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP}
+      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+
+  user-service:
+    build:
+      context: .
+      dockerfile: services/user-service/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./services/user-service:/app
+      - ./services/common:/common
+    ports:
+      - "8085:8085"
+    env_file:
+      - .env
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_EC2_METADATA_DISABLED=true
+      - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED}
+      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP}
+      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+
+  product-service:
+    build:
+      context: .
+      dockerfile: services/product-service/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./services/product-service:/app
+      - ./services/common:/common
+    ports:
+      - "8082:8082"
+    env_file:
+      - .env
+    environment:
+      - AWS_REGION=${AWS_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_S3_BUCKET=shopswift
+      - AWS_S3_PREFIX=products/
+      - DDB_TABLE_PRODUCTS=Products
+      - DDB_TABLE_CATEGORIES=Categories
+      - INVENTORY_SERVICE_URL=http://inventory-service:8084
+      - CLOUDWATCH_ENABLED=true
+      - CLOUDWATCH_LOG_GROUP=/ecommerce/services
+      - CLOUDWATCH_NAMESPACE=ECommerce
+    # local development overrides should be provided via a local compose override (e.g. docker-compose.override.yml)
+    networks:
+      - ecommerce-network
+
+  cart-service:
+    build:
+      context: .
+      dockerfile: services/cart-service/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./services/cart-service:/app
+      - ./services/common:/common
+    ports:
+      - "8086:8086"
+    env_file:
+      - .env
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_EC2_METADATA_DISABLED=true
+      - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED}
+      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP}
+      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+
+  inventory-service:
+    build:
+      context: .
+      dockerfile: services/inventory-service/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./services/inventory-service:/app
+    ports:
+      - "8084:8084"
+    env_file:
+      - .env
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_EC2_METADATA_DISABLED=true
+      - DDB_TABLE=${DDB_TABLE}
+      - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED}
+      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP}
+      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE}
+    # local development overrides should be provided via a local compose override (e.g. docker-compose.override.yml)
+    networks:
+      - ecommerce-network
+
+  order-service:
+    build:
+      context: .
+      dockerfile: services/order-service/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./services/order-service:/app
+    ports:
+      - "8083:8083"
+    env_file:
+      - .env
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_EC2_METADATA_DISABLED=true
+      - INVENTORY_SERVICE_URL=${INVENTORY_SERVICE_URL}
+      - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED}
+      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP}
+      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+
+  payment-service:
+    build:
+      context: .
+      dockerfile: services/payment-service/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./services/payment-service:/app
+      - ./services/common:/common
+    ports:
+      - "8087:8087"
+    env_file:
+      - .env
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_EC2_METADATA_DISABLED=true
+      - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED}
+      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP}
+      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: api-gateway/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./api-gateway:/app
+    env_file:
+      - .env
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_EC2_METADATA_DISABLED=true
+      - AWS_ENDPOINT=${AWS_ENDPOINT}
+      - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED}
+      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP}
+      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE}
+    depends_on:
+      - auth-service
+      - product-service
+      - inventory-service
+      - order-service
+      - user-service
+      - cart-service
+      - payment-service
+    networks:
+      - ecommerce-network
+
+  bff-service:
+    build:
+      context: .
+      dockerfile: services/bff-service/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./services/bff-service:/app
+      - ./docs:/docs:ro
+    ports:
+      - "8088:8088"
+    env_file:
+      - .env
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_EC2_METADATA_DISABLED=true
+      - CLOUDWATCH_ENABLED=true
+      - CLOUDWATCH_LOG_GROUP=/ecommerce/services
+      - CLOUDWATCH_NAMESPACE=ECommerce
+    depends_on:
+      - api-gateway
+    networks:
+      - ecommerce-network
+
+  stripe-cli:
+    image: stripe/stripe-cli:latest
+    restart: unless-stopped
+    command: listen --forward-to http://api-gateway:8080/stripe/webhook
+    env_file:
+      - .env
+    depends_on:
+      - api-gateway
+    networks:
+      - ecommerce-network
+
+networks:
+  ecommerce-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
