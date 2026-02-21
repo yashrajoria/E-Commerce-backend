@@ -11,7 +11,7 @@ COPY api-gateway/go.mod api-gateway/go.sum ./
 
 # Ensure local packages referenced by replace directives are available in the build context
 COPY pkg/aws /pkg/aws
-COPY COPY services/common /common
+COPY services/common /common
 
 RUN go mod download
 
