@@ -208,7 +208,7 @@ on:
       - completed
 
 env:
-  DEPLOY_DIR: /home/ubuntu/E-Commerce-backend/backend
+  DEPLOY_DIR: /home/${{ secrets.INPUT_USERNAME }}/E-Commerce-backend/backend
 
 jobs:
   build-and-test:
@@ -354,9 +354,9 @@ jobs:
           host: ${{ secrets.INPUT_HOST }}
           username: ${{ secrets.INPUT_USERNAME }}
           key: ${{ secrets.INPUT_KEY }}
-          source: "backend/infrastructure/aws/*.sh"
+          source: "backend/infrastructure/aws/"
           target: "/home/${{ secrets.INPUT_USERNAME }}/scripts"
-          strip_components: 3
+          strip_components: 2
 
       # Deploy to EC2
       - name: Deploy to EC2 via SSH
