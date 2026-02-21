@@ -2,18 +2,18 @@ FROM golang:1.25-alpine AS builder
 WORKDIR /src
 
 # Copy module files first
-COPY backend/services/bff-service/go.mod backend/services/bff-service/go.sum ./
+COPY services/bff-service/go.mod services/bff-service/go.sum ./
 
 
 
 # Provide local module if referenced
-COPY backend/pkg/aws /pkg/aws
-COPY COPY services/common /common
+COPY pkg/aws /pkg/aws
+COPY services/common /common
 
 RUN go mod download
 
 # Copy service sources and build
-COPY backend/services/bff-service .
+COPY services/bff-service .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /app .
 
 FROM gcr.io/distroless/static-debian11
