@@ -8,7 +8,7 @@ COPY backend/services/payment-service/go.mod backend/services/payment-service/go
 
 # Provide local module referenced by replace
 COPY backend/pkg/aws /pkg/aws
-COPY backend/services/common /common
+COPY COPY services/common /common
 
 RUN go mod download
 

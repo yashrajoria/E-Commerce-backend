@@ -8,7 +8,7 @@ COPY backend/services/bff-service/go.mod backend/services/bff-service/go.sum ./
 
 # Provide local module if referenced
 COPY backend/pkg/aws /pkg/aws
-COPY backend/services/common /common
+COPY COPY services/common /common
 
 RUN go mod download
 

@@ -8,7 +8,7 @@ COPY backend/services/cart-service/go.mod backend/services/cart-service/go.sum .
 
 # Provide local module referenced by replace
 COPY backend/pkg/aws /pkg/aws
-COPY backend/services/common /common
+COPY COPY services/common /common
 
 RUN go mod download
 

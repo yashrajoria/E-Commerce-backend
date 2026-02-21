@@ -8,7 +8,7 @@ COPY backend/services/inventory-service/go.mod backend/services/inventory-servic
 
 # Provide local module referenced by replace
 COPY backend/pkg/aws /pkg/aws
-COPY backend/services/common /common
+COPY COPY services/common /common
 
 RUN go mod download
 

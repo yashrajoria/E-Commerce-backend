@@ -12,7 +12,7 @@ COPY backend/services/order-service/go.sum ./
 # The go.mod in this repo uses: replace github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws => ../../pkg/aws
 # That resolves inside the container to /pkg/aws when working dir is /src, so provide it.
 COPY backend/pkg/aws /pkg/aws
-COPY backend/services/common /common
+COPY COPY services/common /common
 
 RUN go mod download
 
