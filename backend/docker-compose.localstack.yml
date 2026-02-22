@@ -1,0 +1,148 @@
+# LocalStack override for local development.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.localstack.yml up
+#
+# This file:
+#   1. Adds a LocalStack service that emulates AWS APIs on http://localhost:4566.
+#   2. Injects USE_LOCALSTACK=true and LOCALSTACK_ENDPOINT into every service so
+#      that pkg/aws.LoadConfig() automatically routes all SDK calls to LocalStack
+#      instead of real AWS.
+#
+# No changes to source code or the main docker-compose.yml are required to switch
+# between real AWS (default) and LocalStack (this override).
+
+services:
+  # ── LocalStack ────────────────────────────────────────────────────────────────
+  localstack:
+    image: localstack/localstack:latest
+    restart: unless-stopped
+    ports:
+      - "4566:4566" # unified gateway for all AWS service emulations
+    environment:
+      - SERVICES=s3,sns,sqs,secretsmanager,cloudwatch,logs,dynamodb,ec2
+      - DEFAULT_REGION=${AWS_REGION:-us-east-1}
+      - AWS_DEFAULT_REGION=${AWS_REGION:-us-east-1}
+      - AWS_S3_BUCKET=${AWS_S3_BUCKET:-shopswift}
+      - DDB_TABLE_PRODUCTS=${DDB_TABLE_PRODUCTS:-Products}
+      - DDB_TABLE_CATEGORIES=${DDB_TABLE_CATEGORIES:-Categories}
+      - DDB_TABLE_INVENTORY=${DDB_TABLE_INVENTORY:-Inventory}
+      - ORDER_SNS_TOPIC_NAME=${ORDER_SNS_TOPIC_NAME:-order-events}
+      - PAYMENT_SNS_TOPIC_NAME=${PAYMENT_SNS_TOPIC_NAME:-payment-events}
+      - ORDER_PROCESSING_QUEUE_NAME=${ORDER_PROCESSING_QUEUE_NAME:-order-processing-queue}
+      - PAYMENT_EVENTS_QUEUE_NAME=${PAYMENT_EVENTS_QUEUE_NAME:-payment-events-queue}
+      - PAYMENT_REQUEST_QUEUE_NAME=${PAYMENT_REQUEST_QUEUE_NAME:-payment-request-queue}
+      - PERSISTENCE=1 # survive container restarts
+      - DEBUG=${LOCALSTACK_DEBUG:-0}
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./localstack/init:/etc/localstack/init
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks:
+      - ecommerce-network
+
+  # ── Service overrides ─────────────────────────────────────────────────────────
+  # Each block only adds the two LocalStack env vars; everything else is inherited
+  # from docker-compose.yml.
+
+  auth-service:
+    environment:
+      - USE_LOCALSTACK=true
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
+    depends_on:
+      localstack:
+        condition: service_healthy
+
+  user-service:
+    environment:
+      - USE_LOCALSTACK=true
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
+    depends_on:
+      localstack:
+        condition: service_healthy
+
+  product-service:
+    environment:
+      - USE_LOCALSTACK=true
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
+      # Disable hardcoded CLOUDWATCH_ENABLED=true from the base file in local dev
+      - CLOUDWATCH_ENABLED=true
+    depends_on:
+      localstack:
+        condition: service_healthy
+
+  cart-service:
+    environment:
+      - USE_LOCALSTACK=true
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
+      - ORDER_SNS_TOPIC_ARN=arn:aws:sns:${AWS_REGION:-us-east-1}:000000000000:${ORDER_SNS_TOPIC_NAME:-order-events}
+    depends_on:
+      localstack:
+        condition: service_healthy
+
+  inventory-service:
+    environment:
+      - USE_LOCALSTACK=true
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
+      - DDB_TABLE_INVENTORY=${DDB_TABLE_INVENTORY:-Inventory}
+    depends_on:
+      localstack:
+        condition: service_healthy
+
+  order-service:
+    environment:
+      - USE_LOCALSTACK=true
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_SESSION_TOKEN=
+      - CHECKOUT_QUEUE_URL=http://localstack:4566/000000000000/${ORDER_PROCESSING_QUEUE_NAME:-order-processing-queue}
+      - PAYMENT_REQUEST_QUEUE_URL=http://localstack:4566/000000000000/${PAYMENT_REQUEST_QUEUE_NAME:-payment-request-queue}
+      - PAYMENT_EVENTS_QUEUE_URL=http://localstack:4566/000000000000/${PAYMENT_EVENTS_QUEUE_NAME:-payment-events-queue}
+      - ORDER_SNS_TOPIC_ARN=arn:aws:sns:${AWS_REGION:-us-east-1}:000000000000:${ORDER_SNS_TOPIC_NAME:-order-events}
+      - PAYMENT_SNS_TOPIC_ARN=arn:aws:sns:${AWS_REGION:-us-east-1}:000000000000:${PAYMENT_SNS_TOPIC_NAME:-payment-events}
+    depends_on:
+      localstack:
+        condition: service_healthy
+
+  payment-service:
+    environment:
+      - USE_LOCALSTACK=true
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_SESSION_TOKEN=
+      - PAYMENT_REQUEST_QUEUE_URL=http://localstack:4566/000000000000/${PAYMENT_REQUEST_QUEUE_NAME:-payment-request-queue}
+      - PAYMENT_EVENTS_QUEUE_URL=http://localstack:4566/000000000000/${PAYMENT_EVENTS_QUEUE_NAME:-payment-events-queue}
+      - PAYMENT_SNS_TOPIC_ARN=arn:aws:sns:${AWS_REGION:-us-east-1}:000000000000:${PAYMENT_SNS_TOPIC_NAME:-payment-events}
+    depends_on:
+      localstack:
+        condition: service_healthy
+
+  api-gateway:
+    environment:
+      - USE_LOCALSTACK=true
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
+    depends_on:
+      localstack:
+        condition: service_healthy
+
+  bff-service:
+    environment:
+      - USE_LOCALSTACK=true
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
+      - CLOUDWATCH_ENABLED=true
+    depends_on:
+      localstack:
+        condition: service_healthy
+
+volumes:
+  localstack_data:
