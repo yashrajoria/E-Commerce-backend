@@ -47,3 +47,44 @@ variable "ci_role_name" {
   type        = string
   default     = "ecommerce-github-actions-oidc-role"
 }
+
+  # EC2 instance variables
+  variable "ec2_ami" {
+    description = "AMI ID for EC2 instance"
+    type        = string
+    default     = "ami-0c02fb55956c7d316" # Amazon Linux 2
+  }
+
+  variable "ec2_instance_type" {
+    description = "EC2 instance type"
+    type        = string
+    default     = "t3.micro"
+  }
+
+  # DynamoDB table name
+  variable "dynamodb_table_name" {
+    description = "DynamoDB table name"
+    type        = string
+    default     = "ECommerceDynamoDB"
+  }
+
+  # SNS topic name
+  variable "sns_topic_name" {
+    description = "SNS topic name"
+    type        = string
+    default     = "ECommerceSNSTopic"
+  }
+
+  # SQS queue name
+  variable "sqs_queue_name" {
+    description = "SQS queue name"
+    type        = string
+    default     = "ECommerceSQSQueue"
+  }
+
+  # CloudWatch log group name
+  variable "cloudwatch_log_group_name" {
+    description = "CloudWatch log group name"
+    type        = string
+    default     = "/aws/ecommerce/app"
+  }

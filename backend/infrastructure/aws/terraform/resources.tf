@@ -1,7 +1,11 @@
 resource "aws_s3_bucket" "app_bucket" {
   bucket = var.s3_bucket
-  acl    = "private"
   force_destroy = true
+}
+
+resource "aws_s3_bucket_acl" "app_bucket_acl" {
+  bucket = aws_s3_bucket.app_bucket.id
+  acl    = "private"
 }
 
 resource "aws_dynamodb_table" "products" {

@@ -8,5 +8,4 @@ provider "aws" {
   # Credentials are expected to be provided via CI/GitHub Secrets or environment
 }
 
-# Example: an ECS cluster, ECR repo, or RDS instance can be added here.
-# Add real resources when ready.
+# Resources are defined in resources.tf
