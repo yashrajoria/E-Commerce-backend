@@ -157,7 +157,7 @@ func main() {
 	// --- 4. Route Registration ---
 
 	// Register all application routes, passing in the controllers
-	routes.RegisterRoutes(r, productController, categoryController)
+	routes.RegisterRoutesLegacy(r, productController, categoryController)
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "OK"})
