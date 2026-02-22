@@ -185,9 +185,19 @@ func (ctrl *ProductController) GetProducts(c *gin.Context) {
 	}
 
 	// 2. GENERATE A UNIQUE CACHE KEY
-	// The key MUST include every variable that changes the output
+	// The key MUST include every variable that changes the output.
+	// We include a `products:version` value so we can invalidate all
+	// product-list caches atomically by bumping the version on writes.
+	var cacheVersion int64 = 1
+	if ver, err := ctrl.redis.Get(c.Request.Context(), "products:version").Int64(); err == nil && ver > 0 {
+		cacheVersion = ver
+	} else if err != nil && err != redis.Nil {
+		zap.L().Warn("failed to read products cache version", zap.Error(err))
+	}
+
 	cacheKey := fmt.Sprintf(
-		"products:p:%d:l:%d:f:%s:c:%s:s:%s:min:%s:max:%s",
+		"products:v:%d:p:%d:l:%d:f:%s:c:%s:s:%s:min:%s:max:%s",
+		cacheVersion,
 		page,
 		perPage,
 		normalizedIsFeatured,
@@ -330,6 +340,12 @@ func (ctrl *ProductController) CreateProduct(c *gin.Context) {
 	// 	zap.L().Error("failed to invalidate cache after product creation", zap.Error(err))
 	// }
 
+	// Bump the products cache version so existing product-list cache entries
+	// become stale immediately (they include the version in their key).
+	if err := ctrl.redis.Incr(c.Request.Context(), "products:version").Err(); err != nil {
+		zap.L().Warn("failed to bump products cache version after create", zap.Error(err))
+	}
+
 	c.JSON(http.StatusCreated, product)
 }
 
@@ -363,6 +379,11 @@ func (ctrl *ProductController) UpdateProduct(c *gin.Context) {
 	// 	zap.L().Error("failed to invalidate cache after product update", zap.Error(err))
 	// }
 
+	// Bump the products cache version so list caches become stale.
+	if err := ctrl.redis.Incr(c.Request.Context(), "products:version").Err(); err != nil {
+		zap.L().Warn("failed to bump products cache version after update", zap.Error(err))
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "Product updated successfully"})
 }
 
@@ -389,6 +410,11 @@ func (ctrl *ProductController) DeleteProduct(c *gin.Context) {
 	// if err := ctrl.redis.FlushDB(c.Request.Context()).Err(); err != nil {
 	// 	zap.L().Error("failed to invalidate cache after product deletion", zap.Error(err))
 	// }
+
+	// Bump products cache version to invalidate list caches atomically.
+	if err := ctrl.redis.Incr(c.Request.Context(), "products:version").Err(); err != nil {
+		zap.L().Warn("failed to bump products cache version after delete", zap.Error(err))
+	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Product deleted successfully"})
 }
