@@ -1,10 +1,12 @@
-FROM golang:1.25-alpine AS builder
-WORKDIR /src
+FROM golang:1.25-alpine
 
-# Copy module files first
+WORKDIR /app
+
+RUN apk add --no-cache git
+
+RUN go install github.com/cosmtrek/air@v1.49.0
+
 COPY services/product-service/go.mod services/product-service/go.sum ./
-
-
 
 # Provide local module referenced by replace
 COPY pkg/aws /pkg/aws
@@ -12,11 +14,8 @@ COPY services/common /common
 
 RUN go mod download
 
-# Copy service sources and build
 COPY services/product-service .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /app .
+RUN mkdir -p /app/tmp
 
-FROM gcr.io/distroless/static-debian11
-COPY --from=builder /app /app
-EXPOSE 8080
-ENTRYPOINT ["/app"]
+EXPOSE 8082
+CMD ["air", "-c", ".air.toml"]
