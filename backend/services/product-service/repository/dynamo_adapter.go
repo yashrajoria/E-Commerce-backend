@@ -13,8 +13,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// DynamoAdapter is a starter DynamoDB-backed ProductRepo implementation.
-// It stores products in table with primary key `product_id` (string).
+// DynamoAdapter is a DynamoDB-backed ProductRepo implementation.
+// It stores products in table with primary key `id` (string).
 type DynamoAdapter struct {
 	client *dynamodb.Client
 	table  string
@@ -25,7 +25,7 @@ func NewDynamoAdapter(client *dynamodb.Client, table string) *DynamoAdapter {
 }
 
 type ddbProduct struct {
-	ProductID    string   `dynamodbav:"product_id"`
+	ProductID    string   `dynamodbav:"id"`
 	Name         string   `dynamodbav:"name"`
 	Price        float64  `dynamodbav:"price"`
 	Quantity     int      `dynamodbav:"quantity"`
@@ -42,7 +42,7 @@ type ddbProduct struct {
 }
 
 func (d *DynamoAdapter) FindByID(ctx context.Context, id uuid.UUID) (*models.Product, error) {
-	key, err := attributevalue.MarshalMap(map[string]string{"product_id": id.String()})
+	key, err := attributevalue.MarshalMap(map[string]string{"id": id.String()})
 	if err != nil {
 		return nil, fmt.Errorf("marshal key: %w", err)
 	}
@@ -294,7 +294,7 @@ func (d *DynamoAdapter) Update(ctx context.Context, id uuid.UUID, updates map[st
 		exprVals[ph] = av
 		i++
 	}
-	key, err := attributevalue.MarshalMap(map[string]string{"product_id": id.String()})
+	key, err := attributevalue.MarshalMap(map[string]string{"id": id.String()})
 	if err != nil {
 		return fmt.Errorf("marshal key: %w", err)
 	}
@@ -311,13 +311,55 @@ func (d *DynamoAdapter) Update(ctx context.Context, id uuid.UUID, updates map[st
 }
 
 func (d *DynamoAdapter) Delete(ctx context.Context, id uuid.UUID) error {
-	key, err := attributevalue.MarshalMap(map[string]string{"product_id": id.String()})
+	key, err := attributevalue.MarshalMap(map[string]string{"id": id.String()})
 	if err != nil {
 		return fmt.Errorf("marshal key: %w", err)
 	}
 	_, err = d.client.DeleteItem(ctx, &dynamodb.DeleteItemInput{TableName: &d.table, Key: key})
 	if err != nil {
 		return fmt.Errorf("delete item failed: %w", err)
+	}
+	return nil
+}
+
+// DeleteMany deletes multiple products using BatchWriteItem (chunks of 25)
+func (d *DynamoAdapter) DeleteMany(ctx context.Context, ids []uuid.UUID) error {
+	const chunkSize = 25
+	for i := 0; i < len(ids); i += chunkSize {
+		end := i + chunkSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		writeReqs := make([]types.WriteRequest, 0, end-i)
+		for _, id := range ids[i:end] {
+			key, err := attributevalue.MarshalMap(map[string]string{"id": id.String()})
+			if err != nil {
+				return fmt.Errorf("marshal delete key: %w", err)
+			}
+			writeReqs = append(writeReqs, types.WriteRequest{DeleteRequest: &types.DeleteRequest{Key: key}})
+		}
+
+		req := &dynamodb.BatchWriteItemInput{RequestItems: map[string][]types.WriteRequest{d.table: writeReqs}}
+		attempts := 0
+		for {
+			out, err := d.client.BatchWriteItem(ctx, req)
+			if err != nil {
+				return fmt.Errorf("batch delete failed: %w", err)
+			}
+			if len(out.UnprocessedItems) == 0 {
+				break
+			}
+			if unp, ok := out.UnprocessedItems[d.table]; ok && len(unp) > 0 {
+				req.RequestItems[d.table] = unp
+			} else {
+				break
+			}
+			attempts++
+			if attempts >= 3 {
+				return fmt.Errorf("batch delete had unprocessed items after retries")
+			}
+			time.Sleep(time.Duration(attempts*200) * time.Millisecond)
+		}
 	}
 	return nil
 }
