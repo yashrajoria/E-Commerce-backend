@@ -79,10 +79,10 @@ func (c *PaymentRequestConsumer) Start(ctx context.Context) {
 
 		c.logger.Info("Payment record created", zap.String("payment_id", payment.Payment_ID.String()))
 
-		// Create Stripe PaymentIntent
-		pi, err := c.stripeSvc.CreatePaymentIntent(int64(req.Amount*100), "usd")
+		// Create Stripe Checkout Session (provides a hosted URL for the user to complete payment)
+		sess, err := c.stripeSvc.CreateCheckoutSession(int64(req.Amount*100), "usd", req.OrderID, req.UserID)
 		if err != nil {
-			c.logger.Error("Failed to create Stripe PaymentIntent", zap.Error(err))
+			c.logger.Error("Failed to create Stripe Checkout Session", zap.Error(err))
 			payment.Status = "failed"
 			// Update the existing payment record instead of attempting to create it again
 			if updateErr := c.repo.UpdatePaymentByOrderID(ctx, orderID, "failed", nil, nil); updateErr != nil {
@@ -104,15 +104,17 @@ func (c *PaymentRequestConsumer) Start(ctx context.Context) {
 			return err
 		}
 
-		payment.StripePaymentID = &pi.ID
-		// Note: Payment model doesn't have ClientSecret field
-		if err := c.repo.CreatePayment(ctx, &payment); err != nil {
-			c.logger.Warn("Failed to save payment with Stripe ID", zap.Error(err))
+		checkoutURL := sess.URL
+		payment.StripePaymentID = &sess.ID
+		// Update existing payment record with Stripe session ID and checkout URL
+		if err := c.repo.UpdatePaymentByOrderID(ctx, orderID, "pending", &checkoutURL, &sess.ID); err != nil {
+			c.logger.Warn("Failed to save payment with Stripe session ID", zap.Error(err))
 		}
 
 		c.logger.Info("Payment request processed",
 			zap.String("order_id", req.OrderID),
 			zap.String("payment_id", payment.Payment_ID.String()),
+			zap.String("checkout_url", checkoutURL),
 		)
 
 		return nil
