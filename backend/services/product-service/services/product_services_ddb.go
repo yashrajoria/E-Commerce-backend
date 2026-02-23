@@ -92,20 +92,31 @@ func (s *ProductServiceDDB) GetProduct(ctx context.Context, id uuid.UUID) (*mode
 }
 
 func (s *ProductServiceDDB) ListProducts(ctx context.Context, params ListProductsParams) ([]*models.Product, int64, error) {
-	// Build filter map
+	// Build filter map (use plain types for repository layer)
 	filter := make(map[string]interface{})
 
 	if params.IsFeatured != nil {
 		filter["is_featured"] = *params.IsFeatured
 	}
 	if len(params.CategoryID) > 0 {
-		filter["category_ids"] = params.CategoryID
+		// convert to []string for easier handling in the repo layer
+		ids := make([]string, 0, len(params.CategoryID))
+		for _, u := range params.CategoryID {
+			ids = append(ids, u.String())
+		}
+		filter["category_ids"] = ids
 	}
 	if params.MinPrice != nil {
 		filter["min_price"] = *params.MinPrice
 	}
 	if params.MaxPrice != nil {
 		filter["max_price"] = *params.MaxPrice
+	}
+	if params.Brand != nil {
+		filter["brand"] = *params.Brand
+	}
+	if params.InStock != nil {
+		filter["in_stock"] = *params.InStock
 	}
 
 	limit := params.PerPage
