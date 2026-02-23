@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"product-service/models"
@@ -253,6 +252,52 @@ func (ctrl *ProductController) DeleteProduct(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Product deleted successfully"})
 }
 
+// BulkDeleteProducts deletes multiple products by IDs, categories, or all products
+func (ctrl *ProductController) BulkDeleteProducts(c *gin.Context) {
+	var req struct {
+		IDs         []string `json:"ids"`
+		CategoryIDs []string `json:"category_ids"`
+		DeleteAll   bool     `json:"delete_all"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request", "details": err.Error()})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), ctrl.config.ContextTimeout)
+	defer cancel()
+
+	// Convert string IDs to uuid.UUID slices
+	var ids []uuid.UUID
+	for _, s := range req.IDs {
+		if u, err := uuid.Parse(s); err == nil {
+			ids = append(ids, u)
+		}
+	}
+	var catIDs []uuid.UUID
+	for _, s := range req.CategoryIDs {
+		if u, err := uuid.Parse(s); err == nil {
+			catIDs = append(catIDs, u)
+		}
+	}
+
+	svcReq := services.BulkDeleteRequest{IDs: ids, CategoryIDs: catIDs, DeleteAll: req.DeleteAll}
+
+	deleted, err := ctrl.productService.BulkDeleteProducts(ctx, svcReq)
+	if err != nil {
+		zap.L().Error("Service failed to bulk delete products", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete products"})
+		return
+	}
+
+	// Invalidate cache broadly
+	if err := ctrl.cache.Invalidate(ctx); err != nil {
+		zap.L().Warn("Failed to invalidate cache after bulk delete", zap.Error(err))
+	}
+
+	c.JSON(http.StatusOK, gin.H{"deleted_count": deleted})
+}
+
 // GetProductByIDInternal retrieves internal product details
 func (ctrl *ProductController) GetProductByIDInternal(c *gin.Context) {
 	id := c.Param("id")
@@ -272,61 +317,4 @@ func (ctrl *ProductController) GetProductByIDInternal(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, productDTO)
-}
-
-// Helper functions
-
-func handleServiceError(c *gin.Context, err error, notFoundMsg string) {
-	if errors.Is(err, ErrNotFound) || strings.Contains(err.Error(), "not found") {
-		c.JSON(http.StatusNotFound, gin.H{"error": notFoundMsg})
-		return
-	}
-	zap.L().Error("Service error", zap.Error(err))
-	c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
-}
-
-func handleCreateError(c *gin.Context, err error) {
-	zap.L().Error("Service failed to create product", zap.Error(err))
-	if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "already exists") {
-		c.JSON(http.StatusConflict, gin.H{"error": "Product with this SKU already exists"})
-		return
-	}
-	c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create product"})
-}
-
-func buildServiceParams(page, perPage int, filters *ProductFilters) services.ListProductsParams {
-	params := services.ListProductsParams{
-		Page:    page,
-		PerPage: perPage,
-		Sort:    filters.SortParam,
-	}
-
-	if filters.IsFeaturedParsed != nil {
-		params.IsFeatured = filters.IsFeaturedParsed
-	}
-	if len(filters.CategoryIDs) > 0 {
-		params.CategoryID = filters.CategoryIDs
-	}
-	if filters.MinPrice != nil {
-		params.MinPrice = filters.MinPrice
-	}
-	if filters.MaxPrice != nil {
-		params.MaxPrice = filters.MaxPrice
-	}
-
-	return params
-}
-
-func buildProductListResponse(products []*models.Product, total int64, page, perPage int) map[string]interface{} {
-	totalPages := int((total + int64(perPage) - 1) / int64(perPage))
-
-	return map[string]interface{}{
-		"products": products,
-		"meta": map[string]interface{}{
-			"page":       page,
-			"perPage":    perPage,
-			"total":      total,
-			"totalPages": totalPages,
-		},
-	}
 }
