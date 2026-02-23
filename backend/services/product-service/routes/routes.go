@@ -66,6 +66,9 @@ func registerProductRoutes(
 		products.POST("/bulk", bulkHandler.CreateBulkProducts)             // Import CSV (sync/async)
 		products.GET("/bulk/jobs/:id", bulkHandler.GetBulkImportJobStatus) // Get job status
 
+		// Bulk delete operations
+		products.POST("/bulk/delete", productCtrl.BulkDeleteProducts) // Delete multiple products
+
 		// Internal service-to-service endpoint
 		products.GET("/internal/:id", productCtrl.GetProductByIDInternal)
 	}
