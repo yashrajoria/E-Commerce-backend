@@ -1,5 +1,5 @@
 .env
-Dockerfile
+# Dockerfile
 # Environment files
 .env
 .env.*
@@ -70,9 +70,9 @@ node_modules/
 !services/*/Dockerfile
 !services/*/.dockerignore
 
-Dockerfile
-Dockerfile.prod
-docker-compose.yml
+# Dockerfile
+# Dockerfile.prod
+# docker-compose.yml
 .dockerignore
 *.toml
 docker-compose.prod.yml
@@ -80,16 +80,8 @@ docker-compose.prod.yml
 /tmp/
 .env.example
 *.tmp
-# ...existing code...
-
-# Ignore temporary files
-*.tmp
 *.temp
 tmp/
 tmp-*/
-*~        # editor backup files
-*.swp
 *.swx
 *.bak
-# optional logs
-*.log
