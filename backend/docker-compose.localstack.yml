@@ -72,7 +72,7 @@ services:
       - USE_LOCALSTACK=true
       - LOCALSTACK_ENDPOINT=http://localstack:4566
       # Disable hardcoded CLOUDWATCH_ENABLED=true from the base file in local dev
-      - CLOUDWATCH_ENABLED=true
+      - CLOUDWATCH_ENABLED=false
     depends_on:
       localstack:
         condition: service_healthy

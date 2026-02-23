@@ -17,7 +17,7 @@ services:
       retries: 10
       start_period: 10s
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
     networks:
       - ecommerce-network
 
@@ -57,12 +57,6 @@ services:
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
-      - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
-      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
-      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
-      - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
-      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
-      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
     depends_on:
       postgres:
         condition: service_healthy
@@ -86,9 +80,9 @@ services:
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_REGION=${AWS_REGION}
       - AWS_EC2_METADATA_DISABLED=true
-      - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED}
-      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP}
-      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE}
+      - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
+      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
+      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
     depends_on:
       postgres:
         condition: service_healthy
@@ -143,9 +137,9 @@ services:
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_REGION=${AWS_REGION}
       - AWS_EC2_METADATA_DISABLED=true
-      - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED}
-      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP}
-      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE}
+      - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
+      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
+      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
     depends_on:
       postgres:
         condition: service_healthy
