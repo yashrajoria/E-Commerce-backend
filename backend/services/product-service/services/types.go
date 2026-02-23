@@ -33,6 +33,16 @@ type ProductInternalDTO struct {
 	Stock int
 }
 
+// BulkDeleteRequest describes options to delete products in bulk
+type BulkDeleteRequest struct {
+	// IDs explicitly deleted (UUIDs)
+	IDs []uuid.UUID
+	// Delete products that belong to any of these category IDs
+	CategoryIDs []uuid.UUID
+	// If true, delete all products (ignores other fields)
+	DeleteAll bool
+}
+
 // CategoryCreateRequest is the request payload for creating a category
 type CategoryCreateRequest struct {
 	Name        string   `json:"name" validate:"required"`
