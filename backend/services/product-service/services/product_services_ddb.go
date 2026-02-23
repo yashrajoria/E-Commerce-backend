@@ -242,6 +242,61 @@ func (s *ProductServiceDDB) DeleteProduct(ctx context.Context, id uuid.UUID) (in
 	return 1, nil
 }
 
+// BulkDeleteProducts deletes products by IDs, by category membership, or all products when requested.
+func (s *ProductServiceDDB) BulkDeleteProducts(ctx context.Context, req BulkDeleteRequest) (int64, error) {
+	// If DeleteAll, fetch all product IDs
+	var idsToDelete []uuid.UUID
+	if req.DeleteAll {
+		products, err := s.productRepo.Find(ctx, nil, 0, 0)
+		if err != nil {
+			return 0, fmt.Errorf("failed to fetch products for delete-all: %w", err)
+		}
+		for _, p := range products {
+			idsToDelete = append(idsToDelete, p.ID)
+		}
+	} else {
+		// Add explicit IDs
+		idsSet := make(map[string]uuid.UUID)
+		for _, id := range req.IDs {
+			idsSet[id.String()] = id
+		}
+
+		// If categories provided, scan products and add matches
+		if len(req.CategoryIDs) > 0 {
+			// Fetch all products (Find currently does table scan)
+			products, err := s.productRepo.Find(ctx, nil, 0, 0)
+			if err != nil {
+				return 0, fmt.Errorf("failed to fetch products for category delete: %w", err)
+			}
+			for _, p := range products {
+				for _, cat := range p.CategoryIDs {
+					for _, target := range req.CategoryIDs {
+						if cat == target {
+							idsSet[p.ID.String()] = p.ID
+							break
+						}
+					}
+				}
+			}
+		}
+
+		for _, v := range idsSet {
+			idsToDelete = append(idsToDelete, v)
+		}
+	}
+
+	if len(idsToDelete) == 0 {
+		return 0, nil
+	}
+
+	// Perform batch delete via repo
+	if err := s.productRepo.DeleteMany(ctx, idsToDelete); err != nil {
+		return 0, fmt.Errorf("failed to delete products: %w", err)
+	}
+
+	return int64(len(idsToDelete)), nil
+}
+
 func (s *ProductServiceDDB) GetProductInternal(ctx context.Context, id uuid.UUID) (*ProductInternalDTO, error) {
 	product, err := s.productRepo.FindByID(ctx, id)
 	if err != nil {

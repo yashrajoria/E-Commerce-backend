@@ -1,0 +1,194 @@
+name: CI - ShopSwift Backend
+
+on:
+  push:
+    branches: [main]
+  workflow_run:
+    workflows: ["Terraform"]
+    types:
+      - completed
+
+jobs:
+  build-and-test:
+    name: Build and test services
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        service:
+          - auth-service
+          - bff-service
+          - cart-service
+          - inventory-service
+          - order-service
+          - payment-service
+          - product-service
+          - user-service
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: backend/services/${{ matrix.service }}/go.sum
+
+      - name: Download modules
+        run: go mod download
+        working-directory: backend/services/${{ matrix.service }}
+
+      - name: Run tests
+        run: go test ./... -v
+        working-directory: backend/services/${{ matrix.service }}
+
+  docker-build-and-push:
+    name: Build and push Docker images
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        service:
+          - auth-service
+          - bff-service
+          - cart-service
+          - inventory-service
+          - order-service
+          - payment-service
+          - product-service
+          - user-service
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: "${{ secrets.DOCKERHUB_USERNAME}}"
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          # Use repository root as build context so service Dockerfiles
+          # can COPY files elsewhere in the repo (e.g., backend/pkg/aws).
+          context: .
+          file: ./backend/services/${{ matrix.service }}/Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME}}/${{ matrix.service }}:latest
+            ${{ secrets.DOCKERHUB_USERNAME}}/${{ matrix.service }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  deploy-to-ec2:
+    name: Deploy to EC2
+    needs: docker-build-and-push
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Sync .env from Terraform outputs
+      - name: Populate .env from Terraform outputs
+        run: |
+          chmod +x backend/infrastructure/aws/populate_env_from_terraform.sh
+          backend/infrastructure/aws/populate_env_from_terraform.sh
+
+      # Copy backend code and configs to EC2 for compose build
+      - name: Copy backend/services to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.INPUT_HOST }}
+          username: ${{ secrets.INPUT_USERNAME }}
+          key: ${{ secrets.INPUT_KEY }}
+          source: "backend/services"
+          target: "/home/${{ secrets.INPUT_USERNAME }}/E-Commerce-backend/backend"
+          strip_components: 1
+
+      - name: Copy backend/api-gateway to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.INPUT_HOST }}
+          username: ${{ secrets.INPUT_USERNAME }}
+          key: ${{ secrets.INPUT_KEY }}
+          source: "backend/api-gateway"
+          target: "/home/${{ secrets.INPUT_USERNAME }}/E-Commerce-backend/backend"
+          strip_components: 1
+
+      - name: Copy backend/docker-compose.yml to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.INPUT_HOST }}
+          username: ${{ secrets.INPUT_USERNAME }}
+          key: ${{ secrets.INPUT_KEY }}
+          source: "backend/docker-compose.yml"
+          target: "/home/${{ secrets.INPUT_USERNAME }}/E-Commerce-backend/backend"
+          strip_components: 1
+
+      - name: Copy backend/.env to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.INPUT_HOST }}
+          username: ${{ secrets.INPUT_USERNAME }}
+          key: ${{ secrets.INPUT_KEY }}
+          source: "backend/.env"
+          target: "/home/${{ secrets.INPUT_USERNAME }}/E-Commerce-backend/backend"
+          strip_components: 1
+
+      # Copy deploy script to EC2
+      - name: Copy deploy script to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.INPUT_HOST }}
+          username: ${{ secrets.INPUT_USERNAME }}
+          key: ${{ secrets.INPUT_KEY }}
+          source: "backend/infrastructure/aws/deploy_to_ec2.sh"
+          target: "/home/${{ secrets.INPUT_USERNAME }}"
+          strip_components: 3
+
+      # 2. Log in and run the script
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.INPUT_HOST }}
+          username: ${{ secrets.INPUT_USERNAME }}
+          key: ${{ secrets.INPUT_KEY }}
+          script: |
+            set -euo pipefail
+
+            # The script is now exactly where we expect it
+            DEPLOY_SCRIPT="/home/${{ secrets.INPUT_USERNAME }}/deploy_to_ec2.sh"
+
+            echo "🚀 Starting deployment script..."
+            if [ -f "${DEPLOY_SCRIPT}" ]; then
+              chmod +x "${DEPLOY_SCRIPT}"
+              bash "${DEPLOY_SCRIPT}"
+            else
+              echo "❌ Error: Script not found at ${DEPLOY_SCRIPT}"
+              ls -la /home/${{ secrets.INPUT_USERNAME }} # Debugging: show what IS there
+              exit 1
+            fi
+
+      # 3. Run remote health checks (api-gateway /health on the host)
+      - name: Post-deploy health check (remote)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.INPUT_HOST }}
+          username: ${{ secrets.INPUT_USERNAME }}
+          key: ${{ secrets.INPUT_KEY }}
+          script: |
+            set -euo pipefail
+            echo "[healthcheck] checking api-gateway at http://localhost:8080/health"
+            if curl -fS --max-time 10 http://localhost:8080/health; then
+              echo "[healthcheck] OK"
+            else
+              echo "[healthcheck] FAILED — dumping docker ps and logs for debugging"
+              docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+              exit 2
+            fi

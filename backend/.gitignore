@@ -5,6 +5,14 @@ Dockerfile
 .env.*
 !.env.example
 
+# Local env for local development (do NOT commit real secrets)
+.env.local
+
+# Terraform local vars and state
+infrastructure/aws/terraform/terraform.tfvars
+infrastructure/aws/terraform/terraform.tfstate*
+infrastructure/aws/terraform/.terraform/
+
 # Docker
 docker-compose.override.yml
 .docker/
@@ -21,7 +29,7 @@ docker-compose.override.yml
 /bin/
 /build/
 /dist/
-/pkg/
+
 
 # Go dependency directories
 /vendor/
@@ -58,6 +66,10 @@ node_modules/
 # Ignore local Dockerfile overrides in service folders
 **/Dockerfile.local
 
+# Allow service-level Dockerfiles and dockerignore files (we commit these)
+!services/*/Dockerfile
+!services/*/.dockerignore
+
 Dockerfile
 Dockerfile.prod
 docker-compose.yml
@@ -66,3 +78,18 @@ docker-compose.yml
 docker-compose.prod.yml
 .air.toml
 /tmp/
+.env.example
+*.tmp
+# ...existing code...
+
+# Ignore temporary files
+*.tmp
+*.temp
+tmp/
+tmp-*/
+*~        # editor backup files
+*.swp
+*.swx
+*.bak
+# optional logs
+*.log

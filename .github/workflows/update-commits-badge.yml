@@ -1,0 +1,41 @@
+name: Update Commits Badge
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  update-badge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Count commits
+        id: count
+        run: |
+          COMMIT_COUNT=$(git rev-list --count origin/main)
+          echo "count=$COMMIT_COUNT" >> $GITHUB_OUTPUT
+
+      - name: Update gist
+        env:
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+        run: |
+          cat > badge.json << EOF
+          {
+            "schemaVersion": 1,
+            "label": "commits",
+            "message": "${{ steps.count.outputs.count }}",
+            "color": "blue"
+          }
+          EOF
+          
+          curl -X PATCH \
+            -H "Authorization: token $GIST_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"files":{"commits-badge.json":{"content":"'$(cat badge.json | tr -d '\n')'"}}}' \
+            https://api.github.com/gists/68669c1c711655a41895753490af2898

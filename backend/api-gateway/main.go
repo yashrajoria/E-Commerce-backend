@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"go.uber.org/zap"
 )
 
@@ -63,6 +64,18 @@ func main() {
 	defer logger.Sync()
 	logger.Log.Info("Starting API Gateway...")
 
+	// --- CloudWatch (Logs + Metrics) ---
+	cwLogsClient, err := awspkg.NewCloudWatchLogsClient(context.Background(), "api-gateway")
+	if err != nil {
+		logger.Log.Warn("CloudWatch logs client init failed (non-fatal)", zap.Error(err))
+	}
+	_ = cwLogsClient
+
+	metricsClient, err := awspkg.NewMetricsClient(context.Background())
+	if err != nil {
+		logger.Log.Warn("CloudWatch metrics client init failed (non-fatal)", zap.Error(err))
+	}
+
 	r := gin.New()
 
 	// Configure Gin to handle trailing slashes
@@ -73,6 +86,24 @@ func main() {
 
 	r.Use(CORSMiddleware())
 
+	// CloudWatch HTTP metrics middleware
+	if metricsClient != nil && metricsClient.IsEnabled() {
+		r.Use(func(c *gin.Context) {
+			start := time.Now()
+			c.Next()
+			go func(path, method string, status int, dur time.Duration) {
+				mctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				dims := map[string]string{"Service": "api-gateway", "Method": method, "Path": path}
+				_ = metricsClient.RecordCount(mctx, awspkg.MetricHTTPRequests, dims)
+				_ = metricsClient.RecordLatency(mctx, awspkg.MetricHTTPLatency, dur, dims)
+				if status >= 400 {
+					_ = metricsClient.RecordCount(mctx, awspkg.MetricHTTPErrors, dims)
+				}
+			}(c.Request.URL.Path, c.Request.Method, c.Writer.Status(), time.Since(start))
+		})
+	}
+
 	// Health check / Test route for CORS
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "message": "API Gateway is running"})
@@ -81,17 +112,30 @@ func main() {
 	r.GET("/test-cors", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "CORS is working!"})
 	})
-	// Add this debug middleware
+	// Structured HTTP request logging → CloudWatch via Zap writer
 	r.Use(func(c *gin.Context) {
-		logger.Log.Info("🔍 DEBUG: Request received",
-			zap.String("method", c.Request.Method),
-			zap.String("path", c.Request.URL.Path),
-			zap.String("full_url", c.Request.URL.String()),
-		)
+		start := time.Now()
+		path := c.Request.URL.Path
+		method := c.Request.Method
 		c.Next()
-		logger.Log.Info("🔍 DEBUG: Response sent",
-			zap.Int("status", c.Writer.Status()),
-		)
+		latency := time.Since(start)
+		status := c.Writer.Status()
+		fields := []zap.Field{
+			zap.String("method", method),
+			zap.String("path", path),
+			zap.Int("status", status),
+			zap.Duration("latency", latency),
+			zap.String("client_ip", c.ClientIP()),
+			zap.Int("body_size", c.Writer.Size()),
+		}
+		switch {
+		case status >= 500:
+			logger.Log.Error("http_request", fields...)
+		case status >= 400:
+			logger.Log.Warn("http_request", fields...)
+		default:
+			logger.Log.Info("http_request", fields...)
+		}
 	})
 
 	routes.RegisterAllRoutes(r)

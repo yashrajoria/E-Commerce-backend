@@ -13,14 +13,13 @@ import (
 	"product-service/routes"
 	"product-service/services"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	awscfg "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
 	"github.com/joho/godotenv"
+	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	commonmw "github.com/yashrajoria/common/middleware"
 	"go.uber.org/zap"
 )
 
@@ -56,54 +55,13 @@ func main() {
 		zap.L().Fatal("Failed to load configuration", zap.Error(err))
 	}
 
-	// Initialize AWS configuration (LocalStack-compatible) using AWS SDK v2
-	awsRegion := os.Getenv("AWS_REGION")
-	if awsRegion == "" {
-		awsRegion = "us-east-1"
-	}
-	awsEndpoint := os.Getenv("AWS_ENDPOINT") // e.g. http://localstack:4566
-	awsS3Endpoint := os.Getenv("AWS_S3_ENDPOINT")
-	if awsS3Endpoint == "" {
-		awsS3Endpoint = awsEndpoint
-	}
-	awsAccessKey := os.Getenv("AWS_ACCESS_KEY_ID")
-	awsSecret := os.Getenv("AWS_SECRET_ACCESS_KEY")
-
-	// Log AWS configuration for debugging
-	zap.L().Info("AWS Configuration",
-		zap.String("AWS_ENDPOINT", awsEndpoint),
-		zap.String("AWS_S3_ENDPOINT", awsS3Endpoint),
-		zap.String("AWS_REGION", awsRegion),
-	)
-
-	cfgOpts := []func(*awscfg.LoadOptions) error{
-		awscfg.WithRegion(awsRegion),
-	}
-	if awsAccessKey != "" || awsSecret != "" {
-		cfgOpts = append(cfgOpts, awscfg.WithCredentialsProvider(
-			credentials.NewStaticCredentialsProvider(awsAccessKey, awsSecret, ""),
-		))
-	}
-	// Use custom endpoint resolver for LocalStack
-	if awsEndpoint != "" {
-		cfgOpts = append(cfgOpts, awscfg.WithEndpointResolverWithOptions(
-			aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
-				return aws.Endpoint{URL: awsEndpoint, SigningRegion: awsRegion}, nil
-			}),
-		))
-	}
-
-	awsCfg, err := awscfg.LoadDefaultConfig(context.Background(), cfgOpts...)
+	// Initialize AWS configuration using shared loader
+	awsCfg, err := awspkg.LoadAWSConfig(context.Background())
 	if err != nil {
 		zap.L().Fatal("Failed to load AWS config", zap.Error(err))
 	}
 
-	s3Client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
-		o.UsePathStyle = true
-		if awsS3Endpoint != "" {
-			o.BaseEndpoint = aws.String(awsS3Endpoint)
-		}
-	})
+	s3Client := s3.NewFromConfig(awsCfg)
 
 	// Presign client for generating presigned URLs
 	presignClient := s3.NewPresignClient(s3Client)
@@ -119,18 +77,10 @@ func main() {
 	if prefix == "" {
 		prefix = "products/"
 	}
-	endpoint := os.Getenv("AWS_S3_ENDPOINT")
-	if endpoint == "" {
-		endpoint = awsEndpoint
-	}
+	endpoint := ""
 	cloudfrontDomain := os.Getenv("AWS_CLOUDFRONT_DOMAIN")
 
-	// Initialize DynamoDB client with explicit endpoint for LocalStack
-	ddbClient := dynamodb.NewFromConfig(awsCfg, func(o *dynamodb.Options) {
-		if awsEndpoint != "" {
-			o.BaseEndpoint = aws.String(awsEndpoint)
-		}
-	})
+	ddbClient := dynamodb.NewFromConfig(awsCfg)
 
 	// Products table
 	ddbTable := os.Getenv("DDB_TABLE_PRODUCTS")
@@ -171,10 +121,30 @@ func main() {
 	}
 	services.StartBulkImportWorker(context.Background(), ProductRedis, productService, storageDir)
 
+	// --- CloudWatch (Logs + Metrics) ---
+	cwLogsClient, err := awspkg.NewCloudWatchLogsClient(context.Background(), "product-service")
+	if err != nil {
+		zap.L().Warn("CloudWatch logs client init failed (non-fatal)", zap.Error(err))
+	}
+	_ = cwLogsClient // available for future Zap WriteSyncer integration
+
+	metricsClient, err := awspkg.NewMetricsClient(context.Background())
+	if err != nil {
+		zap.L().Warn("CloudWatch metrics client init failed (non-fatal)", zap.Error(err))
+	}
+
 	// --- 3. HTTP Server & Middleware ---
 
 	r := gin.New()
 	r.Use(gin.Recovery()) // Recover from panics
+
+	// CloudWatch HTTP metrics middleware
+	if metricsClient != nil {
+		r.Use(commonmw.MetricsMiddleware(metricsClient, "product-service"))
+	}
+
+	// Structured HTTP request logging → CloudWatch via Zap writer
+	r.Use(commonmw.RequestLogger(logger))
 
 	// Add request timeout middleware
 	r.Use(func(c *gin.Context) {
@@ -184,12 +154,10 @@ func main() {
 		c.Next()
 	})
 
-	// Add a request logger middleware here if desired
-
 	// --- 4. Route Registration ---
 
 	// Register all application routes, passing in the controllers
-	routes.RegisterRoutes(r, productController, categoryController)
+	routes.RegisterRoutesLegacy(r, productController, categoryController)
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "OK"})

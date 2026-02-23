@@ -7,18 +7,23 @@ import (
 	"log"
 	"time"
 
+	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"github.com/yashrajoria/inventory-service/models"
 	"github.com/yashrajoria/inventory-service/repository"
 )
 
 // InventoryService handles business logic for inventory operations
 type InventoryService struct {
-	repo repository.InventoryRepository
+	repo          repository.InventoryRepository
+	metricsClient *awspkg.MetricsClient
 }
 
 // NewInventoryService creates a new InventoryService
-func NewInventoryService(repo repository.InventoryRepository) *InventoryService {
-	return &InventoryService{repo: repo}
+func NewInventoryService(repo repository.InventoryRepository, metricsClient *awspkg.MetricsClient) *InventoryService {
+	return &InventoryService{
+		repo:          repo,
+		metricsClient: metricsClient,
+	}
 }
 
 // GetStock returns the current inventory for a product
@@ -140,6 +145,23 @@ func (s *InventoryService) ReserveStock(ctx context.Context, req *models.Reserve
 			Requested:    item.Quantity,
 			IsSufficient: true,
 		})
+
+		// Emit metrics
+		if s.metricsClient != nil && s.metricsClient.IsEnabled() {
+			go func(productID string, quantity int) {
+				metricCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				dims := map[string]string{"ProductID": productID}
+				_ = s.metricsClient.RecordCount(metricCtx, awspkg.MetricInventoryReserved, dims)
+				_ = s.metricsClient.RecordValue(metricCtx, "InventoryReservedQuantity", float64(quantity), dims)
+
+				// Check for low stock after reservation
+				inv, err := s.repo.Get(metricCtx, productID)
+				if err == nil && inv.Available <= inv.Threshold && inv.Threshold > 0 {
+					_ = s.metricsClient.RecordCount(metricCtx, awspkg.MetricInventoryLow, dims)
+				}
+			}(item.ProductID, item.Quantity)
+		}
 	}
 
 	log.Printf("[InventoryService] Reserved stock for order=%s items=%d", req.OrderID, len(results))
@@ -155,6 +177,17 @@ func (s *InventoryService) ReleaseStock(ctx context.Context, req *models.Release
 			// Continue releasing other items even if one fails
 			continue
 		}
+
+		// Emit metrics
+		if s.metricsClient != nil && s.metricsClient.IsEnabled() {
+			go func(productID string, quantity int) {
+				metricCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				dims := map[string]string{"ProductID": productID}
+				_ = s.metricsClient.RecordCount(metricCtx, awspkg.MetricInventoryReleased, dims)
+				_ = s.metricsClient.RecordValue(metricCtx, "InventoryReleasedQuantity", float64(quantity), dims)
+			}(item.ProductID, item.Quantity)
+		}
 	}
 
 	log.Printf("[InventoryService] Released stock for order=%s items=%d", req.OrderID, len(req.Items))
@@ -168,6 +201,17 @@ func (s *InventoryService) ConfirmStock(ctx context.Context, req *models.Confirm
 			log.Printf("[InventoryService] Failed to confirm stock for product=%s qty=%d: %v",
 				item.ProductID, item.Quantity, err)
 			continue
+		}
+
+		// Emit metrics
+		if s.metricsClient != nil && s.metricsClient.IsEnabled() {
+			go func(productID string, quantity int) {
+				metricCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				dims := map[string]string{"ProductID": productID}
+				_ = s.metricsClient.RecordCount(metricCtx, awspkg.MetricInventoryConfirmed, dims)
+				_ = s.metricsClient.RecordValue(metricCtx, "InventoryConfirmedQuantity", float64(quantity), dims)
+			}(item.ProductID, item.Quantity)
 		}
 	}
 

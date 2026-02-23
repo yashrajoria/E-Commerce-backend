@@ -73,5 +73,7 @@ func (s *StripeService) ParseWebhook(r *http.Request) (stripe.Event, error) {
 	}
 	r.Body = ioutil.NopCloser(bytes.NewBuffer(payload))
 	sigHeader := r.Header.Get("Stripe-Signature")
-	return webhook.ConstructEvent(payload, sigHeader, s.WebhookKey)
+	return webhook.ConstructEventWithOptions(payload, sigHeader, s.WebhookKey, webhook.ConstructEventOptions{
+		IgnoreAPIVersionMismatch: true,
+	})
 }

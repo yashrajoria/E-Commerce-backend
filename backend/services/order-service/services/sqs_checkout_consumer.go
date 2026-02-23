@@ -19,15 +19,17 @@ type SQSCheckoutConsumer struct {
 	sqsPublisher    *aws_pkg.SQSConsumer // For sending payment requests
 	db              *gorm.DB
 	inventoryClient *InventoryClient
+	metricsClient   *aws_pkg.MetricsClient
 }
 
 // NewSQSCheckoutConsumer creates a new SQS-based checkout consumer
-func NewSQSCheckoutConsumer(sqsConsumer *aws_pkg.SQSConsumer, sqsPublisher *aws_pkg.SQSConsumer, db *gorm.DB, inventoryClient *InventoryClient) *SQSCheckoutConsumer {
+func NewSQSCheckoutConsumer(sqsConsumer *aws_pkg.SQSConsumer, sqsPublisher *aws_pkg.SQSConsumer, db *gorm.DB, inventoryClient *InventoryClient, metricsClient *aws_pkg.MetricsClient) *SQSCheckoutConsumer {
 	return &SQSCheckoutConsumer{
 		sqsConsumer:     sqsConsumer,
 		sqsPublisher:    sqsPublisher,
 		db:              db,
 		inventoryClient: inventoryClient,
+		metricsClient:   metricsClient,
 	}
 }
 
@@ -158,6 +160,17 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 
 	log.Printf("✅ order created id=%s user=%s items=%d total_amount=%d",
 		order.ID.String(), order.UserID.String(), validItems, order.Amount)
+
+	// Emit metrics
+	if c.metricsClient != nil && c.metricsClient.IsEnabled() {
+		go func() {
+			metricCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			dims := map[string]string{"Service": "order-service"}
+			_ = c.metricsClient.RecordCount(metricCtx, aws_pkg.MetricOrdersCreated, dims)
+			_ = c.metricsClient.RecordValue(metricCtx, "OrderAmount", float64(order.Amount), dims)
+		}()
+	}
 
 	// Send payment request to SQS
 	req := models.PaymentRequest{

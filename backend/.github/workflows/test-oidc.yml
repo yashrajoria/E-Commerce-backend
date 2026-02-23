@@ -1,0 +1,22 @@
+name: Test OIDC AssumeRole
+
+on:
+  workflow_dispatch:
+
+jobs:
+  assume-role:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC role
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: us-east-1
+
+      - name: Who am I
+        run: |
+          echo "Running sts get-caller-identity..."
+          aws sts get-caller-identity

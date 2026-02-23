@@ -16,6 +16,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	commonmw "github.com/yashrajoria/common/middleware"
 	"go.uber.org/zap"
 )
 
@@ -57,8 +59,28 @@ func main() {
 
 	// --- 3. HTTP Server & Middleware ---
 
+	// --- CloudWatch (Logs + Metrics) ---
+	cwLogsClient, err := awspkg.NewCloudWatchLogsClient(context.Background(), "auth-service")
+	if err != nil {
+		zap.L().Warn("CloudWatch logs client init failed (non-fatal)", zap.Error(err))
+	}
+	_ = cwLogsClient
+
+	metricsClient, err := awspkg.NewMetricsClient(context.Background())
+	if err != nil {
+		zap.L().Warn("CloudWatch metrics client init failed (non-fatal)", zap.Error(err))
+	}
+
 	r := gin.New()
 	r.Use(gin.Recovery()) // Panic protection
+
+	// CloudWatch HTTP metrics middleware
+	if metricsClient != nil {
+		r.Use(commonmw.MetricsMiddleware(metricsClient, "auth-service"))
+	}
+
+	// Structured HTTP request logging → CloudWatch via Zap writer
+	r.Use(commonmw.RequestLogger(logger))
 
 	// Add request timeout middleware
 	r.Use(func(c *gin.Context) {

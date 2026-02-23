@@ -1,0 +1,16 @@
+bin
+vendor
+*.log
+.env*
+.git
+.github
+node_modules
+**/*.cache
+**/*_test.go
+bin
+.git
+vendor
+node_modules
+*.log
+*.md
+*.tmp

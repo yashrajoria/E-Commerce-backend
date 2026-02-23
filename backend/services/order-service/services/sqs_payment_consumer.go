@@ -16,14 +16,16 @@ type SQSPaymentConsumer struct {
 	sqsConsumer     *aws_pkg.SQSConsumer
 	db              *gorm.DB
 	inventoryClient *InventoryClient
+	metricsClient   *aws_pkg.MetricsClient
 }
 
 // NewSQSPaymentConsumer creates a new SQS-based payment event consumer
-func NewSQSPaymentConsumer(sqsConsumer *aws_pkg.SQSConsumer, db *gorm.DB, inventoryClient *InventoryClient) *SQSPaymentConsumer {
+func NewSQSPaymentConsumer(sqsConsumer *aws_pkg.SQSConsumer, db *gorm.DB, inventoryClient *InventoryClient, metricsClient *aws_pkg.MetricsClient) *SQSPaymentConsumer {
 	return &SQSPaymentConsumer{
 		sqsConsumer:     sqsConsumer,
 		db:              db,
 		inventoryClient: inventoryClient,
+		metricsClient:   metricsClient,
 	}
 }
 
@@ -68,9 +70,29 @@ func (c *SQSPaymentConsumer) handleMessage(ctx context.Context, body string) err
 	case "payment_succeeded":
 		c.updateOrderStatusWithTime(evt.OrderID, "paid", &now, nil)
 		c.confirmInventory(ctx, evt.OrderID)
+		// Emit metrics
+		if c.metricsClient != nil && c.metricsClient.IsEnabled() {
+			go func() {
+				metricCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				dims := map[string]string{"Service": "order-service"}
+				_ = c.metricsClient.RecordCount(metricCtx, aws_pkg.MetricPaymentSucceeded, dims)
+				_ = c.metricsClient.RecordCount(metricCtx, aws_pkg.MetricOrdersCompleted, dims)
+			}()
+		}
 	case "payment_failed":
 		c.updateOrderStatusWithTime(evt.OrderID, "payment_failed", nil, &now)
 		c.releaseInventory(ctx, evt.OrderID)
+		// Emit metrics
+		if c.metricsClient != nil && c.metricsClient.IsEnabled() {
+			go func() {
+				metricCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				dims := map[string]string{"Service": "order-service"}
+				_ = c.metricsClient.RecordCount(metricCtx, aws_pkg.MetricPaymentFailed, dims)
+				_ = c.metricsClient.RecordCount(metricCtx, aws_pkg.MetricOrdersFailed, dims)
+			}()
+		}
 	case "checkout_session_created":
 		log.Printf("ℹ️  [OrderService][SQSPaymentConsumer] checkout session created for order=%s", evt.OrderID)
 	case "checkout_session_failed":
