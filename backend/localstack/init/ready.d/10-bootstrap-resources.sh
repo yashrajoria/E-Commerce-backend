@@ -18,14 +18,14 @@ awslocal dynamodb create-table \
 
 awslocal dynamodb create-table \
     --table-name ${DDB_TABLE_CATEGORIES:-Categories} \
-    --attribute-definitions AttributeName=category_id,AttributeType=S \
-    --key-schema AttributeName=category_id,KeyType=HASH \
+    --attribute-definitions AttributeName=id,AttributeType=S \
+    --key-schema AttributeName=id,KeyType=HASH \
     --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 || true
 
 awslocal dynamodb create-table \
     --table-name ${DDB_TABLE_INVENTORY:-Inventory} \
-    --attribute-definitions AttributeName=product_id,AttributeType=S \
-    --key-schema AttributeName=product_id,KeyType=HASH \
+    --attribute-definitions AttributeName=id,AttributeType=S \
+    --key-schema AttributeName=id,KeyType=HASH \
     --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 || true
 
 # 3. SNS Topics
