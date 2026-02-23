@@ -2,6 +2,7 @@ package aws
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -68,7 +69,8 @@ func (c *CloudWatchLogsClient) ensureLogGroup(ctx context.Context) error {
 	})
 	if err != nil {
 		// ResourceAlreadyExistsException is expected and OK
-		if _, ok := err.(*types.ResourceAlreadyExistsException); !ok {
+		var existsErr *types.ResourceAlreadyExistsException
+		if !errors.As(err, &existsErr) {
 			return err
 		}
 	}
