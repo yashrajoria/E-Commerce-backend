@@ -78,10 +78,6 @@ func JWTMiddleware() gin.HandlerFunc {
 		c.Set("email", email)
 		c.Set("role", role)
 
-		c.Request.Header.Set("X-User-ID", userID)
-		c.Request.Header.Set("X-User-Email", email)
-		c.Request.Header.Set("X-User-Role", role)
-
 		c.Next()
 	}
 }
