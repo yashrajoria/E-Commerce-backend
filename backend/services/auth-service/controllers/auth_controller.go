@@ -180,10 +180,27 @@ func (ctrl *AuthController) GetAuthStatus(c *gin.Context) {
 	if userID == "" {
 		// If not in context, try headers (forwarded by API gateway)
 		userID = c.GetHeader("X-User-ID")
+		if userID == "" {
+			if v, err := c.Cookie("user_id"); err == nil && v != "" {
+				userID = v
+			}
+		}
 	}
 
 	email := c.GetHeader("X-User-Email")
 	role := c.GetHeader("X-User-Role")
+
+	// Fallback to cookies if headers not present
+	if email == "" {
+		if v, err := c.Cookie("user_email"); err == nil && v != "" {
+			email = v
+		}
+	}
+	if role == "" {
+		if v, err := c.Cookie("user_role"); err == nil && v != "" {
+			role = v
+		}
+	}
 
 	if userID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Not authenticated"})
