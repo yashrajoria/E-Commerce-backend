@@ -229,6 +229,33 @@ func (cc *CartController) Checkout(c *gin.Context) {
 		}
 	}
 
+	// Validate products exist via product-service internal API before publishing
+	invalid := []string{}
+	productServiceURL := os.Getenv("PRODUCT_SERVICE_URL")
+	if productServiceURL == "" {
+		productServiceURL = "http://product-service:8082"
+	}
+	// simple per-item check
+	for _, it := range cart.Items {
+		// GET /products/internal/:id
+		resp, err := http.Get(productServiceURL + "/products/internal/" + it.ProductID)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			invalid = append(invalid, it.ProductID)
+			continue
+		}
+		// drain body
+		_ = resp.Body.Close()
+	}
+
+	if len(invalid) > 0 {
+		// return a clear frontend-visible error listing invalid items
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":            "some items in cart are invalid or missing",
+			"invalid_product_ids": invalid,
+		})
+		return
+	}
+
 	orderID := uuid.New().String()
 	// Build SNS payload
 	event := models.CheckoutEvent{
