@@ -61,6 +61,14 @@ func (c *PaymentRequestConsumer) Start(ctx context.Context) {
 			return err
 		}
 
+		// Idempotency: if idempotency key present, check existing payment
+		if req.IdempotencyKey != "" {
+			if existing, err := c.repo.GetPaymentByIdempotencyKey(ctx, req.IdempotencyKey); err == nil && existing != nil {
+				c.logger.Info("Payment already exists for idempotency key, skipping", zap.String("idempotency_key", req.IdempotencyKey), zap.String("payment_id", existing.Payment_ID.String()))
+				return nil
+			}
+		}
+
 		// Create payment record
 		payment := models.Payment{
 			Payment_ID: uuid.New(),
@@ -70,6 +78,9 @@ func (c *PaymentRequestConsumer) Start(ctx context.Context) {
 			Currency:   "usd",
 			Status:     "pending",
 			CreatedAt:  time.Now().UTC(),
+		}
+		if req.IdempotencyKey != "" {
+			payment.IdempotencyKey = &req.IdempotencyKey
 		}
 
 		if err := c.repo.CreatePayment(ctx, &payment); err != nil {
