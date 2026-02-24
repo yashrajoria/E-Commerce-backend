@@ -13,6 +13,8 @@ import (
 	"bff-service/controllers"
 	"bff-service/routes"
 
+	"github.com/redis/go-redis/v9"
+
 	"github.com/gin-gonic/gin"
 	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"go.uber.org/zap"
@@ -47,7 +49,22 @@ func main() {
 	}
 
 	gateway := clients.NewGatewayClient(cfg.APIGatewayURL, timeout)
-	controller := controllers.NewBFFController(gateway)
+
+	// Initialize Redis (optional - for idempotency)
+	var redisClient *redis.Client
+	if addr := os.Getenv("REDIS_URL"); addr != "" {
+		opts, err := redis.ParseURL(addr)
+		if err != nil {
+			log.Fatalf("invalid REDIS_URL: %v", err)
+		}
+		redisClient = redis.NewClient(opts)
+		if err := redisClient.Ping(context.Background()).Err(); err != nil {
+			log.Fatalf("failed to connect to Redis: %v", err)
+		}
+		log.Println("Connected to Redis (BFF)")
+	}
+
+	controller := controllers.NewBFFController(gateway, redisClient)
 
 	r := gin.New()
 	r.Use(gin.Recovery())
