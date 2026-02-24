@@ -275,8 +275,12 @@ services:
       - CLOUDWATCH_ENABLED=true
       - CLOUDWATCH_LOG_GROUP=/ecommerce/services
       - CLOUDWATCH_NAMESPACE=ECommerce
+      - REDIS_URL=redis://redis:6379/0
+      - REQUEST_TIMEOUT=40s
+      - API_GATEWAY_URL=http://api-gateway:8080
     depends_on:
       - api-gateway
+      - redis
     networks:
       - ecommerce-network
 
@@ -288,6 +292,18 @@ services:
       - .env
     depends_on:
       - api-gateway
+    networks:
+      - ecommerce-network
+
+  docs:
+    image: swaggerapi/swagger-ui:latest
+    restart: unless-stopped
+    ports:
+      - "8089:8080"
+    volumes:
+      - ./docs/openapi.yaml:/tmp/openapi.yaml:ro
+    environment:
+      - SWAGGER_JSON=/tmp/openapi.yaml
     networks:
       - ecommerce-network
 

@@ -55,6 +55,9 @@ services:
     environment:
       - USE_LOCALSTACK=true
       - LOCALSTACK_ENDPOINT=http://localstack:4566
+      - SMTP_EMAIL=${SMTP_EMAIL:-test@example.com}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-password}
+      - SMTP_SERVER=${SMTP_SERVER:-smtp.gmail.com}
     depends_on:
       localstack:
         condition: service_healthy
@@ -63,6 +66,9 @@ services:
     environment:
       - USE_LOCALSTACK=true
       - LOCALSTACK_ENDPOINT=http://localstack:4566
+      - SMTP_EMAIL=${SMTP_EMAIL:-test@example.com}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-password}
+      - SMTP_SERVER=${SMTP_SERVER:-smtp.gmail.com}
     depends_on:
       localstack:
         condition: service_healthy
