@@ -239,6 +239,8 @@ paths:
     post:
       tags: [BFF]
       summary: Add items to cart
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         $ref: "#/components/requestBodies/AddItemsRequest"
       responses:
@@ -291,6 +293,28 @@ paths:
     post:
       tags: [BFF]
       summary: Checkout cart
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Checkout started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /bff/checkout:
+    post:
+      tags: [BFF]
+      summary: (alias) Checkout cart - same behavior as /bff/cart/checkout
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: Checkout started
@@ -719,6 +743,8 @@ paths:
     post:
       tags: [Gateway, Cart Service]
       summary: Checkout cart
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: Checkout started
@@ -908,7 +934,22 @@ components:
       description: Sorting key for the product list.
       schema:
         type: string
-        enum: [price_asc, price_desc, created_at_asc, created_at_desc, name_asc, name_desc]
+        enum:
+          [
+            price_asc,
+            price_desc,
+            created_at_asc,
+            created_at_desc,
+            name_asc,
+            name_desc,
+          ]
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: Idempotency key to make POST requests idempotent. Use a unique value per logical operation.
+      schema:
+        type: string
 
   requestBodies:
     LoginRequest:
@@ -1272,7 +1313,8 @@ components:
         $ref: "#/components/schemas/Category"
     CreateProductRequest:
       type: object
-      required: [name, description, brand, sku, price, quantity, category, images]
+      required:
+        [name, description, brand, sku, price, quantity, category, images]
       properties:
         name:
           type: string
@@ -1343,6 +1385,12 @@ components:
         updated_at:
           type: string
           format: date-time
+      example:
+        user_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        items:
+          - product_id: "8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1"
+            quantity: 2
+        updated_at: "2026-02-24T12:34:56Z"
     AddItemsRequest:
       type: object
       required: [items]
@@ -1351,6 +1399,12 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/CartItem"
+      example:
+        items:
+          - product_id: "8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1"
+            quantity: 1
+          - product_id: "9c2a1c4b-8c5c-4a59-8f1b-1a2b3c4d5e6f"
+            quantity: 3
     CheckoutResponse:
       type: object
       properties:
@@ -1359,6 +1413,14 @@ components:
           format: uuid
         status:
           type: string
+        checkout_url:
+          type: string
+          nullable: true
+          description: Optional redirect URL to a hosted checkout session (may be null if payment is pending or async processing is in progress).
+      example:
+        order_id: "f1e2d3c4-b5a6-7890-1234-abcdef123456"
+        status: "pending"
+        checkout_url: "https://checkout.stripe.com/pay/cs_test_XXXXXXXXXXXXXXXX"
     CreateOrderRequest:
       type: object
       required: [items]
