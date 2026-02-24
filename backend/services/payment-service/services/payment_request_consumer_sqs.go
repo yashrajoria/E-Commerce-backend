@@ -91,7 +91,9 @@ func (c *PaymentRequestConsumer) Start(ctx context.Context) {
 		c.logger.Info("Payment record created", zap.String("payment_id", payment.Payment_ID.String()))
 
 		// Create Stripe Checkout Session (provides a hosted URL for the user to complete payment)
-		sess, err := c.stripeSvc.CreateCheckoutSession(int64(req.Amount*100), "usd", req.OrderID, req.UserID)
+		// Amount is already in the smallest currency unit (cents for USD) as set by the order-service.
+		// Do NOT multiply by 100 here; prices are stored and passed in cents throughout the system.
+		sess, err := c.stripeSvc.CreateCheckoutSession(int64(req.Amount), "usd", req.OrderID, req.UserID)
 		if err != nil {
 			c.logger.Error("Failed to create Stripe Checkout Session", zap.Error(err))
 			payment.Status = "failed"
