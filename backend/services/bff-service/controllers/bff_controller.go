@@ -16,7 +16,7 @@ import (
 // SQS consumer to create the payment record + Stripe checkout session.
 const (
 	checkoutPollInterval = 700 * time.Millisecond
-	checkoutPollTimeout  = 15 * time.Second
+	checkoutPollTimeout  = 35 * time.Second
 )
 
 type BFFController struct {
@@ -155,6 +155,10 @@ func (b *BFFController) Profile(c *gin.Context) {
 
 func (b *BFFController) Proxy(method, path string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// ensure backward-compatibility: if downstream expects X-User-ID
+		// but the frontend now provides a cookie, copy it into the header.
+		ensureUserIDHeader(c)
+
 		bodyBytes, err := clients.ReadJSONBody(c.Request)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
@@ -251,6 +255,10 @@ func (b *BFFController) PaymentStatusByOrderID(c *gin.Context) {
 func (b *BFFController) Checkout(c *gin.Context) {
 	ctx := c.Request.Context()
 
+	// ensure downstream services receive a user identifier when the
+	// frontend supplies it via cookie instead of the X-User-ID header.
+	ensureUserIDHeader(c)
+
 	// Idempotency key required to avoid duplicate orders
 	idemKey := c.GetHeader("Idempotency-Key")
 	if idemKey == "" {
@@ -333,8 +341,33 @@ func (b *BFFController) Checkout(c *gin.Context) {
 		}
 	}
 
-	// Timeout — return order_id so the frontend can poll itself
+	// Timeout — try calling payment/create-checkout directly as a fallback.
+	// This handles the case where the SQS consumer created the payment record but
+	// Stripe session creation failed, leaving checkout_url unset.
 	if finalStatus.CheckoutURL == nil || *finalStatus.CheckoutURL == "" {
+		bodyPayload, _ := json.Marshal(map[string]string{"order_id": cartResp.OrderID})
+		createResp, err := b.gateway.Do(ctx, http.MethodPost, "/payment/create-checkout",
+			nil, c.Request.Header, clients.BodyFromBytes(bodyPayload))
+		if err == nil {
+			var createResult struct {
+				CheckoutURL string `json:"checkout_url"`
+				SessionID   string `json:"session_id"`
+			}
+			if decErr := clients.DecodeJSON(createResp, &createResult); decErr == nil && createResult.CheckoutURL != "" {
+				out, _ := json.Marshal(map[string]string{
+					"order_id":     cartResp.OrderID,
+					"session_id":   createResult.SessionID,
+					"checkout_url": createResult.CheckoutURL,
+				})
+				if b.redisClient != nil {
+					_ = b.redisClient.SetNX(ctx, "idem:bff:"+idemKey, out, 15*time.Minute).Err()
+				}
+				c.Data(http.StatusOK, "application/json", out)
+				return
+			}
+		}
+
+		// All attempts exhausted — return accepted so frontend can poll
 		c.JSON(http.StatusAccepted, gin.H{
 			"order_id":     cartResp.OrderID,
 			"status":       "PENDING_PAYMENT",
@@ -368,4 +401,15 @@ func errorString(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+// ensureUserIDHeader copies the `user_id` cookie into the `X-User-ID` header
+// when the header is missing. This provides a small compatibility shim while
+// services migrate from header-based identity to cookie/session-based auth.
+func ensureUserIDHeader(c *gin.Context) {
+	if c.GetHeader("X-User-ID") == "" {
+		if cookie, err := c.Request.Cookie("user_id"); err == nil && cookie != nil {
+			c.Request.Header.Set("X-User-ID", cookie.Value)
+		}
+	}
 }
