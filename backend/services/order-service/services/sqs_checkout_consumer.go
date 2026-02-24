@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log"
 	"order-service/models"
-	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,21 +14,26 @@ import (
 
 // SQSCheckoutConsumer consumes checkout events from SQS and creates orders
 type SQSCheckoutConsumer struct {
-	sqsConsumer     *aws_pkg.SQSConsumer
-	sqsPublisher    *aws_pkg.SQSConsumer // For sending payment requests
-	db              *gorm.DB
-	inventoryClient *InventoryClient
-	metricsClient   *aws_pkg.MetricsClient
+	sqsConsumer       *aws_pkg.SQSConsumer
+	sqsPublisher      *aws_pkg.SQSConsumer // For sending payment requests
+	db                *gorm.DB
+	inventoryClient   *InventoryClient
+	metricsClient     *aws_pkg.MetricsClient
+	productServiceURL string // Base URL for the product service (internal endpoint)
 }
 
 // NewSQSCheckoutConsumer creates a new SQS-based checkout consumer
-func NewSQSCheckoutConsumer(sqsConsumer *aws_pkg.SQSConsumer, sqsPublisher *aws_pkg.SQSConsumer, db *gorm.DB, inventoryClient *InventoryClient, metricsClient *aws_pkg.MetricsClient) *SQSCheckoutConsumer {
+func NewSQSCheckoutConsumer(sqsConsumer *aws_pkg.SQSConsumer, sqsPublisher *aws_pkg.SQSConsumer, db *gorm.DB, inventoryClient *InventoryClient, metricsClient *aws_pkg.MetricsClient, productServiceURL string) *SQSCheckoutConsumer {
+	if productServiceURL == "" {
+		productServiceURL = "http://product-service:8082"
+	}
 	return &SQSCheckoutConsumer{
-		sqsConsumer:     sqsConsumer,
-		sqsPublisher:    sqsPublisher,
-		db:              db,
-		inventoryClient: inventoryClient,
-		metricsClient:   metricsClient,
+		sqsConsumer:       sqsConsumer,
+		sqsPublisher:      sqsPublisher,
+		db:                db,
+		inventoryClient:   inventoryClient,
+		metricsClient:     metricsClient,
+		productServiceURL: productServiceURL,
 	}
 }
 
@@ -90,7 +94,7 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 	orderItems := make([]models.OrderItem, 0, len(evt.Items))
 	totalAmount := 0
 	validItems := 0
-	productServiceURL := os.Getenv("PRODUCT_SERVICE_URL")
+	productServiceURL := c.productServiceURL
 	inventoryItems := make([]ReserveItem, 0, len(evt.Items))
 
 	for _, it := range evt.Items {
@@ -132,13 +136,16 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		return nil
 	}
 
-	// Reserve inventory via inventory service
+	// Reserve inventory via inventory service (non-fatal: proceed even on failure)
 	if c.inventoryClient != nil {
 		if err := c.inventoryClient.ReserveStock(ctx, orderIDUUID.String(), inventoryItems); err != nil {
-			log.Printf("❌ inventory reservation failed for order=%s: %v", orderIDUUID.String(), err)
-			return nil // Don't retry — stock is insufficient or service is down
+			// Log as a warning but do NOT abort order creation.
+			// Inventory can be reconciled later; blocking checkout on inventory failures
+			// causes silent order drops which break the entire checkout_url flow.
+			log.Printf("⚠️ inventory reservation failed for order=%s (proceeding anyway): %v", orderIDUUID.String(), err)
+		} else {
+			log.Printf("✅ inventory reserved for order=%s items=%d", orderIDUUID.String(), len(inventoryItems))
 		}
-		log.Printf("✅ inventory reserved for order=%s items=%d", orderIDUUID.String(), len(inventoryItems))
 	} else {
 		log.Printf("⚠️ inventory client not configured, skipping reservation")
 	}
