@@ -16,6 +16,9 @@ func RegisterAllRoutes(r *gin.Engine) {
 		}
 	}
 
+	// BFF forwarding
+	bff := forwardTo("http://bff-service:8088/bff")
+
 	// ===== PUBLIC ROUTES =====
 	public := r.Group("/")
 
@@ -28,6 +31,10 @@ func RegisterAllRoutes(r *gin.Engine) {
 	categories := forwardTo("http://product-service:8082/categories")
 	public.GET("/categories", categories)
 	public.GET("/categories/*any", categories)
+
+	// BFF public routes (pass-through to bff-service)
+	public.GET("/bff", bff)
+	public.GET("/bff/*any", bff)
 
 	// ===== AUTH ROUTES (PUBLIC) =====
 	// ===== PROTECTED ROUTES (JWT Required) =====
@@ -88,6 +95,12 @@ func RegisterAllRoutes(r *gin.Engine) {
 	protected.POST("/payment", payment)
 	protected.POST("/payment/*any", payment)
 	protected.GET("/payment/*any", payment)
+
+	// BFF: forward POSTs (protected) so POST actions (cart add/checkout) reach bff-service
+	protected.POST("/bff/*any", bff)
+	protected.POST("/bff", bff)
+
+	// Note: public GETs for `/bff` remain handled above so public pages still work.
 
 	// Inventory routes
 	inventory := forwardTo("http://inventory-service:8084/inventory")
