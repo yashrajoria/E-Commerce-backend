@@ -107,9 +107,6 @@ func RegisterAllRoutes(r *gin.Engine) {
 	// Protected: read & operations
 	protected.GET("/inventory/:productId", inventory)
 	protected.POST("/inventory/check", inventory)
-	protected.POST("/inventory/reserve", inventory)
-	protected.POST("/inventory/confirm", inventory)
-	protected.POST("/inventory/release", inventory)
 	// Admin: create & update stock
 	admin.POST("/inventory", inventory)
 	admin.PUT("/inventory/:productId", inventory)
