@@ -78,6 +78,15 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		return nil
 	}
 
+	// Idempotency: if CheckoutEvent contains an idempotency key, check DB for existing order
+	if evt.IdempotencyKey != "" {
+		var existing models.Order
+		if err := c.db.WithContext(ctx).Where("idempotency_key = ?", evt.IdempotencyKey).First(&existing).Error; err == nil {
+			log.Printf("⚠️ order already exists for idempotency_key=%s order_id=%s, skipping creation", evt.IdempotencyKey, existing.ID.String())
+			return nil
+		}
+	}
+
 	orderItems := make([]models.OrderItem, 0, len(evt.Items))
 	totalAmount := 0
 	validItems := 0
@@ -143,6 +152,9 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
+	if evt.IdempotencyKey != "" {
+		order.IdempotencyKey = &evt.IdempotencyKey
+	}
 
 	err = c.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&order).Error; err != nil {
@@ -174,9 +186,10 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 
 	// Send payment request to SQS
 	req := models.PaymentRequest{
-		OrderID: order.ID.String(),
-		UserID:  order.UserID.String(),
-		Amount:  order.Amount,
+		OrderID:        order.ID.String(),
+		UserID:         order.UserID.String(),
+		Amount:         order.Amount,
+		IdempotencyKey: evt.IdempotencyKey,
 	}
 	reqBytes, _ := json.Marshal(req)
 	if err := c.sqsPublisher.SendMessage(ctx, string(reqBytes)); err != nil {
