@@ -15,7 +15,7 @@
 services:
   # ── LocalStack ────────────────────────────────────────────────────────────────
   localstack:
-    image: localstack/localstack:latest
+    build: ./localstack
     restart: unless-stopped
     ports:
       - "4566:4566" # unified gateway for all AWS service emulations
@@ -37,7 +37,7 @@ services:
     volumes:
       - localstack_data:/var/lib/localstack
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./localstack/init:/etc/localstack/init
+      # init scripts are baked into the custom image at /etc/localstack/init
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
       interval: 10s
