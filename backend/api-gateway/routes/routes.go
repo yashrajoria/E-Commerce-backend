@@ -34,7 +34,11 @@ func RegisterAllRoutes(r *gin.Engine) {
 
 	// BFF public routes (pass-through to bff-service)
 	public.GET("/bff", bff)
-	public.GET("/bff/*any", bff)
+	// public.GET("/bff/*any", bff)
+
+	// Expose docs at gateway root by forwarding to the BFF docs path
+	public.GET("/docs", forwardTo("http://bff-service:8088/docs"))
+	public.GET("/docs/*any", forwardTo("http://bff-service:8088/docs"))
 
 	// ===== AUTH ROUTES (PUBLIC) =====
 	// ===== PROTECTED ROUTES (JWT Required) =====
@@ -99,6 +103,9 @@ func RegisterAllRoutes(r *gin.Engine) {
 	// BFF: forward POSTs (protected) so POST actions (cart add/checkout) reach bff-service
 	protected.POST("/bff/*any", bff)
 	protected.POST("/bff", bff)
+
+	// Fix: Explicitly protect BFF profile so Gateway parses the cookie and sets X-User-ID
+	protected.GET("/bff/*any", bff)
 
 	// Note: public GETs for `/bff` remain handled above so public pages still work.
 
