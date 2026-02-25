@@ -224,6 +224,33 @@ services:
     networks:
       - ecommerce-network
 
+  promotion-service:
+    build:
+      context: .
+      dockerfile: services/promotion-service/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./services/promotion-service:/app
+    ports:
+      - "8090:8090"
+    env_file:
+      - .env
+    environment:
+      - PORT=8090
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_EC2_METADATA_DISABLED=true
+      - PROMOTION_SNS_TOPIC_ARN=${PROMOTION_SNS_TOPIC_ARN:-}
+      - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
+      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
+      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+
   api-gateway:
     build:
       context: .
@@ -252,6 +279,7 @@ services:
       - user-service
       - cart-service
       - payment-service
+      - promotion-service
     networks:
       - ecommerce-network
 
