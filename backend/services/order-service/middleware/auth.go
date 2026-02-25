@@ -15,6 +15,23 @@ func AuthMiddleware() gin.HandlerFunc {
 		role := c.GetHeader("X-User-Role")
 		email := c.GetHeader("X-User-Email")
 
+		// Fallback to cookies (set by API gateway) if headers missing
+		if userID == "" {
+			if v, err := c.Cookie("user_id"); err == nil && v != "" {
+				userID = v
+			}
+		}
+		if role == "" {
+			if v, err := c.Cookie("user_role"); err == nil && v != "" {
+				role = v
+			}
+		}
+		if email == "" {
+			if v, err := c.Cookie("user_email"); err == nil && v != "" {
+				email = v
+			}
+		}
+
 		if userID == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 			c.Abort()

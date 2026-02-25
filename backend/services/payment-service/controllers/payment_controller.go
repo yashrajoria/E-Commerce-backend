@@ -65,6 +65,7 @@ func (pc *PaymentController) GetPaymentStatusByOrderID(c *gin.Context) {
 		"order_id":     payment.OrderID.String(),
 		"status":       payment.Status,
 		"checkout_url": payment.CheckoutURL,
+		"session_id":   payment.StripePaymentID,
 	})
 }
 

@@ -2,11 +2,30 @@ openapi: 3.0.3
 info:
   title: Ecommerce Backend API
   version: 1.0.0
-  description: >
-    OpenAPI specification for API Gateway, BFF, and backend services.
+  description:
+    "OpenAPI specification for the API Gateway, BFF (Backend-for-Frontend), and all backend microservices of the\
+    \ ecommerce platform.\n## Architecture Overview\nThe system is composed of the following layers:\n- **API Gateway** (`:8080`)\
+    \ — Single ingress point. Validates JWT access\n  tokens from the `access_token` cookie, enforces role-based access control,\n\
+    \  and proxies requests to the appropriate downstream service.\n\n- **BFF Service** (`:8088`) — Aggregates data from multiple\
+    \ services into\n  single, page-optimised responses for the web frontend. All BFF endpoints\n  also flow through the Gateway.\n\
+    \n- **Auth Service** (`:8081`) — Issues and validates JWT access tokens\n  (short-lived) and refresh tokens (long-lived).\
+    \ Both tokens are delivered\n  as HttpOnly cookies.\n\n- **User Service** (`:8085`) — Manages user profiles and credential\
+    \ changes.\n- **Product Service** (`:8082`) — Product catalogue, category tree, bulk\n  import/export, and presigned S3\
+    \ upload URLs.\n\n- **Cart Service** (`:8086`) — Per-user shopping cart and checkout\n  initiation.\n\n- **Order Service**\
+    \ (`:8083`) — Order lifecycle management.\n- **Payment Service** (`:8087`) — Stripe payment session creation,\n  verification,\
+    \ and webhook ingestion.\n\n- **Inventory Service** — Stock management, reservation, release, and\n  confirmation as part\
+    \ of the order saga.\n\n## Authentication\nAll protected endpoints require a valid JWT `access_token` cookie issued by\
+    \ the Auth Service. The gateway rejects missing or expired tokens with `401 Unauthorized`. Refresh the token via `POST\
+    \ /auth/refresh` before it expires.\n## Role-Based Access Control\n| Role    | Description                           \
+    \               | |---------|------------------------------------------------------| | `user`  | Standard registered customer\
+    \                         | | `admin` | Platform administrator — full catalogue & order mgmt |\nEndpoints restricted to\
+    \ `admin` are marked with the \U0001F510 **Admin Only** tag. Calling them with a `user` token returns `403 Forbidden`.\n\
+    ## Idempotency\nState-mutating operations that must be safe to retry accept an optional `Idempotency-Key` header. Supplying\
+    \ the same key within the deduplication window returns the cached original response without re-executing the operation.\n\
+    ## Error Responses\nAll errors follow the `ErrorResponse` schema: `{ \"error\": \"...\", \"details\": \"...\" }`.\n"
 servers:
   - url: http://localhost:8080
-    description: API Gateway
+    description: API Gateway (primary ingress — use this in production)
   - url: http://localhost:8088
     description: BFF Service
   - url: http://localhost:8081
@@ -23,56 +42,125 @@ servers:
     description: Payment Service
 tags:
   - name: Gateway
-    description: API Gateway proxy endpoints
-  - name: BFF
-    description: Web BFF endpoints
-  - name: Auth Service
-    description: Authentication and session management
-  - name: User Service
-    description: User profile management
-  - name: Product Service
-    description: Product and category APIs
-  - name: Cart Service
-    description: Cart APIs
-  - name: Order Service
-    description: Order APIs
-  - name: Payment Service
-    description: Payment APIs and Stripe webhook
+    description:
+      "Endpoints exposed by the API Gateway. The gateway handles JWT validation, role enforcement, and reverse-proxying
+      to downstream services.
 
+      "
+  - name: BFF
+    description:
+      "Backend-for-Frontend aggregation endpoints. These combine calls to multiple microservices into single, page-optimised
+      responses for the web frontend. All BFF routes are also proxied through the Gateway.
+
+      "
+  - name: Auth Service
+    description:
+      "Authentication and session management. Issues HttpOnly cookie-based JWT access tokens and refresh tokens.
+      Handles registration, login, logout, token refresh, email verification, and auth status checks.
+
+      "
+  - name: User Service
+    description:
+      "User profile management. Allows authenticated users to view and update their profile and change their password.
+
+      "
+  - name: Product Service
+    description:
+      "Product catalogue and category management. Public read endpoints are available to all. Write operations (create,
+      update, delete, bulk import) are restricted to administrators.
+
+      "
+  - name: Cart Service
+    description:
+      "Shopping cart management. Each cart is scoped to an authenticated user. Supports adding/removing items and
+      initiating checkout.
+
+      "
+  - name: Order Service
+    description:
+      "Order lifecycle management. Customers can view their own orders. Administrators can view all orders across
+      users.
+
+      "
+  - name: Payment Service
+    description:
+      "Payment processing via Stripe. Handles checkout session creation (via cart checkout), payment verification,
+      status polling, and webhook ingestion from Stripe.
+
+      "
+  - name: Inventory Service
+    description:
+      "Internal inventory management. Tracks stock levels per product and implements the reserve → confirm / release
+      saga pattern used during checkout. Most endpoints are intended for internal service-to-service calls, not direct frontend
+      usage.
+
+      "
+  - name: Admin Only
+    description:
+      "🔐 Endpoints in this group require the caller to have the `admin` role. Requests from `user`-role tokens will
+      receive `403 Forbidden`.
+
+      "
 paths:
   /health:
     get:
-      tags: [Gateway]
+      tags:
+        - Gateway
       summary: Gateway health check
+      description:
+        "Returns the operational status of the API Gateway. Used by load balancers and orchestration platforms
+        (e.g., Kubernetes liveness probes) to determine whether the gateway is healthy and ready to serve traffic. Does **not**
+        require authentication.
+
+        "
       responses:
         "200":
-          description: OK
+          description: Gateway is healthy
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
-
+              example:
+                status: ok
+                message: API Gateway is running
+      operationId: healthCheck
+      security: []
   /bff/home:
     get:
-      tags: [BFF]
-      summary: Home page data (products + categories)
+      tags:
+        - BFF
+      summary: Home page — aggregated products & categories
+      description:
+        "Returns a single aggregated payload containing the product list (with default pagination) and the full
+        category tree. Designed to populate the storefront home page in a single round trip. No authentication required.
+
+        "
       responses:
         "200":
-          description: Aggregated home data
+          description: Aggregated home page data
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/BFFHomeResponse"
         "502":
           $ref: "#/components/responses/BadGateway"
-
+      operationId: bffGetHome
+      security: []
   /bff/profile:
     get:
-      tags: [BFF]
-      summary: Profile page data (profile + orders)
+      tags:
+        - BFF
+      summary: Profile page — user profile & order history
+      description:
+        'Returns a combined payload containing the authenticated user''s profile information and their order history.
+        Requires a valid `access_token` cookie. Designed to populate the "My Account" / profile page in a single round trip.
+
+        '
+      security:
+        - cookieAuth: []
       responses:
         "200":
-          description: Aggregated profile data
+          description: Aggregated profile page data
           content:
             application/json:
               schema:
@@ -81,11 +169,18 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "502":
           $ref: "#/components/responses/BadGateway"
-
+      operationId: bffGetProfile
   /bff/auth/register:
     post:
-      tags: [BFF]
-      summary: Register a user
+      tags:
+        - BFF
+      summary: Register a new user account
+      description:
+        "Creates a new user account. On success a verification email is sent to the provided address. The user
+        must verify their email before they can log in (if email verification is enforced). Returns `409 Conflict` if the
+        email is already registered.
+
+        "
       requestBody:
         $ref: "#/components/requestBodies/RegisterRequest"
       responses:
@@ -97,50 +192,88 @@ paths:
           $ref: "#/components/responses/Conflict"
         "502":
           $ref: "#/components/responses/BadGateway"
-
+      operationId: bffRegister
+      security: []
   /bff/auth/login:
     post:
-      tags: [BFF]
-      summary: Login and set auth cookies
+      tags:
+        - BFF
+      summary: Login and receive auth cookies
+      description:
+        "Authenticates a user with email and password. On success, sets two HttpOnly cookies:\n- `access_token`\
+        \ — short-lived JWT (e.g., 15 min) used to authenticate\n  subsequent API requests.\n- `refresh_token` — long-lived\
+        \ token (e.g., 7 days) used exclusively\n  with `POST /auth/refresh` to obtain a new access token.\n\nReturns `401\
+        \ Unauthorized` for invalid credentials or unverified accounts.\n"
       requestBody:
         $ref: "#/components/requestBodies/LoginRequest"
       responses:
         "200":
           $ref: "#/components/responses/MessageResponse"
+          headers:
+            Set-Cookie: &id001
+              description: HttpOnly auth cookies set on successful authentication.
+              schema:
+                type: string
+              example: access_token=eyJ...; HttpOnly; Secure; SameSite=Strict; Path=/
         "401":
           $ref: "#/components/responses/Unauthorized"
         "502":
           $ref: "#/components/responses/BadGateway"
-
+      operationId: bffLogin
+      security: []
   /bff/auth/logout:
     post:
-      tags: [BFF]
+      tags:
+        - BFF
       summary: Logout and clear auth cookies
+      description:
+        "Invalidates the current session and clears both `access_token` and `refresh_token` cookies on the client.
+        Safe to call even if the user is not currently authenticated.
+
+        "
       responses:
         "200":
           $ref: "#/components/responses/MessageResponse"
         "502":
           $ref: "#/components/responses/BadGateway"
-
+      operationId: bffLogout
+      security: []
   /bff/auth/refresh:
     post:
-      tags: [BFF]
-      summary: Refresh access token (uses refresh cookie)
+      tags:
+        - BFF
+      summary: Refresh the access token using the refresh cookie
+      description:
+        "Issues a new `access_token` cookie using the `refresh_token` cookie. Call this when an API request returns
+        `401 Unauthorized` due to an expired access token. Returns `401` if the refresh token is missing, expired, or revoked.
+
+        "
       responses:
         "200":
           $ref: "#/components/responses/MessageResponse"
+          headers:
+            Set-Cookie: *id001
         "401":
           $ref: "#/components/responses/Unauthorized"
         "502":
           $ref: "#/components/responses/BadGateway"
-
+      operationId: bffRefreshToken
+      security: []
   /bff/auth/status:
     get:
-      tags: [BFF]
-      summary: Get auth status
+      tags:
+        - BFF
+      summary: Check authentication status
+      description:
+        "Returns whether the current request is authenticated and, if so, the basic identity of the authenticated
+        user (ID, email, role). Useful for initialising client-side auth state on page load.
+
+        "
+      security:
+        - cookieAuth: []
       responses:
         "200":
-          description: Auth status
+          description: Current authentication status
           content:
             application/json:
               schema:
@@ -149,11 +282,17 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "502":
           $ref: "#/components/responses/BadGateway"
-
+      operationId: bffGetAuthStatus
   /bff/auth/verify-email:
     post:
-      tags: [BFF]
-      summary: Verify email address
+      tags:
+        - BFF
+      summary: Verify email address with OTP code
+      description:
+        "Verifies a user's email address using the one-time code sent during registration. The `email` and `code`
+        fields are both required. Returns `404` if no pending verification exists for the given email.
+
+        "
       requestBody:
         $ref: "#/components/requestBodies/VerifyEmailRequest"
       responses:
@@ -165,10 +304,18 @@ paths:
           $ref: "#/components/responses/NotFound"
         "502":
           $ref: "#/components/responses/BadGateway"
+      operationId: bffVerifyEmail
+      security: []
   /bff/products:
     get:
-      tags: [BFF]
-      summary: Product list
+      tags:
+        - BFF
+      summary: List products with filtering, sorting, and pagination
+      description:
+        "Returns a paginated list of products. Supports filtering by featured status, one or more category IDs,
+        and price range. Sort order can be controlled via the `sort` parameter. No authentication required — public endpoint.
+
+        "
       parameters:
         - $ref: "#/components/parameters/PageParam"
         - $ref: "#/components/parameters/PerPageParam"
@@ -179,23 +326,30 @@ paths:
         - $ref: "#/components/parameters/SortParam"
       responses:
         "200":
-          description: Product list
+          description: Paginated product list
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProductListResponse"
         "502":
           $ref: "#/components/responses/BadGateway"
-
+      operationId: bffListProducts
+      security: []
   /bff/products/{id}:
     get:
-      tags: [BFF]
-      summary: Product detail
+      tags:
+        - BFF
+      summary: Get a single product by ID
+      description:
+        "Returns full product details for the given product UUID. No authentication required. Returns `404` if
+        the product does not exist or has been deleted.
+
+        "
       parameters:
         - $ref: "#/components/parameters/ProductID"
       responses:
         "200":
-          description: Product
+          description: Product details
           content:
             application/json:
               schema:
@@ -204,28 +358,44 @@ paths:
           $ref: "#/components/responses/NotFound"
         "502":
           $ref: "#/components/responses/BadGateway"
-
+      operationId: bffGetProduct
+      security: []
   /bff/categories:
     get:
-      tags: [BFF]
-      summary: Category tree
+      tags:
+        - BFF
+      summary: Get the full category tree
+      description:
+        "Returns the complete category hierarchy as a nested tree. Each node may contain a `children` array of
+        sub-categories. No authentication required.
+
+        "
       responses:
         "200":
-          description: Category tree
+          description: Nested category tree
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/CategoryListResponse"
         "502":
           $ref: "#/components/responses/BadGateway"
-
+      operationId: bffListCategories
+      security: []
   /bff/cart:
     get:
-      tags: [BFF]
-      summary: Current cart
+      tags:
+        - BFF
+      summary: Get the current user's cart
+      description:
+        "Returns the authenticated user's cart contents, including all items and their quantities. Returns an
+        empty `items` array if the cart has not been populated yet.
+
+        "
+      security:
+        - cookieAuth: []
       responses:
         "200":
-          description: Cart
+          description: Current cart
           content:
             application/json:
               schema:
@@ -234,16 +404,27 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "502":
           $ref: "#/components/responses/BadGateway"
-
+      operationId: bffGetCart
   /bff/cart/add:
     post:
-      tags: [BFF]
-      summary: Add items to cart
+      tags:
+        - BFF
+      summary: Add one or more items to the cart
+      description:
+        "Adds the provided items to the authenticated user's cart. If an item with the same `product_id` already
+        exists in the cart, its quantity is incremented by the provided amount. Provide an `Idempotency-Key` header to safely
+        retry on network failure without duplicating items.
+
+        "
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         $ref: "#/components/requestBodies/AddItemsRequest"
       responses:
         "200":
-          description: Updated cart
+          description: Updated cart after adding items
           content:
             application/json:
               schema:
@@ -254,16 +435,24 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "502":
           $ref: "#/components/responses/BadGateway"
-
+      operationId: bffAddCartItems
   /bff/cart/remove/{product_id}:
     delete:
-      tags: [BFF]
-      summary: Remove item from cart
+      tags:
+        - BFF
+      summary: Remove an item from the cart
+      description:
+        "Removes the cart line identified by `product_id` entirely (regardless of quantity). Returns `404` if the
+        product is not currently in the cart.
+
+        "
+      security:
+        - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/ProductIDString"
       responses:
         "200":
-          description: Updated cart
+          description: Updated cart after removing item
           content:
             application/json:
               schema:
@@ -274,11 +463,18 @@ paths:
           $ref: "#/components/responses/NotFound"
         "502":
           $ref: "#/components/responses/BadGateway"
-
+      operationId: bffRemoveCartItem
   /bff/cart/clear:
     delete:
-      tags: [BFF]
-      summary: Clear cart
+      tags:
+        - BFF
+      summary: Clear all items from the cart
+      description:
+        "Removes all items from the authenticated user's cart, returning it to an empty state.
+
+        "
+      security:
+        - cookieAuth: []
       responses:
         "200":
           $ref: "#/components/responses/MessageResponse"
@@ -286,14 +482,30 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "502":
           $ref: "#/components/responses/BadGateway"
-
+      operationId: bffClearCart
   /bff/cart/checkout:
     post:
-      tags: [BFF]
-      summary: Checkout cart
+      tags:
+        - BFF
+      summary: Initiate checkout for the current cart
+      description:
+        "Converts the authenticated user's cart into a pending order and creates a Stripe checkout session. Returns
+        the new order ID, initial status, and an optional `checkout_url` to redirect the user to Stripe's hosted payment
+        page.
+
+        This operation is idempotent when an `Idempotency-Key` is provided — retrying with the same key within the deduplication
+        window returns the same order and checkout URL without creating a duplicate order.
+
+        The cart is cleared after a successful checkout initiation.
+
+        "
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
-          description: Checkout started
+          description: Checkout initiated — order created and payment session ready
           content:
             application/json:
               schema:
@@ -304,17 +516,54 @@ paths:
           $ref: "#/components/responses/NotFound"
         "502":
           $ref: "#/components/responses/BadGateway"
+      operationId: bffCheckout
+  /bff/checkout:
+    post:
+      tags:
+        - BFF
+      summary: (Alias) Initiate checkout — identical to POST /bff/cart/checkout
+      description:
+        "Convenience alias for `POST /bff/cart/checkout`. Both routes invoke the same checkout logic. Prefer `/bff/cart/checkout`
+        for consistency.
 
+        "
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Checkout initiated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+      operationId: bffCheckoutAlias
+      deprecated: true
   /bff/orders:
     get:
-      tags: [BFF]
-      summary: List user orders
+      tags:
+        - BFF
+      summary: List the current user's orders
+      description:
+        "Returns a paginated list of orders belonging to the authenticated user, sorted by creation date descending
+        (most recent first).
+
+        "
+      security:
+        - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/PageParam"
         - $ref: "#/components/parameters/LimitParam"
       responses:
         "200":
-          description: Order list
+          description: Paginated order list
           content:
             application/json:
               schema:
@@ -323,16 +572,25 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "502":
           $ref: "#/components/responses/BadGateway"
-
+      operationId: bffListOrders
   /bff/orders/{id}:
     get:
-      tags: [BFF]
-      summary: Order detail
+      tags:
+        - BFF
+      summary: Get order detail
+      description:
+        "Returns full details for the specified order, including all line items. Users may only retrieve their
+        own orders — attempting to fetch another user's order returns `404`. Administrators can use the Gateway endpoint
+        directly to retrieve any order.
+
+        "
+      security:
+        - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/OrderID"
       responses:
         "200":
-          description: Order detail
+          description: Full order detail
           content:
             application/json:
               schema:
@@ -343,16 +601,24 @@ paths:
           $ref: "#/components/responses/NotFound"
         "502":
           $ref: "#/components/responses/BadGateway"
-
+      operationId: bffGetOrder
   /bff/users/profile:
     put:
-      tags: [BFF]
-      summary: Update profile
+      tags:
+        - BFF
+      summary: Update the authenticated user's profile
+      description:
+        "Updates mutable profile fields (`name`, `phone_number`) for the authenticated user. Partial updates are
+        supported — omit fields that should remain unchanged.
+
+        "
+      security:
+        - cookieAuth: []
       requestBody:
         $ref: "#/components/requestBodies/UpdateProfileRequest"
       responses:
         "200":
-          description: Profile updated
+          description: Profile updated successfully
           content:
             application/json:
               schema:
@@ -361,11 +627,20 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "502":
           $ref: "#/components/responses/BadGateway"
-
+      operationId: bffUpdateProfile
   /bff/users/change-password:
     post:
-      tags: [BFF]
-      summary: Change password
+      tags:
+        - BFF
+      summary: Change the authenticated user's password
+      description:
+        "Changes the password for the currently authenticated user. Requires the current password (`old_password`)
+        to be provided as confirmation. All active sessions are invalidated after a successful password change. Returns `400`
+        if `old_password` is incorrect.
+
+        "
+      security:
+        - cookieAuth: []
       requestBody:
         $ref: "#/components/requestBodies/ChangePasswordRequest"
       responses:
@@ -377,11 +652,20 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "502":
           $ref: "#/components/responses/BadGateway"
-
+      operationId: bffChangePassword
   /bff/payment/status/by-order/{order_id}:
     get:
-      tags: [BFF]
-      summary: Payment status by order
+      tags:
+        - BFF
+      summary: Get payment status for an order
+      description:
+        "Returns the current payment status for the given order. Can be polled after checkout to determine whether
+        payment has been confirmed by Stripe. Only the order owner may query payment status; administrators can use the direct
+        Gateway endpoint.
+
+        "
+      security:
+        - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/OrderID"
       responses:
@@ -397,11 +681,19 @@ paths:
           $ref: "#/components/responses/NotFound"
         "502":
           $ref: "#/components/responses/BadGateway"
-
+      operationId: bffGetPaymentStatus
   /bff/payment/verify-payment:
     post:
-      tags: [BFF]
-      summary: Verify payment
+      tags:
+        - BFF
+      summary: Verify payment after Stripe redirect
+      description:
+        "Called by the frontend after Stripe redirects back to the success URL. Verifies the Stripe payment session
+        and syncs the order status. Both `payment_id` and `session_id` (from the Stripe redirect query params) are required.
+
+        "
+      security:
+        - cookieAuth: []
       requestBody:
         $ref: "#/components/requestBodies/VerifyPaymentRequest"
       responses:
@@ -415,10 +707,18 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "502":
           $ref: "#/components/responses/BadGateway"
+      operationId: bffVerifyPayment
   /auth/register:
     post:
-      tags: [Gateway, Auth Service]
-      summary: Register a user
+      tags:
+        - Gateway
+        - Auth Service
+      summary: Register a new user account
+      description:
+        "Direct Gateway route to the Auth Service registration endpoint. Creates a user account and sends a verification
+        email. Equivalent to `POST /bff/auth/register` but without BFF aggregation.
+
+        "
       requestBody:
         $ref: "#/components/requestBodies/RegisterRequest"
       responses:
@@ -428,55 +728,98 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "409":
           $ref: "#/components/responses/Conflict"
-
+      operationId: authRegister
+      security: []
   /auth/login:
     post:
-      tags: [Gateway, Auth Service]
-      summary: Login and set auth cookies
+      tags:
+        - Gateway
+        - Auth Service
+      summary: Login and receive auth cookies
+      description:
+        "Direct Gateway route to the Auth Service login endpoint. Authenticates the user and sets `access_token`
+        and `refresh_token` HttpOnly cookies.
+
+        "
       requestBody:
         $ref: "#/components/requestBodies/LoginRequest"
       responses:
         "200":
           $ref: "#/components/responses/MessageResponse"
+          headers:
+            Set-Cookie: *id001
         "401":
           $ref: "#/components/responses/Unauthorized"
-
+      operationId: authLogin
+      security: []
   /auth/logout:
     post:
-      tags: [Gateway, Auth Service]
+      tags:
+        - Gateway
+        - Auth Service
       summary: Logout and clear auth cookies
+      description:
+        "Invalidates the current session and clears auth cookies. Safe to call without an active session.
+
+        "
       responses:
         "200":
           $ref: "#/components/responses/MessageResponse"
-
+      operationId: authLogout
+      security: []
   /auth/refresh:
     post:
-      tags: [Gateway, Auth Service]
-      summary: Refresh access token (uses refresh cookie)
+      tags:
+        - Gateway
+        - Auth Service
+      summary: Refresh access token using the refresh cookie
+      description:
+        "Issues a new `access_token` cookie from a valid `refresh_token` cookie. Call when an API request returns
+        `401` due to an expired access token.
+
+        "
       responses:
         "200":
           $ref: "#/components/responses/MessageResponse"
+          headers:
+            Set-Cookie: *id001
         "401":
           $ref: "#/components/responses/Unauthorized"
-
+      operationId: authRefreshToken
+      security: []
   /auth/status:
     get:
-      tags: [Gateway, Auth Service]
-      summary: Get auth status
+      tags:
+        - Gateway
+        - Auth Service
+      summary: Check authentication status
+      description:
+        "Returns the authenticated identity (ID, email, role) from the current access token cookie. Useful for
+        server-side session hydration.
+
+        "
+      security:
+        - cookieAuth: []
       responses:
         "200":
-          description: Auth status
+          description: Authentication status
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthStatusResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
-
+      operationId: authGetStatus
   /auth/verify-email:
     post:
-      tags: [Gateway, Auth Service]
-      summary: Verify email
+      tags:
+        - Gateway
+        - Auth Service
+      summary: Verify email address with OTP code
+      description:
+        "Verifies a user's email using the one-time code delivered during registration.
+
+        "
       requestBody:
         $ref: "#/components/requestBodies/VerifyEmailRequest"
       responses:
@@ -486,23 +829,42 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
-
+      operationId: authVerifyEmail
+      security: []
   /users/profile:
     get:
-      tags: [Gateway, User Service]
-      summary: Get user profile
+      tags:
+        - Gateway
+        - User Service
+      summary: Get the authenticated user's profile
+      description:
+        "Returns full profile data for the currently authenticated user, including name, email, phone number, role,
+        and account creation date.
+
+        "
+      security:
+        - cookieAuth: []
       responses:
         "200":
-          description: Profile
+          description: User profile
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/UserProfileResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+      operationId: getUserProfile
     put:
-      tags: [Gateway, User Service]
-      summary: Update user profile
+      tags:
+        - Gateway
+        - User Service
+      summary: Update the authenticated user's profile
+      description:
+        "Updates mutable profile fields for the authenticated user. Partial updates are supported.
+
+        "
+      security:
+        - cookieAuth: []
       requestBody:
         $ref: "#/components/requestBodies/UpdateProfileRequest"
       responses:
@@ -514,11 +876,20 @@ paths:
                 $ref: "#/components/schemas/UpdateProfileResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
-
+      operationId: updateUserProfile
   /users/change-password:
     post:
-      tags: [Gateway, User Service]
-      summary: Change password
+      tags:
+        - Gateway
+        - User Service
+      summary: Change the authenticated user's password
+      description:
+        "Changes the password, requiring the current password as confirmation. Invalidates all active sessions
+        on success.
+
+        "
+      security:
+        - cookieAuth: []
       requestBody:
         $ref: "#/components/requestBodies/ChangePasswordRequest"
       responses:
@@ -528,11 +899,17 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
-
+      operationId: changePassword
   /products:
     get:
-      tags: [Gateway, Product Service]
+      tags:
+        - Gateway
+        - Product Service
       summary: List products
+      description:
+        "Returns a paginated, filterable product catalogue. Public endpoint — no authentication required.
+
+        "
       parameters:
         - $ref: "#/components/parameters/PageParam"
         - $ref: "#/components/parameters/PerPageParam"
@@ -543,42 +920,82 @@ paths:
         - $ref: "#/components/parameters/SortParam"
       responses:
         "200":
-          description: Product list
+          description: Paginated product list
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProductListResponse"
+      operationId: listProducts
+      security: []
     post:
-      tags: [Gateway, Product Service]
-      summary: Create product
+      tags:
+        - Gateway
+        - Product Service
+        - Admin Only
+      summary: 🔐 Create a new product
+      description:
+        "**Admin only.** Creates a new product in the catalogue. Accepts `multipart/form-data` to support simultaneous
+        image upload. The `category` field must be a JSON-encoded string array of category names. Images are uploaded directly
+        to S3 — use the presign endpoints to obtain pre-signed upload URLs for large files instead.
+
+        "
+      security:
+        - cookieAuth:
+            - admin
       requestBody:
         $ref: "#/components/requestBodies/CreateProductRequest"
       responses:
         "201":
-          description: Product created
+          description: Product created successfully
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Product"
-
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      operationId: createProduct
   /products/{id}:
     get:
-      tags: [Gateway, Product Service]
+      tags:
+        - Gateway
+        - Product Service
       summary: Get product by ID
+      description:
+        "Returns full product details. Public endpoint — no authentication required. Returns `404` if the product
+        does not exist or is inactive.
+
+        "
       parameters:
         - $ref: "#/components/parameters/ProductID"
       responses:
         "200":
-          description: Product
+          description: Product details
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Product"
         "404":
           $ref: "#/components/responses/NotFound"
+      operationId: getProduct
+      security: []
     put:
-      tags: [Gateway, Product Service]
-      summary: Update product
+      tags:
+        - Gateway
+        - Product Service
+        - Admin Only
+      summary: 🔐 Update a product
+      description:
+        "**Admin only.** Performs a partial update on the specified product. Only the fields provided in the request
+        body are updated; all other fields retain their current values.
+
+        "
+      security:
+        - cookieAuth:
+            - admin
       parameters:
         - $ref: "#/components/parameters/ProductID"
       requestBody:
@@ -586,57 +1003,322 @@ paths:
       responses:
         "200":
           $ref: "#/components/responses/MessageResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      operationId: updateProduct
     delete:
-      tags: [Gateway, Product Service]
-      summary: Delete product
+      tags:
+        - Gateway
+        - Product Service
+        - Admin Only
+      summary: 🔐 Delete a product
+      description:
+        "**Admin only.** Permanently deletes the specified product from the catalogue. This action is irreversible.
+        Any carts or orders referencing the product are unaffected but the product detail will no longer be resolvable.
+
+        "
+      security:
+        - cookieAuth:
+            - admin
       parameters:
         - $ref: "#/components/parameters/ProductID"
       responses:
         "200":
           $ref: "#/components/responses/MessageResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      operationId: deleteProduct
+  /products/presign:
+    get:
+      tags:
+        - Gateway
+        - Product Service
+        - Admin Only
+      summary: 🔐 Get a presigned S3 upload URL for a new product (by SKU)
+      description:
+        "**Admin only.** Returns a presigned S3 `PUT` URL and any required form fields for uploading a product
+        image before the product record is created. Provide the `sku` query parameter to namespace the object key. The presigned
+        URL expires after a short window (typically 15 minutes).
 
+        "
+      security:
+        - cookieAuth:
+            - admin
+      parameters:
+        - name: sku
+          in: query
+          required: true
+          description: The SKU of the product the image belongs to.
+          schema:
+            type: string
+          example: WIDGET-001
+      responses:
+        "200":
+          description: Presigned upload URL and form fields
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  upload_url:
+                    type: string
+                    description: The presigned S3 PUT URL.
+                    example: https://s3.amazonaws.com/bucket/...
+                  fields:
+                    type: object
+                    description: Additional form fields required by the presigned POST policy.
+                    additionalProperties:
+                      type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      operationId: getProductPresignUrl
+  /products/{id}/images/presign:
+    post:
+      tags:
+        - Gateway
+        - Product Service
+        - Admin Only
+      summary: 🔐 Get a presigned S3 upload URL for an existing product image
+      description:
+        "**Admin only.** Returns a presigned S3 `PUT` URL for uploading a new or replacement image for an existing
+        product. After upload, update the product record with the resulting image URL via `PUT /products/{id}`.
+
+        "
+      security:
+        - cookieAuth:
+            - admin
+      parameters:
+        - $ref: "#/components/parameters/ProductID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - filename
+              properties:
+                filename:
+                  type: string
+                  description: Original filename (used to derive the S3 object key and content type).
+                  example: front-view.jpg
+      responses:
+        "200":
+          description: Presigned upload URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  upload_url:
+                    type: string
+                    example: https://s3.amazonaws.com/bucket/products/...
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      operationId: getProductImagePresignUrl
   /products/bulk/validate:
     post:
-      tags: [Gateway, Product Service]
-      summary: Validate bulk CSV
+      tags:
+        - Gateway
+        - Product Service
+        - Admin Only
+      summary: 🔐 Validate a product bulk import CSV (dry run)
+      description:
+        "**Admin only.** Accepts a CSV file and validates it against the product schema without writing any data.
+        Returns counts of valid/invalid rows, missing categories, duplicate SKUs, field-level errors, and warnings. Use this
+        endpoint to preview issues before running the actual import.
+
+        "
+      security:
+        - cookieAuth:
+            - admin
       requestBody:
         $ref: "#/components/requestBodies/BulkValidateRequest"
       responses:
         "200":
-          description: Validation results
+          description: Dry-run validation results
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/BulkImportValidation"
-
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      operationId: bulkValidateProducts
   /products/bulk:
     post:
-      tags: [Gateway, Product Service]
-      summary: Bulk import CSV
+      tags:
+        - Gateway
+        - Product Service
+        - Admin Only
+      summary: 🔐 Bulk import products from CSV
+      description:
+        "**Admin only.** Imports products from a CSV file. Processing is asynchronous — the response includes a
+        job ID that can be polled via `GET /products/bulk/jobs/{id}`. If `auto_create_categories` is `true`, any categories
+        referenced in the CSV that don't yet exist will be created automatically.
+
+        "
+      security:
+        - cookieAuth:
+            - admin
       requestBody:
         $ref: "#/components/requestBodies/BulkImportRequest"
       responses:
         "200":
-          description: Bulk import result
+          description: Bulk import job queued or completed
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/BulkImportResult"
-
-  /categories:
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      operationId: bulkImportProducts
+  /products/bulk/jobs/{id}:
     get:
-      tags: [Gateway, Product Service]
-      summary: Category tree
+      tags:
+        - Gateway
+        - Product Service
+        - Admin Only
+      summary: 🔐 Get bulk import job status and result
+      description:
+        "**Admin only.** Polls the status of an asynchronous bulk import job. Returns the final `inserted_count`,
+        `errors_count`, and per-row error details once the job is complete.
+
+        "
+      security:
+        - cookieAuth:
+            - admin
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Bulk import job ID returned by `POST /products/bulk`.
+          schema:
+            type: string
       responses:
         "200":
-          description: Category tree
+          description: Bulk import job result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkImportResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      operationId: getBulkImportJob
+  /products/bulk/delete:
+    post:
+      tags:
+        - Gateway
+        - Product Service
+        - Admin Only
+      summary: 🔐 Bulk delete products
+      description:
+        "**Admin only.** Deletes multiple products in a single operation. Supports three mutually exclusive targeting\
+        \ modes:\n- **`ids`** — delete specific products by UUID array. - **`category_ids`** — delete all products belonging\
+        \ to the specified\n  categories.\n- **`delete_all: true`** — delete every product in the catalogue.\n  **Use with\
+        \ extreme caution.**\n\nReturns the count of deleted records.\n"
+      security:
+        - cookieAuth:
+            - admin
+      requestBody:
+        $ref: "#/components/requestBodies/BulkDeleteRequest"
+      responses:
+        "200":
+          description: Number of deleted products
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted_count:
+                    type: integer
+                    example: 42
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      operationId: bulkDeleteProducts
+  /products/internal/{id}:
+    get:
+      tags:
+        - Product Service
+      summary: Internal — fetch product DTO by ID (service-to-service only)
+      description:
+        "**Internal endpoint.** Used by other microservices (e.g., Cart, Order) for service-to-service product
+        lookups. Not exposed through the public API Gateway. Do **not** call this endpoint from client applications.
+
+        "
+      parameters:
+        - $ref: "#/components/parameters/ProductID"
+      responses:
+        "200":
+          description: Product DTO
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      operationId: internalGetProduct
+  /categories:
+    get:
+      tags:
+        - Gateway
+        - Product Service
+      summary: Get full category tree
+      description:
+        "Returns the complete nested category tree. Public endpoint — no authentication required.
+
+        "
+      responses:
+        "200":
+          description: Nested category tree
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/CategoryListResponse"
+      operationId: listCategories
+      security: []
     post:
-      tags: [Gateway, Product Service]
-      summary: Create category
+      tags:
+        - Gateway
+        - Product Service
+        - Admin Only
+      summary: 🔐 Create a category
+      description:
+        "**Admin only.** Creates a new product category. To create a sub-category, provide one or more `parent_ids`.
+        The `slug` must be unique across all categories.
+
+        "
+      security:
+        - cookieAuth:
+            - admin
       requestBody:
         $ref: "#/components/requestBodies/CreateCategoryRequest"
       responses:
@@ -646,11 +1328,28 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Category"
-
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      operationId: createCategory
   /categories/{id}:
     put:
-      tags: [Gateway, Product Service]
-      summary: Update category
+      tags:
+        - Gateway
+        - Product Service
+        - Admin Only
+      summary: 🔐 Update a category
+      description:
+        "**Admin only.** Updates the specified category. Partial updates are supported. Note that changing `parent_ids`
+        will affect all products whose `category_path` includes this category.
+
+        "
+      security:
+        - cookieAuth:
+            - admin
       parameters:
         - $ref: "#/components/parameters/CategoryID"
       requestBody:
@@ -658,31 +1357,76 @@ paths:
       responses:
         "200":
           $ref: "#/components/responses/MessageResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      operationId: updateCategory
     delete:
-      tags: [Gateway, Product Service]
-      summary: Delete category
+      tags:
+        - Gateway
+        - Product Service
+        - Admin Only
+      summary: 🔐 Delete a category
+      description:
+        "**Admin only.** Deletes the specified category. Products that were exclusively in this category should
+        be re-assigned before deletion to avoid orphaned catalogue entries.
+
+        "
+      security:
+        - cookieAuth:
+            - admin
       parameters:
         - $ref: "#/components/parameters/CategoryID"
       responses:
         "200":
           $ref: "#/components/responses/MessageResponse"
-
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      operationId: deleteCategory
   /cart:
     get:
-      tags: [Gateway, Cart Service]
-      summary: Get cart
+      tags:
+        - Gateway
+        - Cart Service
+      summary: Get the current user's cart
+      description:
+        "Returns the cart for the authenticated user. Returns an empty `items` array if no cart exists yet.
+
+        "
+      security:
+        - cookieAuth: []
       responses:
         "200":
-          description: Cart
+          description: Current cart
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Cart"
-
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+      operationId: getCart
   /cart/add:
     post:
-      tags: [Gateway, Cart Service]
-      summary: Add items to cart
+      tags:
+        - Gateway
+        - Cart Service
+      summary: Add items to the cart
+      description:
+        "Adds one or more items to the cart. Existing items have their quantity incremented rather than replaced.
+        Use `Idempotency-Key` to prevent duplicate additions on retry.
+
+        "
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         $ref: "#/components/requestBodies/AddItemsRequest"
       responses:
@@ -692,11 +1436,23 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Cart"
-
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+      operationId: addCartItems
   /cart/remove/{product_id}:
     delete:
-      tags: [Gateway, Cart Service]
-      summary: Remove item from cart
+      tags:
+        - Gateway
+        - Cart Service
+      summary: Remove an item from the cart
+      description:
+        "Removes the cart line for the given `product_id`. Returns `404` if the product is not in the cart.
+
+        "
+      security:
+        - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/ProductIDString"
       responses:
@@ -706,85 +1462,171 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Cart"
-
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      operationId: removeCartItem
   /cart/clear:
     delete:
-      tags: [Gateway, Cart Service]
-      summary: Clear cart
+      tags:
+        - Gateway
+        - Cart Service
+      summary: Clear all cart items
+      description: "Removes all items from the authenticated user's cart.
+
+        "
+      security:
+        - cookieAuth: []
       responses:
         "200":
           $ref: "#/components/responses/MessageResponse"
-
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+      operationId: clearCart
   /cart/checkout:
     post:
-      tags: [Gateway, Cart Service]
-      summary: Checkout cart
+      tags:
+        - Gateway
+        - Cart Service
+      summary: Initiate checkout
+      description:
+        "Converts the cart into a pending order and creates a Stripe payment session. Returns the new `order_id`,
+        `status`, and an optional `checkout_url` for the hosted Stripe payment page. The cart is cleared on success. Use `Idempotency-Key`
+        to safely retry without creating duplicate orders.
+
+        "
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
-          description: Checkout started
+          description: Checkout initiated
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/CheckoutResponse"
-
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      operationId: checkout
   /orders:
     get:
-      tags: [Gateway, Order Service]
-      summary: List user orders
+      tags:
+        - Gateway
+        - Order Service
+      summary: List the current user's orders
+      description:
+        "Returns a paginated list of the authenticated user's orders. Results are sorted by creation date descending.
+
+        "
+      security:
+        - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/PageParam"
         - $ref: "#/components/parameters/LimitParam"
       responses:
         "200":
-          description: Order list
+          description: Paginated order list
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/OrderListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+      operationId: listOrders
     post:
-      tags: [Gateway]
-      summary: Create order (if enabled)
+      tags:
+        - Gateway
+      summary: Create order directly (if enabled)
+      description:
+        "Creates an order directly from a list of items, bypassing the cart flow. This route may be disabled in
+        production environments where the cart → checkout flow is the only supported path. Use `POST /cart/checkout` for the
+        standard checkout flow.
+
+        "
+      security:
+        - cookieAuth: []
       requestBody:
         $ref: "#/components/requestBodies/CreateOrderRequest"
       responses:
         "202":
           $ref: "#/components/responses/AcceptedResponse"
-
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+      operationId: createOrder
   /orders/{id}:
     get:
-      tags: [Gateway, Order Service]
+      tags:
+        - Gateway
+        - Order Service
       summary: Get order by ID
+      description:
+        "Returns full order detail including all line items. Customers can only retrieve their own orders. Administrators
+        can retrieve any order. Returns `404` for orders belonging to other users (from a customer's perspective).
+
+        "
+      security:
+        - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/OrderID"
       responses:
         "200":
-          description: Order detail
+          description: Full order detail
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/OrderDetailResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
-
+      operationId: getOrder
   /orders/admin:
     get:
-      tags: [Gateway, Order Service]
-      summary: Admin list all orders
+      tags:
+        - Gateway
+        - Order Service
+        - Admin Only
+      summary: 🔐 Admin — list all orders across all users
+      description:
+        "**Admin only.** Returns a paginated list of all orders placed on the platform, regardless of user. Useful
+        for fulfilment, customer service, and reporting dashboards.
+
+        "
+      security:
+        - cookieAuth:
+            - admin
       parameters:
         - $ref: "#/components/parameters/PageParam"
         - $ref: "#/components/parameters/LimitParam"
       responses:
         "200":
-          description: Order list
+          description: All orders (paginated)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/OrderListResponse"
-
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      operationId: adminListOrders
   /payment/status/by-order/{order_id}:
     get:
-      tags: [Gateway, Payment Service]
-      summary: Payment status by order
+      tags:
+        - Gateway
+        - Payment Service
+      summary: Get payment status by order ID
+      description:
+        "Returns the payment status for the given order. Poll this endpoint after checkout to confirm whether the
+        Stripe payment succeeded, is still pending, or failed. Returns `checkout_url` if a retry is needed.
+
+        "
+      security:
+        - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/OrderID"
       responses:
@@ -794,13 +1636,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PaymentStatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
-
+      operationId: getPaymentStatus
   /payment/verify-payment:
     post:
-      tags: [Gateway, Payment Service]
-      summary: Verify payment
+      tags:
+        - Gateway
+        - Payment Service
+      summary: Verify payment after Stripe redirect
+      description:
+        "Verifies a Stripe payment session after the user is redirected back to the site. Supply the `payment_id`
+        and `session_id` from the Stripe redirect query string. On success, the associated order status is updated to reflect
+        the confirmed payment.
+
+        "
+      security:
+        - cookieAuth: []
       requestBody:
         $ref: "#/components/requestBodies/VerifyPaymentRequest"
       responses:
@@ -810,106 +1664,400 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/VerifyPaymentResponse"
-
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+      operationId: verifyPayment
   /stripe/webhook:
     post:
-      tags: [Gateway, Payment Service]
-      summary: Stripe webhook endpoint
+      tags:
+        - Gateway
+        - Payment Service
+      summary: Stripe webhook receiver
+      description:
+        "Receives webhook events from Stripe (e.g., `payment_intent.succeeded`, `checkout.session.completed`, `payment_intent.payment_failed`).
+        The gateway forwards the raw request body and `Stripe-Signature` header to the Payment Service for signature verification
+        and event processing.
+
+        **This endpoint must not be called by the frontend.** It is exclusively for Stripe's webhook delivery. Configure
+        your Stripe dashboard to send events to this URL.
+
+        "
       requestBody:
-        description: Stripe webhook payload
+        description: Raw Stripe webhook event payload
         required: true
         content:
           application/json:
             schema:
               type: object
+              description: Stripe event object. See Stripe documentation for full schema.
       responses:
         "200":
           $ref: "#/components/responses/MessageResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
+      operationId: stripeWebhook
+      security: []
+      parameters:
+        - name: Stripe-Signature
+          in: header
+          required: true
+          description:
+            Webhook signature generated by Stripe for payload verification. Must be validated using your Stripe webhook
+            secret before processing the event. Requests with a missing or invalid signature should be rejected with `400`.
+          schema:
+            type: string
+          example: t=1714000000,v1=abc123...
+  /inventory/{productId}:
+    get:
+      tags:
+        - Inventory Service
+        - Admin Only
+      summary: 🔐 Get stock level for a product
+      description:
+        "**Admin only (or internal service call).** Returns the current on-hand stock quantity for a single product.
+        Used by the admin dashboard and internal services for stock visibility.
+
+        "
+      security:
+        - cookieAuth:
+            - admin
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          description: UUID of the product to query.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Current stock level
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StockResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      operationId: getStock
+    put:
+      tags:
+        - Inventory Service
+        - Admin Only
+      summary: 🔐 Update stock quantity for a product
+      description:
+        "**Admin only.** Sets the absolute stock quantity for a product. Use this to correct inventory after a
+        stock count or manual adjustment. This is an absolute set, not a delta increment.
+
+        "
+      security:
+        - cookieAuth:
+            - admin
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          description: UUID of the product to update.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StockRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      operationId: updateStock
+  /inventory:
+    post:
+      tags:
+        - Inventory Service
+        - Admin Only
+      summary: 🔐 Create or upsert stock record for a product
+      description:
+        "**Admin only.** Creates a new inventory record for a product, or updates the quantity if one already exists
+        (upsert). Use when adding a product to inventory for the first time or performing a bulk stock-level reset.
+
+        "
+      security:
+        - cookieAuth:
+            - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StockRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      operationId: upsertStock
+  /inventory/check:
+    post:
+      tags:
+        - Inventory Service
+      summary: Check availability for multiple items
+      description:
+        "Checks whether sufficient stock is available for each item in the request. Returns an `available` boolean
+        and the current `available_quantity` for each product. Called by the Cart or Order service before initiating checkout
+        to surface out-of-stock errors before payment.
+
+        "
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InventoryCheckRequest"
+      responses:
+        "200":
+          description: Per-item availability results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryCheckResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+      operationId: checkInventory
+      security: []
+  /inventory/reserve:
+    post:
+      tags:
+        - Inventory Service
+      summary: Reserve stock for an order (idempotent)
+      description:
+        "**Internal — order saga step 1.** Temporarily reserves the requested quantities for the given `order_id`.
+        This prevents overselling while payment is being processed. The reservation must be either confirmed (`POST /inventory/confirm`)
+        on successful payment or released (`POST /inventory/release`) on failure or cancellation.
+
+        This operation is idempotent: calling it multiple times with the same `order_id` and items has no additional effect.
+
+        "
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReserveRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+      operationId: reserveStock
+  /inventory/release:
+    post:
+      tags:
+        - Inventory Service
+      summary: Release previously reserved stock
+      description:
+        "**Internal — order saga compensation.** Releases stock that was previously reserved for an order. Called
+        when payment fails, the order is cancelled, or a checkout session expires. Returns the reserved quantities to the
+        available pool.
+
+        "
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReleaseRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      operationId: releaseStock
+  /inventory/confirm:
+    post:
+      tags:
+        - Inventory Service
+      summary: Confirm reserved stock after successful payment
+      description:
+        "**Internal — order saga step 2.** Converts a reservation into a confirmed deduction from available stock.
+        Called by the Payment Service (or via Stripe webhook processing) once a payment is successfully captured. After confirmation
+        the reservation is closed and the stock is permanently decremented.
+
+        "
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      operationId: confirmStock
 components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: access_token
+      description:
+        "JWT access token stored as an HttpOnly cookie. Issued by the Auth Service on login or token refresh. Short-lived
+        (typically 15 minutes). Pass the `admin` scope value in the `security` declaration to indicate an endpoint requires
+        the `admin` role.
+
+        "
   parameters:
     ProductID:
       name: id
       in: path
       required: true
+      description: UUID of the product.
       schema:
         type: string
         format: uuid
+      example: 8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1
     ProductIDString:
       name: product_id
       in: path
       required: true
+      description: Product ID (string, may be UUID or SKU depending on the service).
       schema:
         type: string
+      example: 8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1
     CategoryID:
       name: id
       in: path
       required: true
+      description: UUID of the category.
       schema:
         type: string
         format: uuid
+      example: 9c2a1c4b-8c5c-4a59-8f1b-1a2b3c4d5e6f
     OrderID:
-      name: order_id
+      name: id
       in: path
       required: true
+      description: UUID of the order.
       schema:
         type: string
         format: uuid
+      example: f1e2d3c4-b5a6-7890-1234-abcdef123456
     PageParam:
       name: page
       in: query
+      description: Page number for paginated results (1-indexed).
       schema:
         type: integer
+        minimum: 1
         default: 1
+      example: 1
     PerPageParam:
       name: perPage
       in: query
+      description: Number of items per page.
       schema:
         type: integer
+        minimum: 1
+        maximum: 100
         default: 10
+      example: 20
     LimitParam:
       name: limit
       in: query
+      description: Maximum number of items to return per page.
       schema:
         type: integer
+        minimum: 1
+        maximum: 100
         default: 10
+      example: 10
     IsFeaturedParam:
       name: is_featured
       in: query
+      description: Filter to only featured (`true`) or non-featured (`false`) products.
       schema:
         type: boolean
+      example: true
     CategoryIDsParam:
       name: categoryId
       in: query
-      description: Comma-separated list of category UUIDs.
+      description:
+        "Comma-separated list of category UUIDs to filter by. Products are returned if they belong to **any** of
+        the provided categories.
+
+        "
       schema:
         type: string
-        example: "8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1,9c2a1c4b-8c5c-4a59-8f1b-1a2b3c4d5e6f"
+      example: 8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1,9c2a1c4b-8c5c-4a59-8f1b-1a2b3c4d5e6f
     MinPriceParam:
       name: minPrice
       in: query
-      description: Minimum price filter (inclusive).
+      description: Minimum product price (inclusive, in the store's base currency).
       schema:
         type: number
         format: float
-        example: 10.5
+        minimum: 0
+      example: 10.5
     MaxPriceParam:
       name: maxPrice
       in: query
-      description: Maximum price filter (inclusive).
+      description: Maximum product price (inclusive, in the store's base currency).
       schema:
         type: number
         format: float
-        example: 199.99
+        minimum: 0
+      example: 199.99
     SortParam:
       name: sort
       in: query
-      description: Sorting key for the product list.
+      description:
+        "Sorting order for the product list: - `price_asc` / `price_desc` — by price - `created_at_asc` / `created_at_desc`
+        — by creation date - `name_asc` / `name_desc` — alphabetically by product name
+
+        "
       schema:
         type: string
-        enum: [price_asc, price_desc, created_at_asc, created_at_desc, name_asc, name_desc]
+        enum:
+          - price_asc
+          - price_desc
+          - created_at_asc
+          - created_at_desc
+          - name_asc
+          - name_desc
+      example: created_at_desc
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description:
+        "Client-generated unique key (e.g., a UUIDv4) to make POST requests idempotent. If a request with the same
+        key has already been processed within the deduplication window, the original response is returned without re-executing
+        the operation. Strongly recommended for checkout and cart mutations to prevent duplicate actions on network retry.
 
+        "
+      schema:
+        type: string
+        format: uuid
+      example: 550e8400-e29b-41d4-a716-446655440000
   requestBodies:
     LoginRequest:
       required: true
@@ -967,11 +2115,25 @@ components:
             $ref: "#/components/schemas/CreateProductRequest"
     UpdateProductRequest:
       required: true
+      description:
+        "Partial product update payload. Only supply the fields you want to change — all other fields will remain
+        unchanged.
+
+        "
       content:
         application/json:
           schema:
             type: object
             additionalProperties: true
+            example:
+              price: 29.99
+              is_featured: true
+    BulkDeleteRequest:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/BulkDeleteRequest"
     CreateCategoryRequest:
       required: true
       content:
@@ -984,232 +2146,391 @@ components:
         multipart/form-data:
           schema:
             type: object
-            required: [file]
+            required:
+              - file
             properties:
               file:
                 type: string
                 format: binary
+                description: CSV file containing product rows to validate.
     BulkImportRequest:
       required: true
       content:
         multipart/form-data:
           schema:
             type: object
-            required: [file]
+            required:
+              - file
             properties:
               file:
                 type: string
                 format: binary
+                description: CSV file containing product rows to import.
               auto_create_categories:
                 type: boolean
+                default: false
+                description:
+                  "If `true`, categories referenced in the CSV that do not yet exist will be created automatically.
+                  If `false` (default), unknown categories are treated as errors.
 
+                  "
   responses:
     MessageResponse:
-      description: Message response
+      description: Generic success message
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/MessageResponse"
+          example:
+            message: Operation completed successfully.
     AcceptedResponse:
-      description: Accepted
+      description: Request accepted for asynchronous processing
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/MessageResponse"
+          example:
+            message: Order accepted and is being processed.
     BadRequest:
-      description: Bad request
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/ErrorResponse"
-    Unauthorized:
-      description: Unauthorized
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/ErrorResponse"
-    NotFound:
-      description: Not found
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/ErrorResponse"
-    Conflict:
-      description: Conflict
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/ErrorResponse"
-    BadGateway:
-      description: Upstream error
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/ErrorResponse"
+      description:
+        "Bad request — the request body or parameters failed validation.
 
+        "
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: Bad Request
+            details: Field 'email' must be a valid email address.
+    Unauthorized:
+      description:
+        "Unauthorized — no valid `access_token` cookie present, or the token has expired. Refresh the token via
+        `POST /auth/refresh`.
+
+        "
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: Unauthorized
+            details: Access token is missing or has expired.
+    Forbidden:
+      description: Forbidden — the authenticated user does not have the required role (`admin`) to access this endpoint.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: Forbidden
+            details: This endpoint requires the admin role.
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: Not Found
+            details: The requested resource could not be found.
+    Conflict:
+      description:
+        "Conflict — the request could not be completed due to a conflict with the current state (e.g., duplicate
+        email on registration).
+
+        "
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: Conflict
+            details: A user with this email address already exists.
+    BadGateway:
+      description:
+        "Bad Gateway — the BFF or Gateway received an invalid response from an upstream microservice. This typically
+        indicates the downstream service is unavailable or returned an unexpected error.
+
+        "
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: Bad Gateway
+            details: Upstream service is temporarily unavailable.
   schemas:
     HealthResponse:
       type: object
+      description: Gateway health check response.
       properties:
         status:
           type: string
+          enum:
+            - ok
+            - degraded
+            - error
+          example: ok
         message:
           type: string
+          example: API Gateway is running
     MessageResponse:
       type: object
+      description: A simple message confirming the outcome of an operation.
       properties:
         message:
           type: string
+          example: Operation completed successfully.
     ErrorResponse:
       type: object
+      description: Standard error envelope returned for all 4xx and 5xx responses.
       properties:
         error:
           type: string
+          description: Short error code or title.
+          example: Not Found
         details:
           type: string
+          description: Human-readable description of what went wrong.
+          example: No product found with the given ID.
     LoginRequest:
       type: object
-      required: [email, password]
+      required:
+        - email
+        - password
       properties:
         email:
           type: string
           format: email
+          example: jane.doe@example.com
         password:
           type: string
           format: password
+          minLength: 8
+          example: S3cur3P@ssw0rd
     RegisterRequest:
       type: object
-      required: [name, email, password, role]
+      required:
+        - name
+        - email
+        - password
+        - role
       properties:
         name:
           type: string
+          example: Jane Doe
         email:
           type: string
           format: email
+          example: jane.doe@example.com
         password:
           type: string
           format: password
+          minLength: 8
+          example: S3cur3P@ssw0rd
         role:
           type: string
+          enum:
+            - user
+            - admin
+          description:
+            "Role assigned to the new account. In production, `admin` accounts should only be created by existing
+            administrators or via a seeding script.
+
+            "
+          example: user
     VerifyEmailRequest:
       type: object
-      required: [email, code]
+      required:
+        - email
+        - code
       properties:
         email:
           type: string
           format: email
+          example: jane.doe@example.com
         code:
           type: string
+          description: One-time verification code sent to the user's email.
+          example: "847291"
     AuthStatusResponse:
       type: object
+      description: Current authentication state for the request.
       properties:
         authenticated:
           type: boolean
+          example: true
         user:
           type: object
+          description: Present only when `authenticated` is `true`.
           properties:
             id:
               type: string
+              format: uuid
+              example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
             email:
               type: string
+              format: email
+              example: jane.doe@example.com
             role:
               type: string
+              enum:
+                - user
+                - admin
+              example: user
         timestamp:
           type: string
           format: date-time
+          example: "2026-02-25T10:00:00Z"
     UserProfileResponse:
       type: object
+      description: Full user profile.
       properties:
         id:
           type: string
           format: uuid
+          example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
         name:
           type: string
+          example: Jane Doe
         email:
           type: string
           format: email
+          example: jane.doe@example.com
         phone_number:
           type: string
           nullable: true
+          example: "+447911123456"
         created_at:
           type: string
           format: date-time
+          example: "2025-01-15T08:30:00Z"
         role:
           type: string
+          enum:
+            - user
+            - admin
+          example: user
     UpdateProfileRequest:
       type: object
+      description: Fields that can be updated on a user profile. All fields optional.
       properties:
         name:
           type: string
+          example: Jane Smith
         phone_number:
           type: string
+          example: "+447911123456"
     UpdateProfileResponse:
       type: object
       properties:
         message:
           type: string
+          example: Profile updated successfully.
         user:
           type: object
           properties:
             id:
               type: string
               format: uuid
+              example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
             name:
               type: string
+              example: Jane Smith
             phone_number:
               type: string
               nullable: true
+              example: "+447911123456"
     ChangePasswordRequest:
       type: object
-      required: [old_password, new_password]
+      required:
+        - old_password
+        - new_password
       properties:
         old_password:
           type: string
           format: password
+          description: The user's current password for verification.
+          example: S3cur3P@ssw0rd
         new_password:
           type: string
           format: password
+          minLength: 8
+          description: The desired new password.
+          example: N3wS3cur3P@ss!
     Product:
       type: object
+      description: A product in the catalogue.
       properties:
         _id:
           type: string
           format: uuid
+          description: Unique product identifier.
+          example: 8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1
         name:
           type: string
+          example: Wireless Ergonomic Mouse
         price:
           type: number
+          format: float
+          description: Price in the store's base currency (e.g., GBP).
+          example: 49.99
         quantity:
           type: integer
+          description: Available stock quantity.
+          example: 150
         description:
           type: string
+          example: A comfortable wireless mouse with ergonomic design.
         images:
           type: array
+          description: List of public image URLs for the product.
           items:
             type: string
+            format: uri
+          example:
+            - https://cdn.example.com/products/mouse-front.jpg
+            - https://cdn.example.com/products/mouse-side.jpg
         brand:
           type: string
+          example: Logitech
         sku:
           type: string
+          description: Stock-keeping unit — unique per product variant.
+          example: LGT-MOUSE-001
         category_ids:
           type: array
+          description: UUIDs of all categories this product belongs to.
           items:
             type: string
             format: uuid
+          example:
+            - 9c2a1c4b-8c5c-4a59-8f1b-1a2b3c4d5e6f
         category_path:
           type: array
+          description: Human-readable category breadcrumb (e.g., ["Electronics", "Peripherals"]).
           items:
             type: string
+          example:
+            - Electronics
+            - Peripherals
+            - Mice
         is_featured:
           type: boolean
+          description: Whether the product is shown in featured/promoted slots.
+          example: true
         created_at:
           type: string
           format: date-time
+          example: "2025-03-01T12:00:00Z"
         updated_at:
           type: string
           format: date-time
+          example: "2026-01-10T09:15:00Z"
     ProductListResponse:
       type: object
+      description: Paginated list of products.
       properties:
         products:
           type: array
@@ -1217,214 +2538,384 @@ components:
             $ref: "#/components/schemas/Product"
         meta:
           type: object
+          description: Pagination metadata.
           properties:
             page:
               type: integer
+              example: 1
             perPage:
               type: integer
+              example: 10
             total:
               type: integer
+              description: Total number of matching products.
+              example: 243
             totalPages:
               type: integer
+              example: 25
     Category:
       type: object
+      description: A product category node in the category tree.
       properties:
         _id:
           type: string
           format: uuid
+          example: 9c2a1c4b-8c5c-4a59-8f1b-1a2b3c4d5e6f
         name:
           type: string
+          example: Peripherals
         parent_ids:
           type: array
+          description: UUIDs of direct parent categories (empty for root categories).
           items:
             type: string
             format: uuid
         image:
           type: string
+          format: uri
+          nullable: true
+          example: https://cdn.example.com/categories/peripherals.jpg
         ancestors:
           type: array
+          description: UUIDs of all ancestor categories from root to immediate parent.
           items:
             type: string
             format: uuid
         slug:
           type: string
+          description: URL-friendly unique identifier.
+          example: peripherals
         path:
           type: array
+          description: Human-readable breadcrumb path from root.
           items:
             type: string
+          example:
+            - Electronics
+            - Peripherals
         level:
           type: integer
+          description: Depth in the tree (0 = root).
+          example: 1
         is_active:
           type: boolean
+          description: Whether the category is visible to customers.
+          example: true
         created_at:
           type: string
           format: date-time
+          example: "2025-01-01T00:00:00Z"
         updated_at:
           type: string
           format: date-time
+          example: "2025-06-15T10:30:00Z"
         children:
           type: array
+          description: Direct child categories (nested tree structure).
           items:
             $ref: "#/components/schemas/Category"
     CategoryListResponse:
       type: array
+      description: Array of root-level categories, each with nested `children`.
       items:
         $ref: "#/components/schemas/Category"
     CreateProductRequest:
       type: object
-      required: [name, description, brand, sku, price, quantity, category, images]
+      description:
+        '`multipart/form-data` payload for creating a new product. The `category` field must be a JSON-encoded
+        string array, e.g. `["Electronics","Peripherals"]`.
+
+        '
+      required:
+        - name
+        - description
+        - brand
+        - sku
+        - price
+        - quantity
+        - category
+        - images
       properties:
         name:
           type: string
+          example: Wireless Ergonomic Mouse
         description:
           type: string
+          example: A comfortable wireless mouse with ergonomic design.
         brand:
           type: string
+          example: Logitech
         sku:
           type: string
+          example: LGT-MOUSE-001
         price:
           type: number
+          format: float
+          example: 49.99
         quantity:
           type: integer
+          example: 150
         is_featured:
           type: boolean
+          default: false
+          example: true
         category:
           type: string
-          description: JSON string array of category names
+          description: JSON-encoded array of category name strings.
+          example: '["Electronics","Peripherals","Mice"]'
         images:
           type: array
+          description: Binary image files to upload with the product.
           items:
             type: string
             format: binary
     CreateCategoryRequest:
       type: object
-      required: [name]
+      required:
+        - name
+      description: Payload for creating or updating a product category.
       properties:
         name:
           type: string
+          example: Peripherals
         parent_ids:
           type: array
+          description: UUIDs of parent categories. Omit or provide empty array for a root category.
           items:
             type: string
             format: uuid
         image:
           type: string
+          format: uri
+          nullable: true
+          example: https://cdn.example.com/categories/peripherals.jpg
         ancestors:
           type: array
+          description:
+            "UUIDs of all ancestor categories (from root to immediate parent). Usually computed server-side — only
+            provide if known.
+
+            "
           items:
             type: string
             format: uuid
         slug:
           type: string
+          description: URL-friendly identifier. Must be unique. Auto-generated from `name` if omitted.
+          example: peripherals
         path:
           type: array
+          description: Human-readable breadcrumb. Auto-computed server-side if omitted.
           items:
             type: string
         level:
           type: integer
+          description: Tree depth (0 = root). Auto-computed server-side if omitted.
+          example: 1
         is_active:
           type: boolean
+          default: true
+          example: true
     CartItem:
       type: object
+      description: A single item line in a shopping cart.
       properties:
         product_id:
           type: string
+          description: UUID of the product.
+          example: 8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1
         quantity:
           type: integer
+          minimum: 1
+          example: 2
     Cart:
       type: object
+      description: A user's shopping cart.
       properties:
         user_id:
           type: string
+          description: UUID of the cart owner.
+          example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
         items:
           type: array
+          description: Current items in the cart. Empty array if the cart is empty.
           items:
             $ref: "#/components/schemas/CartItem"
         updated_at:
           type: string
           format: date-time
+          description: Timestamp of the last cart modification.
+          example: "2026-02-24T12:34:56Z"
+      example:
+        user_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        items:
+          - product_id: 8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1
+            quantity: 2
+        updated_at: "2026-02-24T12:34:56Z"
     AddItemsRequest:
       type: object
-      required: [items]
+      required:
+        - items
+      description: One or more items to add to the cart.
       properties:
         items:
           type: array
+          minItems: 1
           items:
             $ref: "#/components/schemas/CartItem"
+      example:
+        items:
+          - product_id: 8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1
+            quantity: 1
+          - product_id: 9c2a1c4b-8c5c-4a59-8f1b-1a2b3c4d5e6f
+            quantity: 3
     CheckoutResponse:
       type: object
+      description: Result of initiating the checkout flow.
       properties:
         order_id:
           type: string
           format: uuid
+          description: UUID of the newly created order.
+          example: f1e2d3c4-b5a6-7890-1234-abcdef123456
         status:
           type: string
+          description:
+            "Initial order status. Typically `pending` until payment is confirmed by Stripe webhook.
+
+            "
+          enum:
+            - pending
+            - processing
+            - paid
+            - failed
+            - cancelled
+          example: pending
+        checkout_url:
+          type: string
+          format: uri
+          nullable: true
+          description:
+            "URL to Stripe's hosted checkout page. Redirect the user here to complete payment. May be `null` if
+            the payment session is still being created asynchronously.
+
+            "
+          example: https://checkout.stripe.com/pay/cs_test_XXXXXXXXXXXXXXXX
     CreateOrderRequest:
       type: object
-      required: [items]
+      required:
+        - items
+      description: Direct order creation payload (bypasses cart flow).
       properties:
         items:
           type: array
+          minItems: 1
           items:
             type: object
-            required: [product_id, quantity]
+            required:
+              - product_id
+              - quantity
             properties:
               product_id:
                 type: string
                 format: uuid
+                example: 8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1
               quantity:
                 type: integer
+                minimum: 1
+                example: 2
     OrderItem:
       type: object
+      description: A single line item within an order.
       properties:
         id:
           type: string
           format: uuid
+          example: b2c3d4e5-f6a7-8901-bcde-f12345678901
         order_id:
           type: string
           format: uuid
+          example: f1e2d3c4-b5a6-7890-1234-abcdef123456
         product_id:
           type: string
           format: uuid
+          example: 8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1
         quantity:
           type: integer
+          example: 2
         price:
           type: integer
+          description:
+            "Unit price in the smallest currency unit (e.g., pence for GBP, cents for USD) at the time the order
+            was placed.
+
+            "
+          example: 4999
     Order:
       type: object
+      description: An order record.
       properties:
         id:
           type: string
           format: uuid
+          example: f1e2d3c4-b5a6-7890-1234-abcdef123456
         order_number:
           type: string
+          description: Human-readable order reference shown to customers.
+          example: ORD-20260225-0042
         user_id:
           type: string
           format: uuid
+          example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
         amount:
           type: integer
+          description:
+            "Total order amount in the smallest currency unit (e.g., pence for GBP). Equals the sum of (`price`
+            × `quantity`) for all line items.
+
+            "
+          example: 9998
         status:
           type: string
+          enum:
+            - pending
+            - processing
+            - paid
+            - cancelled
+            - completed
+            - refunded
+          description:
+            "Current order lifecycle status: - `pending` — awaiting payment - `processing` — payment received,
+            fulfilment in progress - `paid` — payment confirmed by Stripe - `cancelled` — order cancelled before fulfilment
+            - `completed` — order shipped/delivered - `refunded` — payment refunded
+
+            "
+          example: paid
         canceled_at:
           type: string
           format: date-time
           nullable: true
+          example: null
         completed_at:
           type: string
           format: date-time
           nullable: true
+          example: null
         created_at:
           type: string
           format: date-time
+          example: "2026-02-25T10:00:00Z"
         updated_at:
           type: string
           format: date-time
+          example: "2026-02-25T10:05:00Z"
         order_items:
           type: array
           items:
             $ref: "#/components/schemas/OrderItem"
     OrderListResponse:
       type: object
+      description: Paginated list of orders.
       properties:
         orders:
           type: array
@@ -1435,45 +2926,84 @@ components:
           properties:
             page:
               type: integer
+              example: 1
             limit:
               type: integer
+              example: 10
             total_orders:
               type: integer
+              example: 37
             total_pages:
               type: integer
+              example: 4
             has_more:
               type: boolean
+              example: true
     OrderDetailResponse:
       type: object
+      description: Wrapper containing a single order's full details.
       properties:
         order:
           $ref: "#/components/schemas/Order"
     PaymentStatusResponse:
       type: object
+      description: Payment status for an order.
       properties:
         order_id:
           type: string
           format: uuid
+          example: f1e2d3c4-b5a6-7890-1234-abcdef123456
         status:
           type: string
+          enum:
+            - pending
+            - paid
+            - failed
+            - refunded
+          example: paid
         checkout_url:
           type: string
+          format: uri
           nullable: true
+          description: Retry URL if payment failed and a new session was created.
     VerifyPaymentRequest:
       type: object
-      required: [payment_id, session_id]
+      required:
+        - payment_id
+        - session_id
+      description:
+        "Payload for verifying a payment after Stripe redirects back. Extract `payment_id` and `session_id` from
+        the Stripe success URL query parameters.
+
+        "
       properties:
         payment_id:
           type: string
+          description: Stripe PaymentIntent ID (e.g., `pi_...`).
+          example: pi_3OqAbCDefGhIjKlM0NoPqRsT
         session_id:
           type: string
+          description: Stripe Checkout Session ID (e.g., `cs_test_...`).
+          example: cs_test_a1B2c3D4e5F6g7H8i9J0kL
     VerifyPaymentResponse:
       type: object
+      description: Result of the payment verification.
       properties:
         status:
           type: string
+          enum:
+            - success
+            - pending
+            - failed
+          description:
+            "- `success` — payment confirmed; order status updated to `paid`. - `pending` — payment not yet captured
+            (try again shortly). - `failed` — payment failed; order will be cancelled.
+
+            "
+          example: success
     BFFHomeResponse:
       type: object
+      description: Aggregated home page payload.
       properties:
         products:
           $ref: "#/components/schemas/ProductListResponse"
@@ -1482,8 +3012,11 @@ components:
         timestamp:
           type: string
           format: date-time
+          description: Server-side timestamp when the response was assembled.
+          example: "2026-02-25T10:00:00Z"
     BFFProfileResponse:
       type: object
+      description: Aggregated profile page payload.
       properties:
         profile:
           $ref: "#/components/schemas/UserProfileResponse"
@@ -1492,41 +3025,273 @@ components:
         timestamp:
           type: string
           format: date-time
+          example: "2026-02-25T10:00:00Z"
     BulkImportValidation:
       type: object
+      description: Dry-run validation results for a bulk product CSV.
       properties:
         totalProducts:
           type: integer
+          description: Total number of rows found in the CSV.
+          example: 120
         validProducts:
           type: integer
+          description: Number of rows that passed validation.
+          example: 115
         invalidProducts:
           type: integer
+          description: Number of rows that failed validation.
+          example: 5
         missingCategories:
           type: array
+          description: Category names referenced in the CSV that don't exist in the catalogue.
           items:
             type: string
+          example:
+            - Wearables
+            - Smart Home
         duplicateSKUs:
           type: array
+          description: SKUs that appear more than once in the CSV or already exist in the catalogue.
           items:
             type: string
+          example:
+            - LGT-MOUSE-001
         errors:
           type: array
+          description: Per-row validation errors.
           items:
             type: object
+            properties:
+              row:
+                type: integer
+                description: 1-indexed row number in the CSV.
+              field:
+                type: string
+                description: The field that failed validation.
+              message:
+                type: string
         warnings:
           type: array
+          description: Non-blocking warnings (rows will still be imported).
           items:
             type: object
     BulkImportResult:
       type: object
+      description: Result of a completed bulk product import.
       properties:
         insertedCount:
           type: integer
+          description: Number of products successfully inserted.
+          example: 115
         errorsCount:
           type: integer
+          description: Number of rows that failed to import.
+          example: 5
         errors:
+          type: array
+          description: Per-row import errors for failed rows.
+          items:
+            type: object
+            properties:
+              row:
+                type: integer
+              sku:
+                type: string
+              message:
+                type: string
+        message:
+          type: string
+          description: Human-readable summary of the import result.
+          example: "Import complete: 115 inserted, 5 errors."
+    BulkDeleteRequest:
+      type: object
+      description:
+        "Identifies products to delete in bulk. Use exactly one of the three targeting modes:
+
+        - `ids` — list of specific product UUIDs - `category_ids` — delete all products in these categories - `delete_all:
+        true` — delete **all** products (use with extreme caution)
+
+        "
+      properties:
+        ids:
+          type: array
+          description: Specific product UUIDs to delete.
+          items:
+            type: string
+            format: uuid
+        category_ids:
+          type: array
+          description: Delete all products belonging to these category UUIDs.
+          items:
+            type: string
+            format: uuid
+        delete_all:
+          type: boolean
+          description: If `true`, deletes every product in the catalogue. Irreversible.
+          default: false
+      example:
+        ids:
+          - 8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1
+        category_ids: []
+        delete_all: false
+    StockRequest:
+      type: object
+      required:
+        - product_id
+        - quantity
+      description: Sets the absolute stock quantity for a product.
+      properties:
+        product_id:
+          type: string
+          format: uuid
+          example: 8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1
+        quantity:
+          type: integer
+          minimum: 0
+          description: New absolute stock quantity. Use 0 to mark as out of stock.
+          example: 100
+    StockResponse:
+      type: object
+      description: Current stock level for a product.
+      properties:
+        product_id:
+          type: string
+          format: uuid
+          example: 8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1
+        quantity:
+          type: integer
+          description: Current on-hand (unreserved) quantity.
+          example: 42
+    InventoryCheckRequest:
+      type: object
+      description: List of items to check stock availability for.
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required:
+              - product_id
+              - quantity
+            properties:
+              product_id:
+                type: string
+                format: uuid
+                example: 8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1
+              quantity:
+                type: integer
+                minimum: 1
+                description: Desired quantity to purchase.
+                example: 2
+    InventoryCheckResponse:
+      type: object
+      description: Per-item availability results.
+      properties:
+        items:
           type: array
           items:
             type: object
-        message:
+            properties:
+              product_id:
+                type: string
+                format: uuid
+                example: 8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1
+              available:
+                type: boolean
+                description: Whether the requested quantity is currently available.
+                example: true
+              available_quantity:
+                type: integer
+                description: Current unreserved stock for this product.
+                example: 5
+    ReserveRequest:
+      type: object
+      description:
+        "Request to reserve stock for an order. Part of the order saga pattern. Idempotent on `order_id`.
+
+        "
+      properties:
+        order_id:
           type: string
+          format: uuid
+          description: The order for which stock is being reserved.
+          example: f1e2d3c4-b5a6-7890-1234-abcdef123456
+        items:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required:
+              - product_id
+              - quantity
+            properties:
+              product_id:
+                type: string
+                format: uuid
+                example: 8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1
+              quantity:
+                type: integer
+                minimum: 1
+                example: 2
+    ReleaseRequest:
+      type: object
+      description:
+        "Request to release a previously created stock reservation. Called when an order is cancelled or payment
+        fails.
+
+        "
+      properties:
+        order_id:
+          type: string
+          format: uuid
+          description: The order whose reservation should be released.
+          example: f1e2d3c4-b5a6-7890-1234-abcdef123456
+        items:
+          type: array
+          items:
+            type: object
+            required:
+              - product_id
+              - quantity
+            properties:
+              product_id:
+                type: string
+                format: uuid
+                example: 8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1
+              quantity:
+                type: integer
+                minimum: 1
+                example: 2
+    ConfirmRequest:
+      type: object
+      description:
+        "Request to confirm a stock reservation after successful payment. Converts the reservation into a permanent
+        stock deduction.
+
+        "
+      properties:
+        order_id:
+          type: string
+          format: uuid
+          description: The order whose reservation should be confirmed.
+          example: f1e2d3c4-b5a6-7890-1234-abcdef123456
+        items:
+          type: array
+          items:
+            type: object
+            required:
+              - product_id
+              - quantity
+            properties:
+              product_id:
+                type: string
+                format: uuid
+                example: 8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1
+              quantity:
+                type: integer
+                minimum: 1
+                example: 2
+security:
+  - cookieAuth: []

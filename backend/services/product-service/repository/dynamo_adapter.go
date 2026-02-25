@@ -41,6 +41,100 @@ type ddbProduct struct {
 	DeletedAt    *string  `dynamodbav:"deleted_at,omitempty"`
 }
 
+// matchesFilter checks whether a DynamoDB product record matches the provided filter map.
+func matchesFilter(dp ddbProduct, filter map[string]interface{}) bool {
+	if filter == nil || len(filter) == 0 {
+		return true
+	}
+
+	if v, ok := filter["is_featured"].(bool); ok {
+		if dp.IsFeatured != v {
+			return false
+		}
+	}
+
+	if v, ok := filter["brand"].(string); ok {
+		if dp.Brand == nil || *dp.Brand != v {
+			return false
+		}
+	}
+
+	if v, ok := filter["min_price"]; ok {
+		switch t := v.(type) {
+		case float64:
+			if dp.Price < t {
+				return false
+			}
+		case float32:
+			if dp.Price < float64(t) {
+				return false
+			}
+		case int:
+			if dp.Price < float64(t) {
+				return false
+			}
+		case int64:
+			if dp.Price < float64(t) {
+				return false
+			}
+		}
+	}
+
+	if v, ok := filter["max_price"]; ok {
+		switch t := v.(type) {
+		case float64:
+			if dp.Price > t {
+				return false
+			}
+		case float32:
+			if dp.Price > float64(t) {
+				return false
+			}
+		case int:
+			if dp.Price > float64(t) {
+				return false
+			}
+		case int64:
+			if dp.Price > float64(t) {
+				return false
+			}
+		}
+	}
+
+	if v, ok := filter["category_ids"].([]string); ok && len(v) > 0 {
+		// require at least one matching category id
+		found := false
+		for _, cat := range dp.CategoryIDs {
+			for _, target := range v {
+				if cat == target {
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+
+	if v, ok := filter["in_stock"].(bool); ok {
+		if v { // want in-stock
+			if dp.Quantity <= 0 {
+				return false
+			}
+		} else { // want out-of-stock
+			if dp.Quantity > 0 {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
 func (d *DynamoAdapter) FindByID(ctx context.Context, id uuid.UUID) (*models.Product, error) {
 	key, err := attributevalue.MarshalMap(map[string]string{"id": id.String()})
 	if err != nil {
@@ -152,6 +246,12 @@ func (d *DynamoAdapter) Find(ctx context.Context, filter map[string]interface{},
 			if err := attributevalue.UnmarshalMap(it, &dp); err != nil {
 				return nil, fmt.Errorf("unmarshal item: %w", err)
 			}
+
+			// apply filters from service layer
+			if !matchesFilter(dp, filter) {
+				continue
+			}
+
 			p := &models.Product{}
 			p.ID, _ = uuid.Parse(dp.ProductID)
 			p.Name = dp.Name
@@ -194,7 +294,7 @@ func (d *DynamoAdapter) Find(ctx context.Context, filter map[string]interface{},
 
 // Count returns the item count (full table scan Count)
 func (d *DynamoAdapter) Count(ctx context.Context, filter map[string]interface{}) (int64, error) {
-	input := &dynamodb.ScanInput{TableName: &d.table, Select: types.SelectCount}
+	input := &dynamodb.ScanInput{TableName: &d.table}
 	paginator := dynamodb.NewScanPaginator(d.client, input)
 	var total int64
 	for paginator.HasMorePages() {
@@ -202,7 +302,15 @@ func (d *DynamoAdapter) Count(ctx context.Context, filter map[string]interface{}
 		if err != nil {
 			return 0, fmt.Errorf("scan count failed: %w", err)
 		}
-		total += int64(page.Count)
+		for _, it := range page.Items {
+			var dp ddbProduct
+			if err := attributevalue.UnmarshalMap(it, &dp); err != nil {
+				return 0, fmt.Errorf("unmarshal item: %w", err)
+			}
+			if matchesFilter(dp, filter) {
+				total++
+			}
+		}
 	}
 	return total, nil
 }

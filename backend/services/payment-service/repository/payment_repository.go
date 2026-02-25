@@ -11,6 +11,7 @@ import (
 type PaymentRepository interface {
 	CreatePayment(ctx context.Context, payment *models.Payment) error
 	GetPaymentByOrderID(ctx context.Context, orderID uuid.UUID) (*models.Payment, error)
+	GetPaymentByIdempotencyKey(ctx context.Context, key string) (*models.Payment, error)
 	UpdatePaymentByOrderID(ctx context.Context, orderID uuid.UUID, status string, checkoutURL *string, stripePaymentID *string) error
 }
 
@@ -29,6 +30,14 @@ func (r *gormPaymentRepo) CreatePayment(ctx context.Context, payment *models.Pay
 func (r *gormPaymentRepo) GetPaymentByOrderID(ctx context.Context, orderID uuid.UUID) (*models.Payment, error) {
 	var payment models.Payment
 	if err := r.db.WithContext(ctx).Where("order_id = ?", orderID).First(&payment).Error; err != nil {
+		return nil, err
+	}
+	return &payment, nil
+}
+
+func (r *gormPaymentRepo) GetPaymentByIdempotencyKey(ctx context.Context, key string) (*models.Payment, error) {
+	var payment models.Payment
+	if err := r.db.WithContext(ctx).Where("idempotency_key = ?", key).First(&payment).Error; err != nil {
 		return nil, err
 	}
 	return &payment, nil

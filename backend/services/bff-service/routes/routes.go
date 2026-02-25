@@ -42,6 +42,8 @@ func RegisterRoutes(r *gin.Engine, ctrl *controllers.BFFController) {
 		protected.DELETE("/cart/remove/:product_id", ctrl.CartRemoveItem)
 		protected.DELETE("/cart/clear", ctrl.Proxy("DELETE", "/cart/clear"))
 		protected.POST("/cart/checkout", ctrl.Proxy("POST", "/cart/checkout"))
+		// Orchestrated checkout: creates order and checkout session, returns URL
+		protected.POST("/checkout", ctrl.Checkout)
 
 		// Orders page
 		protected.GET("/orders", ctrl.Proxy("GET", "/orders"))

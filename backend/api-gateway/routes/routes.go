@@ -16,6 +16,9 @@ func RegisterAllRoutes(r *gin.Engine) {
 		}
 	}
 
+	// BFF forwarding
+	bff := forwardTo("http://bff-service:8088/bff")
+
 	// ===== PUBLIC ROUTES =====
 	public := r.Group("/")
 
@@ -28,6 +31,14 @@ func RegisterAllRoutes(r *gin.Engine) {
 	categories := forwardTo("http://product-service:8082/categories")
 	public.GET("/categories", categories)
 	public.GET("/categories/*any", categories)
+
+	// BFF public routes (pass-through to bff-service)
+	public.GET("/bff", bff)
+	// public.GET("/bff/*any", bff)
+
+	// Expose docs at gateway root by forwarding to the BFF docs path
+	public.GET("/docs", forwardTo("http://bff-service:8088/docs"))
+	public.GET("/docs/*any", forwardTo("http://bff-service:8088/docs"))
 
 	// ===== AUTH ROUTES (PUBLIC) =====
 	// ===== PROTECTED ROUTES (JWT Required) =====
@@ -89,14 +100,20 @@ func RegisterAllRoutes(r *gin.Engine) {
 	protected.POST("/payment/*any", payment)
 	protected.GET("/payment/*any", payment)
 
+	// BFF: forward POSTs (protected) so POST actions (cart add/checkout) reach bff-service
+	protected.POST("/bff/*any", bff)
+	protected.POST("/bff", bff)
+
+	// Fix: Explicitly protect BFF profile so Gateway parses the cookie and sets X-User-ID
+	protected.GET("/bff/*any", bff)
+
+	// Note: public GETs for `/bff` remain handled above so public pages still work.
+
 	// Inventory routes
 	inventory := forwardTo("http://inventory-service:8084/inventory")
 	// Protected: read & operations
 	protected.GET("/inventory/:productId", inventory)
 	protected.POST("/inventory/check", inventory)
-	protected.POST("/inventory/reserve", inventory)
-	protected.POST("/inventory/confirm", inventory)
-	protected.POST("/inventory/release", inventory)
 	// Admin: create & update stock
 	admin.POST("/inventory", inventory)
 	admin.PUT("/inventory/:productId", inventory)

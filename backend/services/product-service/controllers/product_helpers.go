@@ -51,6 +51,13 @@ func buildServiceParams(page, perPage int, filters *ProductFilters) services.Lis
 	if filters.MaxPrice != nil {
 		params.MaxPrice = filters.MaxPrice
 	}
+	if strings.TrimSpace(filters.Brand) != "" {
+		b := strings.TrimSpace(filters.Brand)
+		params.Brand = &b
+	}
+	if filters.InStockParsed != nil {
+		params.InStock = filters.InStockParsed
+	}
 
 	return params
 }

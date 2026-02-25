@@ -18,7 +18,13 @@ func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.GetHeader("X-User-ID")
 		if userID == "" {
-			// Try cookie-based auth
+			// First try gateway-propagated user_id cookie
+			if v, err := c.Cookie("user_id"); err == nil && v != "" {
+				userID = v
+			}
+		}
+		if userID == "" {
+			// Try cookie-based auth via __session JWT
 			tokenStr, err := c.Cookie("__session")
 			if err != nil || tokenStr == "" {
 				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
