@@ -40,6 +40,8 @@ servers:
     description: Order Service
   - url: http://localhost:8087
     description: Payment Service
+  - url: http://localhost:8090
+    description: Promotion Service
 tags:
   - name: Gateway
     description:
@@ -93,6 +95,13 @@ tags:
       "Internal inventory management. Tracks stock levels per product and implements the reserve → confirm / release
       saga pattern used during checkout. Most endpoints are intended for internal service-to-service calls, not direct frontend
       usage.
+
+      "
+  - name: Promotion Service
+    description:
+      "Coupon and promotion management. Supports creating, validating, retrieving, and deactivating discount coupons.
+      Coupon types include percentage, flat, and free-shipping discounts. Publishes a `coupon_applied` SNS event when
+      a coupon is successfully applied.
 
       "
   - name: Admin Only
@@ -2261,6 +2270,139 @@ components:
             error: Bad Gateway
             details: Upstream service is temporarily unavailable.
   schemas:
+    PaginationMeta:
+      type: object
+      description: Pagination metadata returned with paginated list responses.
+      properties:
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 10
+        total:
+          type: integer
+          format: int64
+          example: 42
+        total_pages:
+          type: integer
+          format: int64
+          example: 5
+        has_more:
+          type: boolean
+          example: true
+    Coupon:
+      type: object
+      description: A promotional coupon.
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        code:
+          type: string
+          example: SAVE10
+        type:
+          type: string
+          enum: [percentage, flat, freeshipping]
+          example: percentage
+        value:
+          type: number
+          format: double
+          description: Discount value — percentage (0-100), flat amount in cents/currency, or 0 for freeshipping.
+          example: 10
+        min_order_value:
+          type: number
+          format: double
+          description: Minimum cart total required to apply this coupon.
+          example: 50.0
+        usage_limit:
+          type: integer
+          description: Maximum number of times this coupon can be used. 0 = unlimited.
+          example: 100
+        used_count:
+          type: integer
+          description: Number of times this coupon has been used.
+          example: 5
+        expires_at:
+          type: string
+          format: date-time
+          example: "2026-12-31T23:59:59Z"
+        active:
+          type: boolean
+          example: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateCouponRequest:
+      type: object
+      required: [code, type, value, expires_at]
+      properties:
+        code:
+          type: string
+          minLength: 3
+          maxLength: 64
+          example: SAVE10
+        type:
+          type: string
+          enum: [percentage, flat, freeshipping]
+          example: percentage
+        value:
+          type: number
+          format: double
+          minimum: 0
+          example: 10
+        min_order_value:
+          type: number
+          format: double
+          minimum: 0
+          default: 0
+          example: 50.0
+        usage_limit:
+          type: integer
+          minimum: 0
+          default: 0
+          description: 0 = unlimited
+          example: 100
+        expires_at:
+          type: string
+          format: date-time
+          example: "2026-12-31T23:59:59Z"
+    ValidateCouponRequest:
+      type: object
+      required: [code, cart_total]
+      properties:
+        code:
+          type: string
+          example: SAVE10
+        cart_total:
+          type: number
+          format: double
+          minimum: 0.01
+          example: 120.0
+    ValidateCouponResponse:
+      type: object
+      properties:
+        valid:
+          type: boolean
+          example: true
+        code:
+          type: string
+          example: SAVE10
+        type:
+          type: string
+          enum: [percentage, flat, freeshipping]
+          example: percentage
+        discount_amount:
+          type: number
+          format: double
+          example: 12.0
+        message:
+          type: string
+          example: Coupon applied successfully
     HealthResponse:
       type: object
       description: Gateway health check response.
@@ -3293,5 +3435,165 @@ components:
                 type: integer
                 minimum: 1
                 example: 2
+  /coupons:
+    post:
+      tags:
+        - Promotion Service
+        - Admin Only
+      summary: Create coupon
+      description: "**Admin only.** Creates a new discount coupon."
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCouponRequest"
+      responses:
+        "201":
+          description: Coupon created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  coupon:
+                    $ref: "#/components/schemas/Coupon"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Coupon code already exists
+    get:
+      tags:
+        - Promotion Service
+        - Admin Only
+      summary: List all coupons
+      description: "**Admin only.** Returns a paginated list of all coupons."
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+            maximum: 100
+      responses:
+        "200":
+          description: Coupon list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  coupons:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Coupon"
+                  meta:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /coupons/validate:
+    post:
+      tags:
+        - Promotion Service
+      summary: Validate and apply a coupon
+      description: |
+        Validates a coupon code against the provided cart total. Returns the discount amount.
+        If valid, increments the coupon's usage count and publishes a `coupon_applied` SNS event.
+        Called by the cart-service or frontend during checkout.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ValidateCouponRequest"
+      responses:
+        "200":
+          description: Validation result (valid or invalid with reason)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidateCouponResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /coupons/{code}:
+    get:
+      tags:
+        - Promotion Service
+      summary: Get coupon by code
+      description: Returns the details of a single active coupon.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+          example: SAVE10
+      responses:
+        "200":
+          description: Coupon details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  coupon:
+                    $ref: "#/components/schemas/Coupon"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags:
+        - Promotion Service
+        - Admin Only
+      summary: Deactivate coupon
+      description: "**Admin only.** Soft-deactivates a coupon. The coupon record is retained for audit purposes."
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+          example: SAVE10
+      responses:
+        "200":
+          description: Coupon deactivated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Coupon deactivated
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
 security:
   - cookieAuth: []

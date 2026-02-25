@@ -118,6 +118,16 @@ func RegisterAllRoutes(r *gin.Engine) {
 	admin.POST("/inventory", inventory)
 	admin.PUT("/inventory/:productId", inventory)
 
+	// Coupon / Promotion routes
+	coupons := forwardTo("http://promotion-service:8090/coupons")
+	// Protected: validate coupon (called by cart-service or frontend) and read
+	protected.POST("/coupons/validate", coupons)
+	protected.GET("/coupons/:code", coupons)
+	// Admin: create, list, deactivate
+	admin.POST("/coupons", coupons)
+	admin.GET("/coupons", coupons)
+	admin.DELETE("/coupons/:code", coupons)
+
 	// Stripe webhook (public)
 	public.POST("/stripe/webhook", forwardTo("http://payment-service:8087/stripe/webhook"))
 }
