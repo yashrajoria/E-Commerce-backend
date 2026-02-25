@@ -38,6 +38,8 @@ tags:
     description: Order APIs
   - name: Payment Service
     description: Payment APIs and Stripe webhook
+  - name: Inventory Service
+    description: Inventory stock, reservation, and reconciliation APIs
 
 paths:
   /health:
@@ -853,6 +855,205 @@ paths:
           $ref: "#/components/responses/MessageResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
+  /products/presign:
+    get:
+      tags: [Gateway, Product Service]
+      summary: "Get presigned upload URLs (query: sku)"
+      parameters:
+        - name: sku
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Presigned URLs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  upload_url:
+                    type: string
+                  fields:
+                    type: object
+
+  /products/{id}/images/presign:
+    post:
+      tags: [Gateway, Product Service]
+      summary: Create a presigned upload URL for a specific product image
+      parameters:
+        - $ref: "#/components/parameters/ProductID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                filename:
+                  type: string
+      responses:
+        "200":
+          description: Presign result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  upload_url:
+                    type: string
+
+  /products/bulk/delete:
+    post:
+      tags: [Gateway, Product Service]
+      summary: Bulk delete products by IDs, categories, or all
+      requestBody:
+        $ref: "#/components/requestBodies/BulkDeleteRequest"
+      responses:
+        "200":
+          description: Deleted count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted_count:
+                    type: integer
+
+  /products/internal/{id}:
+    get:
+      tags: [Product Service]
+      summary: Internal endpoint to fetch product by ID
+      parameters:
+        - $ref: "#/components/parameters/ProductID"
+      responses:
+        "200":
+          description: Product DTO
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+
+  /products/bulk/jobs/{id}:
+    get:
+      tags: [Gateway, Product Service]
+      summary: Get bulk import job status/result
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Bulk import job result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkImportResult"
+
+  /inventory/{productId}:
+    get:
+      tags: [Inventory Service]
+      summary: Get stock for a product
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Stock level
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StockResponse"
+    put:
+      tags: [Inventory Service]
+      summary: Update stock for a product
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StockRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+
+  /inventory/check:
+    post:
+      tags: [Inventory Service]
+      summary: Check availability for multiple items
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InventoryCheckRequest"
+      responses:
+        "200":
+          description: Availability results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryCheckResponse"
+
+  /inventory:
+    post:
+      tags: [Inventory Service]
+      summary: Set stock for a product (create/upsert)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StockRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+
+  /inventory/reserve:
+    post:
+      tags: [Inventory Service]
+      summary: Reserve stock for an order (idempotent)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReserveRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+
+  /inventory/release:
+    post:
+      tags: [Inventory Service]
+      summary: Release previously reserved stock
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReleaseRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+
+  /inventory/confirm:
+    post:
+      tags: [Inventory Service]
+      summary: Confirm reserved stock after successful payment
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
 components:
   parameters:
     ProductID:
@@ -876,7 +1077,7 @@ components:
         type: string
         format: uuid
     OrderID:
-      name: order_id
+      name: id
       in: path
       required: true
       schema:
@@ -1013,6 +1214,12 @@ components:
           schema:
             type: object
             additionalProperties: true
+    BulkDeleteRequest:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/BulkDeleteRequest"
     CreateCategoryRequest:
       required: true
       content:
@@ -1592,3 +1799,142 @@ components:
             type: object
         message:
           type: string
+    BulkDeleteRequest:
+      type: object
+      properties:
+        ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        category_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        delete_all:
+          type: boolean
+      example:
+        ids: ["8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1"]
+        category_ids: []
+        delete_all: false
+
+    StockRequest:
+      type: object
+      required: [product_id, quantity]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+      example:
+        product_id: "8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1"
+        quantity: 100
+
+    StockResponse:
+      type: object
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+      example:
+        product_id: "8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1"
+        quantity: 42
+
+    InventoryCheckRequest:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              product_id:
+                type: string
+                format: uuid
+              quantity:
+                type: integer
+      example:
+        items:
+          - product_id: "8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1"
+            quantity: 2
+
+    InventoryCheckResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              product_id:
+                type: string
+                format: uuid
+              available:
+                type: boolean
+              available_quantity:
+                type: integer
+      example:
+        items:
+          - product_id: "8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1"
+            available: true
+            available_quantity: 5
+
+    ReserveRequest:
+      type: object
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              product_id:
+                type: string
+                format: uuid
+              quantity:
+                type: integer
+      example:
+        order_id: "f1e2d3c4-b5a6-7890-1234-abcdef123456"
+        items:
+          - product_id: "8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1"
+            quantity: 2
+
+    ReleaseRequest:
+      type: object
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              product_id:
+                type: string
+                format: uuid
+              quantity:
+                type: integer
+
+    ConfirmRequest:
+      type: object
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              product_id:
+                type: string
+                format: uuid
+              quantity:
+                type: integer
