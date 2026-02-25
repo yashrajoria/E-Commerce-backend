@@ -232,14 +232,42 @@ func (s *ProductServiceDDB) UpdateProduct(ctx context.Context, id uuid.UUID, upd
 	if len(updates) == 0 {
 		return 0, fmt.Errorf("no update fields provided")
 	}
-	delete(updates, "_id")
-	delete(updates, "product_id")
 
-	updates["updated_at"] = time.Now().UTC().Format(time.RFC3339)
+	// Map frontend camelCase keys to backend snake_case for DynamoDB
+	sanitized := make(map[string]interface{})
+	for k, v := range updates {
+		switch k {
+		case "id", "_id", "product_id", "created_at", "updated_at":
+			continue // Skip system fields
+		case "isFeatured":
+			sanitized["is_featured"] = v
+		case "categoryIds":
+			sanitized["category_ids"] = v
+		default:
+			sanitized[k] = v
+		}
+	}
+	sanitized["updated_at"] = time.Now().UTC().Format(time.RFC3339)
 
-	err := s.productRepo.Update(ctx, id, updates)
+	err := s.productRepo.Update(ctx, id, sanitized)
 	if err != nil {
 		return 0, err
+	}
+
+	// Sync inventory if quantity is updated
+	if val, ok := sanitized["quantity"]; ok && s.inventoryClient != nil {
+		var newQty int
+		switch v := val.(type) {
+		case int:
+			newQty = v
+		case float64:
+			newQty = int(v)
+		}
+		// Fire-and-forget sync to ensure Inventory Service has the latest count
+		if err := s.inventoryClient.SetStock(ctx, id.String(), newQty); err != nil {
+			zap.L().Warn("Failed to sync inventory on product update",
+				zap.String("product_id", id.String()), zap.Error(err))
+		}
 	}
 
 	return 1, nil
@@ -250,6 +278,13 @@ func (s *ProductServiceDDB) DeleteProduct(ctx context.Context, id uuid.UUID) (in
 	if err != nil {
 		return 0, err
 	}
+
+	// Sync inventory: Set stock to 0 to prevent future orders
+	if s.inventoryClient != nil {
+		// Ideally, InventoryService should have a DeleteStock method, but SetStock(0) is a safe fallback
+		_ = s.inventoryClient.SetStock(ctx, id.String(), 0)
+	}
+
 	return 1, nil
 }
 
@@ -303,6 +338,16 @@ func (s *ProductServiceDDB) BulkDeleteProducts(ctx context.Context, req BulkDele
 	// Perform batch delete via repo
 	if err := s.productRepo.DeleteMany(ctx, idsToDelete); err != nil {
 		return 0, fmt.Errorf("failed to delete products: %w", err)
+	}
+
+	// Sync inventory for bulk deletes (async to avoid blocking response)
+	if s.inventoryClient != nil && len(idsToDelete) > 0 {
+		go func(ids []uuid.UUID) {
+			bgCtx := context.Background()
+			for _, id := range ids {
+				_ = s.inventoryClient.SetStock(bgCtx, id.String(), 0)
+			}
+		}(idsToDelete)
 	}
 
 	return int64(len(idsToDelete)), nil
