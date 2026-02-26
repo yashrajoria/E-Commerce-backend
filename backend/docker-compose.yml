@@ -251,6 +251,34 @@ services:
     networks:
       - ecommerce-network
 
+  shipping-service:
+    build:
+      context: .
+      dockerfile: services/shipping-service/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./services/shipping-service:/app
+    ports:
+      - "8091:8091"
+    env_file:
+      - .env
+    environment:
+      - PORT=8091
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_EC2_METADATA_DISABLED=true
+      - SHIPPO_API_KEY=${SHIPPO_API_KEY:-}
+      - SHIPPING_SNS_TOPIC_ARN=${SHIPPING_SNS_TOPIC_ARN:-}
+      - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
+      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
+      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+
   api-gateway:
     build:
       context: .
@@ -280,6 +308,7 @@ services:
       - cart-service
       - payment-service
       - promotion-service
+      - shipping-service
     networks:
       - ecommerce-network
 

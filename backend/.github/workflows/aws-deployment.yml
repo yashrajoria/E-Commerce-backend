@@ -24,6 +24,7 @@ jobs:
           - payment-service
           - product-service
           - promotion-service
+          - shipping-service
           - user-service
     steps:
       - name: Checkout
@@ -59,6 +60,7 @@ jobs:
           - payment-service
           - product-service
           - promotion-service
+          - shipping-service
           - user-service
     steps:
       - name: Checkout
