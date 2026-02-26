@@ -128,6 +128,14 @@ func RegisterAllRoutes(r *gin.Engine) {
 	admin.GET("/coupons", coupons)
 	admin.DELETE("/coupons/:code", coupons)
 
+	// Shipping routes
+	shipping := forwardTo("http://shipping-service:8091/shipping")
+	// Protected: get rates and track shipments
+	protected.POST("/shipping/rates", shipping)
+	protected.GET("/shipping/track/:tracking_code", shipping)
+	// Protected: create shipping labels (called by order flow)
+	protected.POST("/shipping/labels", shipping)
+
 	// Stripe webhook (public)
 	public.POST("/stripe/webhook", forwardTo("http://payment-service:8087/stripe/webhook"))
 }
