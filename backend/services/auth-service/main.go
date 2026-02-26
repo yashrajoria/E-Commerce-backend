@@ -43,7 +43,10 @@ func main() {
 	if err := models.Migrate(database.DB); err != nil {
 		zap.L().Fatal("DB migration failed", zap.Error(err))
 	}
-
+	snsPublisher, err := services.NewSNSPublisher(context.Background())
+	if err != nil {
+		logger.Fatal("Failed to init SNS publisher", zap.Error(err))
+	}
 	// --- 2. Dependency Injection (Wiring the layers) ---
 
 	// Initialize Repositories
@@ -52,7 +55,7 @@ func main() {
 	// Initialize Services
 	tokenService := services.NewTokenService()
 	// emailService := services.NewEmailService()
-	authService := services.NewAuthService(userRepo, tokenService, database.DB)
+	authService := services.NewAuthService(userRepo, tokenService, snsPublisher, database.DB)
 
 	// Initialize Controllers
 	authController := controllers.NewAuthController(authService)

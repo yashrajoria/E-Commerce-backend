@@ -29,23 +29,31 @@ type ITokenService interface {
 	ValidateToken(tokenStr, expectedType string) (jwt.MapClaims, error)
 }
 
-type IEmailService interface {
-	SendVerificationEmail(email, code string) error
+// IEventPublisher publishes domain events to SNS
+// notification-service consumes these and handles the actual sending
+type IEventPublisher interface {
+	Publish(ctx context.Context, eventType string, payload map[string]interface{}) error
 }
-
-// Placeholder for a real email service
-type EmailService struct{}
-
-func NewEmailService() *EmailService { return &EmailService{} }
 
 type AuthService struct {
-	userRepo     IUserRepository
-	tokenService ITokenService
-	db           *gorm.DB
+	userRepo       IUserRepository
+	tokenService   ITokenService
+	eventPublisher IEventPublisher
+	db             *gorm.DB
 }
 
-func NewAuthService(ur IUserRepository, ts ITokenService, db *gorm.DB) *AuthService {
-	return &AuthService{userRepo: ur, tokenService: ts, db: db}
+func NewAuthService(
+	ur IUserRepository,
+	ts ITokenService,
+	ep IEventPublisher,
+	db *gorm.DB,
+) *AuthService {
+	return &AuthService{
+		userRepo:       ur,
+		tokenService:   ts,
+		eventPublisher: ep,
+		db:             db,
+	}
 }
 
 func (s *AuthService) Login(ctx context.Context, email, password string) (*TokenPair, error) {
@@ -62,19 +70,19 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*Token
 		return nil, fmt.Errorf("invalid email or password")
 	}
 
-	tokenPair, refreshTokenID, err := s.tokenService.GenerateTokenPair(user.ID.String(), user.Email, user.Role)
+	tokenPair, refreshTokenID, err := s.tokenService.GenerateTokenPair(
+		user.ID.String(), user.Email, user.Role,
+	)
 	if err != nil {
 		return nil, err
 	}
 
-	// persist refresh token for rotation/revocation
 	rt := &models.RefreshToken{
 		TokenID:   refreshTokenID,
 		UserID:    user.ID,
 		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
 	}
 	if err := s.userRepo.CreateRefreshToken(ctx, rt); err != nil {
-		// if persistence fails, do not return tokens
 		return nil, fmt.Errorf("failed to store refresh token: %w", err)
 	}
 
@@ -114,8 +122,17 @@ func (s *AuthService) Register(ctx context.Context, name, email, password, role 
 			return fmt.Errorf("failed to create account: %w", err)
 		}
 
-		if err := SendVerificationEmail(newUser.Email, newUser.VerificationCode); err != nil {
-			return fmt.Errorf("failed to send verification email: %w", err)
+		// ✅ Publish SNS event instead of sending email directly
+		// notification-service will consume this and send the verification email
+		if err := s.eventPublisher.Publish(ctx, "user_registered", map[string]interface{}{
+			"email":             newUser.Email,
+			"name":              newUser.Name,
+			"verification_code": newUser.VerificationCode,
+		}); err != nil {
+			// Non-fatal — user is created, email can be resent
+			// Do not roll back the transaction for this
+			// Log the error but don't return it
+			_ = err
 		}
 
 		return nil
@@ -149,7 +166,6 @@ func (s *AuthService) RefreshTokens(ctx context.Context, refreshToken string) (*
 		return nil, fmt.Errorf("invalid token: user ID (sub) claim is missing or not a string")
 	}
 
-	// Verify refresh token hasn't been revoked
 	tokenIDStr, ok := claims["jti"].(string)
 	if !ok {
 		return nil, fmt.Errorf("invalid token: jti claim missing")
@@ -183,7 +199,6 @@ func (s *AuthService) RefreshTokens(ctx context.Context, refreshToken string) (*
 		return nil, fmt.Errorf("invalid token: role claim is missing or not a string")
 	}
 
-	// verify the refresh token against DB (jti)
 	jti, ok := claims["jti"].(string)
 	if !ok || jti == "" {
 		return nil, fmt.Errorf("invalid refresh token: jti missing")
@@ -197,12 +212,10 @@ func (s *AuthService) RefreshTokens(ctx context.Context, refreshToken string) (*
 		return nil, fmt.Errorf("refresh token revoked or expired")
 	}
 
-	// revoke old refresh token
 	if err := s.userRepo.RevokeRefreshTokenByTokenID(ctx, jti); err != nil {
 		return nil, fmt.Errorf("failed to revoke old refresh token: %w", err)
 	}
 
-	// generate new pair and persist new refresh token
 	tokenPair, newTokenID, err := s.tokenService.GenerateTokenPair(userIDStr, email, role)
 	if err != nil {
 		return nil, err
@@ -220,7 +233,6 @@ func (s *AuthService) RefreshTokens(ctx context.Context, refreshToken string) (*
 	return tokenPair, nil
 }
 
-// Logout revokes a given refresh token so it cannot be used anymore
 func (s *AuthService) Logout(ctx context.Context, refreshToken string) error {
 	claims, err := s.tokenService.ValidateToken(refreshToken, "refresh")
 	if err != nil {
@@ -233,7 +245,6 @@ func (s *AuthService) Logout(ctx context.Context, refreshToken string) error {
 	return s.userRepo.RevokeRefreshTokenByTokenID(ctx, jti)
 }
 
-// ResendVerificationEmail generates a new verification code and sends it to the user
 func (s *AuthService) ResendVerificationEmail(ctx context.Context, email string) error {
 	user, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil {
@@ -244,18 +255,21 @@ func (s *AuthService) ResendVerificationEmail(ctx context.Context, email string)
 		return fmt.Errorf("email already verified")
 	}
 
-	// Generate a new verification code
 	verificationCode := GenerateRandomCode(6)
 	user.VerificationCode = verificationCode
 
-	// Update user with new code
 	if err := s.userRepo.Update(ctx, user); err != nil {
 		return fmt.Errorf("failed to update verification code: %w", err)
 	}
 
-	// Send verification email
-	if err := SendVerificationEmail(user.Email, verificationCode); err != nil {
-		return fmt.Errorf("failed to send verification email: %w", err)
+	// ✅ Publish SNS event instead of sending email directly
+	if err := s.eventPublisher.Publish(ctx, "user_registered", map[string]interface{}{
+		"email":             user.Email,
+		"name":              user.Name,
+		"verification_code": verificationCode,
+	}); err != nil {
+		// Non-fatal — code is updated, user can request again
+		_ = err
 	}
 
 	return nil
