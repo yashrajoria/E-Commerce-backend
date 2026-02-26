@@ -37,6 +37,49 @@ services:
     networks:
       - ecommerce-network
 
+  # ── NEW: OpenSearch for search-service ──────────────────────────────────────
+  # opensearch:
+  #   image: opensearchproject/opensearch:2.11.0
+  #   restart: unless-stopped
+  #   environment:
+  #     - discovery.type=single-node
+  #     - DISABLE_SECURITY_PLUGIN=true # fine for local dev
+  #     - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+  #   ports:
+  #     - "9200:9200"
+  #   healthcheck:
+  #     test:
+  #       [
+  #         "CMD-SHELL",
+  #         "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'",
+  #       ]
+  #     interval: 15s
+  #     timeout: 10s
+  #     retries: 10
+  #     start_period: 30s
+  #   volumes:
+  #     - opensearch_data:/usr/share/opensearch/data
+  #   networks:
+  #     - ecommerce-network
+
+  # # ── NEW: Jaeger for distributed tracing (Feature 6) ─────────────────────────
+  # jaeger:
+  #   image: jaegertracing/all-in-one:1.52
+  #   restart: unless-stopped
+  #   ports:
+  #     - "16686:16686" # Jaeger UI
+  #     - "4317:4317" # OTLP gRPC
+  #     - "4318:4318" # OTLP HTTP
+  #   environment:
+  #     - COLLECTOR_OTLP_ENABLED=true
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "wget -qO- http://localhost:16686 > /dev/null"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   networks:
+  #     - ecommerce-network
+
   auth-service:
     build:
       context: .
@@ -57,6 +100,11 @@ services:
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
+      # ── NEW: SNS topic for publishing user_registered events ──
+      - AUTH_SNS_TOPIC_ARN=${AUTH_SNS_TOPIC_ARN:-}
+      # ── NEW: Jaeger tracing ──
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      # - OTEL_SERVICE_NAME=auth-service
     depends_on:
       postgres:
         condition: service_healthy
@@ -83,6 +131,9 @@ services:
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
+      # ── NEW: Jaeger tracing ──
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      # - OTEL_SERVICE_NAME=user-service
     depends_on:
       postgres:
         condition: service_healthy
@@ -116,7 +167,11 @@ services:
       - CLOUDWATCH_ENABLED=true
       - CLOUDWATCH_LOG_GROUP=/ecommerce/services
       - CLOUDWATCH_NAMESPACE=ECommerce
-    # local development overrides should be provided via a local compose override (e.g. docker-compose.override.yml)
+      # ── NEW: SNS topic so product-service publishes product_created/updated ──
+      - PRODUCT_SNS_TOPIC_ARN=${PRODUCT_SNS_TOPIC_ARN:-}
+      # ── NEW: Jaeger tracing ──
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      # - OTEL_SERVICE_NAME=product-service
     networks:
       - ecommerce-network
 
@@ -140,6 +195,9 @@ services:
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
+      # ── NEW: Jaeger tracing ──
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      # - OTEL_SERVICE_NAME=cart-service
     depends_on:
       postgres:
         condition: service_healthy
@@ -168,7 +226,9 @@ services:
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
-    # local development overrides should be provided via a local compose override (e.g. docker-compose.override.yml)
+      # ── NEW: Jaeger tracing ──
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      # - OTEL_SERVICE_NAME=inventory-service
     networks:
       - ecommerce-network
 
@@ -192,6 +252,11 @@ services:
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
+      # ── NEW: SNS topic for order events ──
+      - ORDER_SNS_TOPIC_ARN=${ORDER_SNS_TOPIC_ARN:-}
+      # ── NEW: Jaeger tracing ──
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      # - OTEL_SERVICE_NAME=order-service
     depends_on:
       postgres:
         condition: service_healthy
@@ -218,6 +283,11 @@ services:
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
+      # ── NEW: SNS topic for payment events ──
+      - PAYMENT_SNS_TOPIC_ARN=${PAYMENT_SNS_TOPIC_ARN:-}
+      # ── NEW: Jaeger tracing ──
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      # - OTEL_SERVICE_NAME=payment-service
     depends_on:
       postgres:
         condition: service_healthy
@@ -245,6 +315,9 @@ services:
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
+      # ── NEW: Jaeger tracing ──
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      # - OTEL_SERVICE_NAME=promotion-service
     depends_on:
       postgres:
         condition: service_healthy
@@ -273,9 +346,62 @@ services:
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
+      # ── NEW: Jaeger tracing ──
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      # - OTEL_SERVICE_NAME=shipping-service
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - ecommerce-network
+
+  # ── NEW: Notification Service (Feature 3) ───────────────────────────────────
+  notification-service:
+    build:
+      context: .
+      dockerfile: services/notification-service/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./services/notification-service:/app
+    ports:
+      - "8092:8092"
+    env_file:
+      - .env
+    environment:
+      - PORT=8092
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_EC2_METADATA_DISABLED=true
+      # SQS queue that receives all notification events from SNS
+      - SQS_QUEUE_URL=${NOTIFICATION_SQS_QUEUE_URL:-}
+      # SMTP config
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_EMAIL:-}
+      - SMTP_PASS=${SMTP_PASSWORD:-}
+      # Twilio config
+      # - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
+      # - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
+      # - TWILIO_FROM_NUMBER=${TWILIO_FROM_NUMBER:-}
+      # Postgres (for notification logs)
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=ecommerce
+      - POSTGRES_SSLMODE=disable
+      - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
+      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
+      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
+      # ── Jaeger tracing ──
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      # - OTEL_SERVICE_NAME=notification-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # jaeger:
+      #   condition: service_healthy
     networks:
       - ecommerce-network
 
@@ -299,6 +425,9 @@ services:
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
+      # ── NEW: Jaeger tracing ──
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      # - OTEL_SERVICE_NAME=api-gateway
     depends_on:
       - auth-service
       - product-service
@@ -309,6 +438,7 @@ services:
       - payment-service
       - promotion-service
       - shipping-service
+      - notification-service # ── NEW ──
     networks:
       - ecommerce-network
 
@@ -335,6 +465,15 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - REQUEST_TIMEOUT=40s
       - API_GATEWAY_URL=http://api-gateway:8080
+      # ── NEW: downstream service URLs for admin aggregation (Feature 9) ──
+      - ANALYTICS_SERVICE_URL=http://analytics-service:8093
+      - NOTIFICATION_SERVICE_URL=http://notification-service:8092
+      - REVIEW_SERVICE_URL=http://review-service:8094
+      - PROMOTION_SERVICE_URL=http://promotion-service:8090
+      - SHIPPING_SERVICE_URL=http://shipping-service:8091
+      # ── NEW: Jaeger tracing ──
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      # - OTEL_SERVICE_NAME=bff-service
     depends_on:
       - api-gateway
       - redis
@@ -352,11 +491,12 @@ services:
     networks:
       - ecommerce-network
 
+  # ── docs port changed: 8089 was taken by notification-service ───────────────
   docs:
     image: swaggerapi/swagger-ui:latest
     restart: unless-stopped
     ports:
-      - "8089:8080"
+      - "8099:8080" # ← changed from 8089 to 8099
     volumes:
       - ./docs/openapi.yaml:/tmp/openapi.yaml:ro
     environment:
@@ -371,3 +511,4 @@ networks:
 volumes:
   postgres_data:
   redis_data:
+  # opensearch_data: # ── NEW ──
