@@ -42,6 +42,8 @@ servers:
     description: Payment Service
   - url: http://localhost:8090
     description: Promotion Service
+  - url: http://localhost:8091
+    description: Shipping Service
 tags:
   - name: Gateway
     description:
@@ -102,6 +104,12 @@ tags:
       "Coupon and promotion management. Supports creating, validating, retrieving, and deactivating discount coupons.
       Coupon types include percentage, flat, and free-shipping discounts. Publishes a `coupon_applied` SNS event when
       a coupon is successfully applied.
+
+      "
+  - name: Shipping Service
+    description:
+      "Shipping management. Provides real-time carrier rates via Shippo, creates shipping labels, and tracks
+      shipments. Publishes `shipment_created` and `shipment_updated` SNS events.
 
       "
   - name: Admin Only
@@ -2403,6 +2411,156 @@ components:
         message:
           type: string
           example: Coupon applied successfully
+
+    # ── Shipping Service schemas ─────────────────────────────────────────────
+    Address:
+      type: object
+      properties:
+        name:
+          type: string
+          example: Jane Doe
+        street1:
+          type: string
+          example: 456 Elm St
+        street2:
+          type: string
+          example: Apt 4B
+        city:
+          type: string
+          example: New York
+        state:
+          type: string
+          example: NY
+        postal_code:
+          type: string
+          example: "10001"
+        country:
+          type: string
+          example: US
+        phone:
+          type: string
+          example: "+12125550100"
+        email:
+          type: string
+          format: email
+          example: jane@example.com
+
+    ShippingRate:
+      type: object
+      properties:
+        provider:
+          type: string
+          example: USPS
+        service_level:
+          type: string
+          example: Priority Mail
+        amount:
+          type: number
+          format: double
+          example: 9.99
+        currency:
+          type: string
+          example: USD
+        estimated_days:
+          type: integer
+          example: 2
+        rate_id:
+          type: string
+          example: rate_abc123
+
+    ShippingRatesRequest:
+      type: object
+      required: [weight_kg, destination]
+      properties:
+        weight_kg:
+          type: number
+          format: double
+          example: 1.5
+        destination:
+          $ref: "#/components/schemas/Address"
+
+    CreateLabelRequest:
+      type: object
+      required: [order_id, user_id, rate_id, weight_kg]
+      properties:
+        order_id:
+          type: string
+          example: order-uuid-1234
+        user_id:
+          type: string
+          example: user-uuid-5678
+        rate_id:
+          type: string
+          example: rate_abc123
+        weight_kg:
+          type: number
+          format: double
+          example: 1.5
+        origin:
+          $ref: "#/components/schemas/Address"
+        destination:
+          $ref: "#/components/schemas/Address"
+
+    Shipment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+        user_id:
+          type: string
+        carrier:
+          type: string
+          example: USPS
+        service_level:
+          type: string
+          example: Priority Mail
+        tracking_code:
+          type: string
+          example: "1Z999AA10123456784"
+        label_url:
+          type: string
+          format: uri
+        tracking_url:
+          type: string
+          format: uri
+        status:
+          type: string
+          enum: [created, in_transit, delivered, failure, returned]
+          example: created
+        weight_kg:
+          type: number
+          format: double
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    TrackingStatus:
+      type: object
+      properties:
+        tracking_code:
+          type: string
+        status:
+          type: string
+          example: TRANSIT
+        sub_status:
+          type: string
+          example: TRANSIT_IN_TRANSIT
+        location:
+          type: string
+          example: Chicago, IL
+        carrier:
+          type: string
+          example: USPS
+        updated_at:
+          type: string
+          format: date-time
+
     HealthResponse:
       type: object
       description: Gateway health check response.
@@ -3435,106 +3593,106 @@ components:
                 type: integer
                 minimum: 1
                 example: 2
-  /coupons:
-    post:
-      tags:
-        - Promotion Service
-        - Admin Only
-      summary: Create coupon
-      description: "**Admin only.** Creates a new discount coupon."
-      security:
-        - cookieAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateCouponRequest"
-      responses:
-        "201":
-          description: Coupon created
+    /coupons:
+      post:
+        tags:
+          - Promotion Service
+          - Admin Only
+        summary: Create coupon
+        description: "**Admin only.** Creates a new discount coupon."
+        security:
+          - cookieAuth: []
+        requestBody:
+          required: true
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  coupon:
-                    $ref: "#/components/schemas/Coupon"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "409":
-          description: Coupon code already exists
-    get:
-      tags:
-        - Promotion Service
-        - Admin Only
-      summary: List all coupons
-      description: "**Admin only.** Returns a paginated list of all coupons."
-      security:
-        - cookieAuth: []
-      parameters:
-        - name: page
-          in: query
-          schema:
-            type: integer
-            default: 1
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 10
-            maximum: 100
-      responses:
-        "200":
-          description: Coupon list
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  coupons:
-                    type: array
-                    items:
+                $ref: "#/components/schemas/CreateCouponRequest"
+        responses:
+          "201":
+            description: Coupon created
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    coupon:
                       $ref: "#/components/schemas/Coupon"
-                  meta:
-                    $ref: "#/components/schemas/PaginationMeta"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-  /coupons/validate:
-    post:
-      tags:
-        - Promotion Service
-      summary: Validate and apply a coupon
-      description: |
-        Validates a coupon code against the provided cart total. Returns the discount amount.
-        If valid, increments the coupon's usage count and publishes a `coupon_applied` SNS event.
-        Called by the cart-service or frontend during checkout.
-      security:
-        - cookieAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
+          "400":
+            $ref: "#/components/responses/BadRequest"
+          "401":
+            $ref: "#/components/responses/Unauthorized"
+          "403":
+            $ref: "#/components/responses/Forbidden"
+          "409":
+            description: Coupon code already exists
+      get:
+        tags:
+          - Promotion Service
+          - Admin Only
+        summary: List all coupons
+        description: "**Admin only.** Returns a paginated list of all coupons."
+        security:
+          - cookieAuth: []
+        parameters:
+          - name: page
+            in: query
             schema:
-              $ref: "#/components/schemas/ValidateCouponRequest"
-      responses:
-        "200":
-          description: Validation result (valid or invalid with reason)
+              type: integer
+              default: 1
+          - name: limit
+            in: query
+            schema:
+              type: integer
+              default: 10
+              maximum: 100
+        responses:
+          "200":
+            description: Coupon list
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    coupons:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/Coupon"
+                    meta:
+                      $ref: "#/components/schemas/PaginationMeta"
+          "401":
+            $ref: "#/components/responses/Unauthorized"
+          "403":
+            $ref: "#/components/responses/Forbidden"
+    /coupons/validate:
+      post:
+        tags:
+          - Promotion Service
+        summary: Validate and apply a coupon
+        description: |
+          Validates a coupon code against the provided cart total. Returns the discount amount.
+          If valid, increments the coupon's usage count and publishes a `coupon_applied` SNS event.
+          Called by the cart-service or frontend during checkout.
+        security:
+          - cookieAuth: []
+        requestBody:
+          required: true
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ValidateCouponResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-  /coupons/{code}:
+                $ref: "#/components/schemas/ValidateCouponRequest"
+        responses:
+          "200":
+            description: Validation result (valid or invalid with reason)
+            content:
+              application/json:
+                schema:
+                  $ref: "#/components/schemas/ValidateCouponResponse"
+          "400":
+            $ref: "#/components/responses/BadRequest"
+          "401":
+            $ref: "#/components/responses/Unauthorized"
+    /coupons/{code}:
     get:
       tags:
         - Promotion Service
@@ -3595,5 +3753,112 @@ components:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-security:
-  - cookieAuth: []
+
+# ── Shipping Service ─────────────────────────────────────────────────────────
+
+/shipping/rates:
+  post:
+    tags:
+      - Shipping Service
+    summary: Get shipping rates
+    description: "Returns available carrier rates for the given weight and destination. Requires authentication."
+    security:
+      - cookieAuth: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ShippingRatesRequest"
+      responses:
+        "200":
+          description: List of available rates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rates:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ShippingRate"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: No rates available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Carrier API error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /shipping/labels:
+    post:
+      tags:
+        - Shipping Service
+      summary: Create shipping label
+      description: "Creates a shipping label via Shippo for the selected rate. Returns the shipment record with tracking info."
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLabelRequest"
+      responses:
+        "201":
+          description: Shipment created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  shipment:
+                    $ref: "#/components/schemas/Shipment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          description: Carrier API error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /shipping/track/{tracking_code}:
+    get:
+      tags:
+        - Shipping Service
+      summary: Track shipment
+      description: "Returns the current tracking status for a shipment from the carrier. Updates the DB record if the status changed."
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: tracking_code
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "1Z999AA10123456784"
+      responses:
+        "200":
+          description: Current tracking status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrackingStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          description: Carrier API error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
