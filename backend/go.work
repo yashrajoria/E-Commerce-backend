@@ -1,0 +1,18 @@
+go 1.25.6
+
+use (
+	./api-gateway
+	./pkg/aws
+	./services/auth-service
+	./services/bff-service
+	./services/cart-service
+	./services/common
+	./services/inventory-service
+	./services/notification-service
+	./services/order-service
+	./services/payment-service
+	./services/product-service
+	./services/promotion-service
+	./services/shipping-service
+	./services/user-service
+)
