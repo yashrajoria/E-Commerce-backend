@@ -26,19 +26,19 @@ type concreteMockSvc struct {
 	trackErr *services.ServiceError
 }
 
-func (m *concreteMockSvc) GetRates(ctx context.Context, req *models.ShippingRatesRequest) ([]models.ShippingRate, error) {
+func (m *concreteMockSvc) GetRates(ctx context.Context, req *models.ShippingRatesRequest) ([]models.ShippingRate, *services.ServiceError) {
 	if m.rateErr != nil {
 		return m.rates, m.rateErr
 	}
 	return m.rates, nil
 }
-func (m *concreteMockSvc) CreateLabel(ctx context.Context, req *models.CreateLabelRequest) (*models.Shipment, error) {
+func (m *concreteMockSvc) CreateLabel(ctx context.Context, req *models.CreateLabelRequest) (*models.Shipment, *services.ServiceError) {
 	if m.labelErr != nil {
 		return m.shipment, m.labelErr
 	}
 	return m.shipment, nil
 }
-func (m *concreteMockSvc) TrackShipment(ctx context.Context, code string) (*models.TrackingStatus, error) {
+func (m *concreteMockSvc) TrackShipment(ctx context.Context, code string) (*models.TrackingStatus, *services.ServiceError) {
 	if m.trackErr != nil {
 		return m.status, m.trackErr
 	}
