@@ -6,6 +6,17 @@ set -x
 echo "Initializing LocalStack resources..."
 
 # --------------------------------------------------
+# Config (names driven by env; safe defaults)
+# --------------------------------------------------
+ORDER_TOPIC_NAME="${ORDER_SNS_TOPIC_NAME:-order-events}"
+PAYMENT_TOPIC_NAME="${PAYMENT_SNS_TOPIC_NAME:-payment-events}"
+
+ORDER_QUEUE_NAME="${ORDER_PROCESSING_QUEUE_NAME:-order-processing-queue}"
+PAYMENT_EVENTS_QUEUE_NAME="${PAYMENT_EVENTS_QUEUE_NAME:-payment-events-queue}"
+PAYMENT_REQUEST_QUEUE_NAME="${PAYMENT_REQUEST_QUEUE_NAME:-payment-request-queue}"
+NOTIFICATION_QUEUE_NAME="${NOTIFICATION_SQS_QUEUE_NAME:-notification-queue}"
+
+# --------------------------------------------------
 # Retry helper (ONLY for transient failures)
 # --------------------------------------------------
 retry() {
@@ -81,8 +92,8 @@ create_topic_if_missing() {
         --output text
 }
 
-ORDER_TOPIC_ARN=$(retry create_topic_if_missing "order-events")
-PAYMENT_TOPIC_ARN=$(retry create_topic_if_missing "payment-events")
+ORDER_TOPIC_ARN=$(retry create_topic_if_missing "$ORDER_TOPIC_NAME")
+PAYMENT_TOPIC_ARN=$(retry create_topic_if_missing "$PAYMENT_TOPIC_NAME")
 
 
 # --------------------------------------------------
@@ -97,14 +108,53 @@ create_queue_if_missing() {
         --output text
 }
 
-ORDER_QUEUE_URL=$(retry create_queue_if_missing "order-processing-queue")
-PAYMENT_EVENTS_QUEUE_URL=$(retry create_queue_if_missing "payment-events-queue")
-retry create_queue_if_missing "payment-request-queue" >/dev/null
+ORDER_QUEUE_URL=$(retry create_queue_if_missing "$ORDER_QUEUE_NAME")
+PAYMENT_EVENTS_QUEUE_URL=$(retry create_queue_if_missing "$PAYMENT_EVENTS_QUEUE_NAME")
+PAYMENT_REQUEST_QUEUE_URL=$(retry create_queue_if_missing "$PAYMENT_REQUEST_QUEUE_NAME")
+NOTIFICATION_QUEUE_URL=$(retry create_queue_if_missing "$NOTIFICATION_QUEUE_NAME")
 
 
 # --------------------------------------------------
 # SNS → SQS Subscription (idempotent)
+# NOTE: In real AWS, SQS also needs a queue policy allowing the SNS topic to
+# send messages. LocalStack can be permissive, but we set it anyway to avoid
+# silent non-delivery and to keep parity with AWS.
 # --------------------------------------------------
+ensure_sqs_policy_allows_sns() {
+    local topic_arn="$1"
+    local queue_url="$2"
+
+    local queue_arn
+    queue_arn=$(awslocal sqs get-queue-attributes \
+        --queue-url "$queue_url" \
+        --attribute-names QueueArn \
+        --query "Attributes.QueueArn" \
+        --output text)
+
+    local existing_policy
+    existing_policy=$(awslocal sqs get-queue-attributes \
+        --queue-url "$queue_url" \
+        --attribute-names Policy \
+        --query "Attributes.Policy" \
+        --output text 2>/dev/null || true)
+
+    # If the policy already references this topic ARN, assume it's fine.
+    if [ -n "$existing_policy" ] && echo "$existing_policy" | grep -q "$topic_arn"; then
+        echo "SQS policy already allows SNS topic $topic_arn"
+        return 0
+    fi
+
+    local policy
+    policy=$(cat <<EOF
+{"Version":"2012-10-17","Statement":[{"Sid":"Allow-SNS-SendMessage","Effect":"Allow","Principal":"*","Action":"sqs:SendMessage","Resource":"$queue_arn","Condition":{"ArnEquals":{"aws:SourceArn":"$topic_arn"}}}]}
+EOF
+)
+
+    retry awslocal sqs set-queue-attributes \
+        --queue-url "$queue_url" \
+        --attributes Policy="$policy" >/dev/null
+}
+
 subscribe_if_missing() {
     local topic_arn="$1"
     local queue_url="$2"
@@ -131,8 +181,18 @@ subscribe_if_missing() {
         --notification-endpoint "$queue_arn"
 }
 
+ensure_sqs_policy_allows_sns "$ORDER_TOPIC_ARN" "$ORDER_QUEUE_URL"
 subscribe_if_missing "$ORDER_TOPIC_ARN" "$ORDER_QUEUE_URL"
+ensure_sqs_policy_allows_sns "$PAYMENT_TOPIC_ARN" "$PAYMENT_EVENTS_QUEUE_URL"
 subscribe_if_missing "$PAYMENT_TOPIC_ARN" "$PAYMENT_EVENTS_QUEUE_URL"
+
+# Fan-out order/payment events into the shared notification queue so that
+# notification-service can react to any event type without coupling tightly
+# to individual service queues.
+ensure_sqs_policy_allows_sns "$ORDER_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
+subscribe_if_missing "$ORDER_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
+ensure_sqs_policy_allows_sns "$PAYMENT_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
+subscribe_if_missing "$PAYMENT_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
 
 
 # --------------------------------------------------
