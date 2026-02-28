@@ -8,7 +8,7 @@ require (
 	github.com/stripe/stripe-go/v80 v80.2.1
 	github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws v0.0.0
 	github.com/yashrajoria/common v0.0.0
-	gorm.io/gorm v1.30.1
+	gorm.io/gorm v1.31.1
 )
 
 require (
