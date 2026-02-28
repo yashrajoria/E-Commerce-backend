@@ -35,10 +35,6 @@ docker-compose.override.yml
 /vendor/
 Godeps/
 
-# Go workspace
-go.work
-go.work.sum
-
 # Logs
 logs/
 *.log
