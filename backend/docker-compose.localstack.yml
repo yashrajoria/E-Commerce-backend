@@ -132,7 +132,21 @@ services:
     depends_on:
       localstack:
         condition: service_healthy
-
+  notification-service:
+    environment:
+      - USE_LOCALSTACK=true
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_SESSION_TOKEN=
+      # Keep both for compatibility; the service code expects SQS_QUEUE_URL
+      - NOTIFICATION_SQS_QUEUE_URL=http://localstack:4566/000000000000/${NOTIFICATION_SQS_QUEUE_NAME:-notification-queue}
+      - SQS_QUEUE_URL=http://localstack:4566/000000000000/${NOTIFICATION_SQS_QUEUE_NAME:-notification-queue}
+    # Add any other notification-specific env vars as needed
+    depends_on:
+      localstack:
+        condition: service_healthy
   api-gateway:
     environment:
       - USE_LOCALSTACK=true
