@@ -10,6 +10,7 @@ echo "Initializing LocalStack resources..."
 # --------------------------------------------------
 ORDER_TOPIC_NAME="${ORDER_SNS_TOPIC_NAME:-order-events}"
 PAYMENT_TOPIC_NAME="${PAYMENT_SNS_TOPIC_NAME:-payment-events}"
+AUTH_TOPIC_NAME="${AUTH_SNS_TOPIC_NAME:-auth-events}"
 
 ORDER_QUEUE_NAME="${ORDER_PROCESSING_QUEUE_NAME:-order-processing-queue}"
 PAYMENT_EVENTS_QUEUE_NAME="${PAYMENT_EVENTS_QUEUE_NAME:-payment-events-queue}"
@@ -94,6 +95,8 @@ create_topic_if_missing() {
 
 ORDER_TOPIC_ARN=$(retry create_topic_if_missing "$ORDER_TOPIC_NAME")
 PAYMENT_TOPIC_ARN=$(retry create_topic_if_missing "$PAYMENT_TOPIC_NAME")
+AUTH_TOPIC_ARN=$(retry create_topic_if_missing "$AUTH_TOPIC_NAME")
+NOTIFICATION_TOPIC_ARN=$(retry create_topic_if_missing "notification-topic")
 
 
 # --------------------------------------------------
@@ -144,15 +147,21 @@ ensure_sqs_policy_allows_sns() {
         return 0
     fi
 
-    local policy
-    policy=$(cat <<EOF
-{"Version":"2012-10-17","Statement":[{"Sid":"Allow-SNS-SendMessage","Effect":"Allow","Principal":"*","Action":"sqs:SendMessage","Resource":"$queue_arn","Condition":{"ArnEquals":{"aws:SourceArn":"$topic_arn"}}}]}
+    local attrs_file
+    attrs_file=$(mktemp)
+
+    # The --attributes value must be a JSON object where the Policy value is
+    # itself a JSON-encoded string (double-escaped). Using file:// avoids all
+    # shell quoting issues with embedded double quotes.
+    cat > "$attrs_file" <<EOF
+{"Policy":"{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"Allow-SNS-SendMessage\",\"Effect\":\"Allow\",\"Principal\":\"*\",\"Action\":\"sqs:SendMessage\",\"Resource\":\"${queue_arn}\",\"Condition\":{\"ArnEquals\":{\"aws:SourceArn\":\"${topic_arn}\"}}}]}"}
 EOF
-)
 
     retry awslocal sqs set-queue-attributes \
         --queue-url "$queue_url" \
-        --attributes Policy="$policy" >/dev/null
+        --attributes "file://$attrs_file" >/dev/null
+
+    rm -f "$attrs_file"
 }
 
 subscribe_if_missing() {
@@ -186,13 +195,15 @@ subscribe_if_missing "$ORDER_TOPIC_ARN" "$ORDER_QUEUE_URL"
 ensure_sqs_policy_allows_sns "$PAYMENT_TOPIC_ARN" "$PAYMENT_EVENTS_QUEUE_URL"
 subscribe_if_missing "$PAYMENT_TOPIC_ARN" "$PAYMENT_EVENTS_QUEUE_URL"
 
-# Fan-out order/payment events into the shared notification queue so that
+# Fan-out order/payment/auth events into the shared notification queue so that
 # notification-service can react to any event type without coupling tightly
 # to individual service queues.
 ensure_sqs_policy_allows_sns "$ORDER_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
 subscribe_if_missing "$ORDER_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
 ensure_sqs_policy_allows_sns "$PAYMENT_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
 subscribe_if_missing "$PAYMENT_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
+ensure_sqs_policy_allows_sns "$AUTH_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
+subscribe_if_missing "$AUTH_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
 
 
 # --------------------------------------------------
