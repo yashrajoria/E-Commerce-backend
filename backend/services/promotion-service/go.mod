@@ -10,7 +10,7 @@ require (
 	github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws v0.0.0
 	go.uber.org/zap v1.27.1
 	gorm.io/driver/postgres v1.6.0
-	gorm.io/gorm v1.30.1
+	gorm.io/gorm v1.31.1
 )
 
 require (

@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"go.uber.org/zap"
 )
 
@@ -22,13 +22,21 @@ type SQSConsumer struct {
 }
 
 func NewSQSConsumer(svc services.NotificationService, logger *zap.Logger) (*SQSConsumer, error) {
-	cfg, err := config.LoadDefaultConfig(context.Background())
+
+	queueURL := os.Getenv("SQS_QUEUE_URL")
+	if queueURL == "" {
+		// Backward/compose-compat fallback
+		queueURL = os.Getenv("NOTIFICATION_SQS_QUEUE_URL")
+	}
+
+	cfg, err := awspkg.LoadConfig(context.Background())
 	if err != nil {
 		return nil, err
 	}
+
 	return &SQSConsumer{
 		client:   sqs.NewFromConfig(cfg),
-		queueURL: os.Getenv("SQS_QUEUE_URL"),
+		queueURL: queueURL,
 		service:  svc,
 		logger:   logger,
 	}, nil
@@ -70,6 +78,16 @@ type snsEnvelope struct {
 }
 
 func (c *SQSConsumer) processMessage(ctx context.Context, body *string, receiptHandle *string) {
+	if body == nil || *body == "" {
+		c.logger.Error("received empty SQS message body")
+		// Don't delete; let it retry / get sent to DLQ if configured.
+		return
+	}
+	if receiptHandle == nil || *receiptHandle == "" {
+		c.logger.Error("received empty SQS receipt handle")
+		return
+	}
+
 	// Step 1: unwrap SNS envelope
 	var envelope snsEnvelope
 	if err := json.Unmarshal([]byte(*body), &envelope); err != nil {

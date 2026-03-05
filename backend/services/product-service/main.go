@@ -61,8 +61,9 @@ func main() {
 		zap.L().Fatal("Failed to load AWS config", zap.Error(err))
 	}
 
-	s3Client := s3.NewFromConfig(awsCfg)
-
+	s3Client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
+		o.UsePathStyle = true // Important for LocalStack compatibility
+	})
 	// Presign client for generating presigned URLs
 	presignClient := s3.NewPresignClient(s3Client)
 

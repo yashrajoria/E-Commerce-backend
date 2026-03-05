@@ -1,21 +1,27 @@
-FROM golang:1.25-alpine
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
 RUN apk add --no-cache git
 
-RUN go install github.com/cosmtrek/air@v1.49.0
-
-COPY services/product-service/go.mod services/product-service/go.sum ./
-
-# Provide local module referenced by replace
 COPY pkg/aws /pkg/aws
 COPY services/common /common
 
+COPY services/product-service/go.mod services/product-service/go.sum ./
 RUN go mod download
 
-COPY services/product-service .
-RUN mkdir -p /app/tmp
+COPY services/product-service ./
+
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -ldflags="-w -s" -o /product-service .
+
+FROM alpine:3.19
+
+# Add timezone data
+RUN apk add --no-cache tzdata
+
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /product-service /product-service
 
 EXPOSE 8082
-CMD ["air", "-c", ".air.toml"]
+ENTRYPOINT ["/product-service"]

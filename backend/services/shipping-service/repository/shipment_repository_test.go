@@ -53,8 +53,8 @@ func TestFindByID_NotFound(t *testing.T) {
 
 	id := uuid.New()
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "shipments"`)).
-		WithArgs(id).
-		WillReturnRows(sqlmock.NewRows([]string{}))
+		WithArgs(id, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
 	s, err := repo.FindByID(context.Background(), id)
 	assert.Error(t, err)
@@ -71,7 +71,7 @@ func TestFindByOrderID_Success(t *testing.T) {
 		AddRow(id, "order-99", "user-1", models.ShipmentStatusCreated, "TRK099", 0.5, now, now)
 
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "shipments"`)).
-		WithArgs("order-99").
+		WithArgs("order-99", 1).
 		WillReturnRows(rows)
 
 	s, err := repo.FindByOrderID(context.Background(), "order-99")
@@ -89,7 +89,7 @@ func TestFindByTrackingCode_Success(t *testing.T) {
 		AddRow(id, "order-5", "user-5", models.ShipmentStatusInTransit, "TRK555", 2.0, now, now)
 
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "shipments"`)).
-		WithArgs("TRK555").
+		WithArgs("TRK555", 1).
 		WillReturnRows(rows)
 
 	s, err := repo.FindByTrackingCode(context.Background(), "TRK555")

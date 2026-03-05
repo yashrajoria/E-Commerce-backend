@@ -11,7 +11,7 @@ require (
 	go.uber.org/zap v1.27.1
 	golang.org/x/time v0.11.0
 	gorm.io/driver/postgres v1.6.0
-	gorm.io/gorm v1.30.1
+	gorm.io/gorm v1.31.1
 )
 
 replace github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws => ../../pkg/aws
