@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
+	sdkaws "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sns"
 	"github.com/aws/aws-sdk-go-v2/service/sns/types"
+	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 )
 
 type SNSPublisher struct {
@@ -18,7 +18,7 @@ type SNSPublisher struct {
 }
 
 func NewSNSPublisher(ctx context.Context) (*SNSPublisher, error) {
-	cfg, err := config.LoadDefaultConfig(ctx)
+	cfg, err := awspkg.LoadConfig(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
@@ -35,20 +35,23 @@ func NewSNSPublisher(ctx context.Context) (*SNSPublisher, error) {
 }
 
 func (p *SNSPublisher) Publish(ctx context.Context, eventType string, payload map[string]interface{}) error {
-	payload["event_type"] = eventType
+	message := map[string]interface{}{
+		"event_type": eventType,
+		"data":       payload,
+	}
 
-	msgBytes, err := json.Marshal(payload)
+	msgBytes, err := json.Marshal(message)
 	if err != nil {
 		return fmt.Errorf("failed to marshal event payload: %w", err)
 	}
 
 	_, err = p.client.Publish(ctx, &sns.PublishInput{
-		TopicArn: aws.String(p.topicARN),
-		Message:  aws.String(string(msgBytes)),
+		TopicArn: sdkaws.String(p.topicARN),
+		Message:  sdkaws.String(string(msgBytes)),
 		MessageAttributes: map[string]types.MessageAttributeValue{
 			"event_type": {
-				DataType:    aws.String("String"),
-				StringValue: aws.String(eventType),
+				DataType:    sdkaws.String("String"),
+				StringValue: sdkaws.String(eventType),
 			},
 		},
 	})
