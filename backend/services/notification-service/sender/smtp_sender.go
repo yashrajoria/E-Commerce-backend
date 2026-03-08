@@ -18,9 +18,8 @@ type SMTPSender struct {
 func NewSMTPSender() (*SMTPSender, error) {
 	host := os.Getenv("SMTP_HOST")
 	port := os.Getenv("SMTP_PORT")
-	username := os.Getenv("SMTP_USER")
-	password := os.Getenv("SMTP_PASS")
-
+	username := os.Getenv("SMTP_EMAIL")
+	password := os.Getenv("SMTP_PASSWORD")
 	if host == "" {
 		return nil, fmt.Errorf("SMTP_HOST not set")
 	}
