@@ -11,6 +11,8 @@ echo "Initializing LocalStack resources..."
 ORDER_TOPIC_NAME="${ORDER_SNS_TOPIC_NAME:-order-events}"
 PAYMENT_TOPIC_NAME="${PAYMENT_SNS_TOPIC_NAME:-payment-events}"
 AUTH_TOPIC_NAME="${AUTH_SNS_TOPIC_NAME:-auth-events}"
+SHIPPING_TOPIC_NAME="${SHIPPING_SNS_TOPIC_NAME:-shipping-events}"
+PROMOTION_TOPIC_NAME="${PROMOTION_SNS_TOPIC_NAME:-promotion-events}"
 
 ORDER_QUEUE_NAME="${ORDER_PROCESSING_QUEUE_NAME:-order-processing-queue}"
 PAYMENT_EVENTS_QUEUE_NAME="${PAYMENT_EVENTS_QUEUE_NAME:-payment-events-queue}"
@@ -96,6 +98,8 @@ create_topic_if_missing() {
 ORDER_TOPIC_ARN=$(retry create_topic_if_missing "$ORDER_TOPIC_NAME")
 PAYMENT_TOPIC_ARN=$(retry create_topic_if_missing "$PAYMENT_TOPIC_NAME")
 AUTH_TOPIC_ARN=$(retry create_topic_if_missing "$AUTH_TOPIC_NAME")
+SHIPPING_TOPIC_ARN=$(retry create_topic_if_missing "$SHIPPING_TOPIC_NAME")
+PROMOTION_TOPIC_ARN=$(retry create_topic_if_missing "$PROMOTION_TOPIC_NAME")
 NOTIFICATION_TOPIC_ARN=$(retry create_topic_if_missing "notification-topic")
 
 
@@ -204,6 +208,10 @@ ensure_sqs_policy_allows_sns "$PAYMENT_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
 subscribe_if_missing "$PAYMENT_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
 ensure_sqs_policy_allows_sns "$AUTH_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
 subscribe_if_missing "$AUTH_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
+ensure_sqs_policy_allows_sns "$SHIPPING_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
+subscribe_if_missing "$SHIPPING_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
+ensure_sqs_policy_allows_sns "$PROMOTION_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
+subscribe_if_missing "$PROMOTION_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
 
 
 # --------------------------------------------------
