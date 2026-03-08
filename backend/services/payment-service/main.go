@@ -60,6 +60,7 @@ func main() {
 	if paymentTopicArn == "" {
 		paymentTopicArn = "arn:aws:sns:eu-west-2:000000000000:payment-events"
 	}
+	notificationTopicArn := os.Getenv("NOTIFICATION_SNS_TOPIC_ARN")
 	snsPublisher := aws_pkg.NewSNSClient(awsCfg)
 
 	// SQS consumer for payment requests
@@ -79,6 +80,7 @@ func main() {
 		sqsConsumer,
 		snsPublisher,
 		paymentTopicArn,
+		notificationTopicArn,
 		stripeSvc,
 		paymentRepo,
 		logger,
@@ -124,11 +126,12 @@ func main() {
 	})
 
 	pc := &controllers.PaymentController{
-		Stripe:   stripeSvc,
-		SNS:      snsPublisher,
-		TopicArn: paymentTopicArn,
-		Repo:     paymentRepo,
-		Logger:   logger,
+		Stripe:               stripeSvc,
+		SNS:                  snsPublisher,
+		TopicArn:             paymentTopicArn,
+		NotificationTopicArn: notificationTopicArn,
+		Repo:                 paymentRepo,
+		Logger:               logger,
 	}
 	routes.RegisterPaymentRoutes(r, pc)
 
