@@ -109,7 +109,7 @@ func main() {
 
 	// --- Dependency injection ---
 	couponRepo := repository.NewGormCouponRepository(database.DB)
-	couponService := services.NewCouponService(couponRepo, snsClient, cfg.PromotionSNSTopicARN, logger)
+	couponService := services.NewCouponService(couponRepo, snsClient, cfg.PromotionSNSTopicARN, cfg.NotificationSNSTopicARN, logger)
 	couponController := controllers.NewCouponController(couponService)
 
 	routes.RegisterCouponRoutes(r, couponController)
