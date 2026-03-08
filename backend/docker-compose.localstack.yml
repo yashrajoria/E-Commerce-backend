@@ -319,6 +319,7 @@ services:
       - PAYMENT_EVENTS_QUEUE_URL=http://localstack:4566/000000000000/${PAYMENT_EVENTS_QUEUE_NAME:-payment-events-queue}
       - ORDER_SNS_TOPIC_ARN=arn:aws:sns:${AWS_REGION:-us-east-1}:000000000000:${ORDER_SNS_TOPIC_NAME:-order-events}
       - PAYMENT_SNS_TOPIC_ARN=arn:aws:sns:${AWS_REGION:-us-east-1}:000000000000:${PAYMENT_SNS_TOPIC_NAME:-payment-events}
+      - NOTIFICATION_SNS_TOPIC_ARN=arn:aws:sns:${AWS_REGION:-us-east-1}:000000000000:notification-events
     depends_on:
       localstack-init:
         condition: service_completed_successfully
@@ -334,6 +335,7 @@ services:
       - PAYMENT_REQUEST_QUEUE_URL=http://localstack:4566/000000000000/${PAYMENT_REQUEST_QUEUE_NAME:-payment-request-queue}
       - PAYMENT_EVENTS_QUEUE_URL=http://localstack:4566/000000000000/${PAYMENT_EVENTS_QUEUE_NAME:-payment-events-queue}
       - PAYMENT_SNS_TOPIC_ARN=arn:aws:sns:${AWS_REGION:-us-east-1}:000000000000:${PAYMENT_SNS_TOPIC_NAME:-payment-events}
+      - NOTIFICATION_SNS_TOPIC_ARN=arn:aws:sns:${AWS_REGION:-us-east-1}:000000000000:notification-events
     depends_on:
       localstack-init:
         condition: service_completed_successfully
