@@ -41,7 +41,7 @@ func (r *notificationRepository) GetLogs(ctx context.Context, filter models.Noti
 
 	query := r.db.WithContext(ctx).Model(&models.NotificationLog{})
 
-	if filter.UserID != 0 {
+	if filter.UserID != "" {
 		query = query.Where("user_id = ?", filter.UserID)
 	}
 	if filter.Status != "" {
