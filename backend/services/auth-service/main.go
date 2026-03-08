@@ -45,7 +45,8 @@ func main() {
 	}
 	snsPublisher, err := services.NewSNSPublisher(context.Background())
 	if err != nil {
-		logger.Fatal("Failed to init SNS publisher", zap.Error(err))
+		logger.Warn("SNS publisher unavailable, email notifications disabled", zap.Error(err))
+		snsPublisher = nil
 	}
 	// --- 2. Dependency Injection (Wiring the layers) ---
 
