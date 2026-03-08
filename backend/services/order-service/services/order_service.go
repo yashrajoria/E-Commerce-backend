@@ -45,17 +45,19 @@ func (e *ServiceError) Error() string {
 }
 
 type OrderService struct {
-	orderRepo   repositories.OrderRepository
-	snsClient   aws_pkg.SNSPublisher
-	snsTopicArn string
+	orderRepo            repositories.OrderRepository
+	snsClient            aws_pkg.SNSPublisher
+	snsTopicArn          string
+	notificationTopicArn string
 }
 
 // NewOrderServiceSQS creates an OrderService that uses SNS/SQS instead of Kafka
-func NewOrderServiceSQS(orderRepo repositories.OrderRepository, snsClient aws_pkg.SNSPublisher, snsTopicArn string) *OrderService {
+func NewOrderServiceSQS(orderRepo repositories.OrderRepository, snsClient aws_pkg.SNSPublisher, snsTopicArn, notificationTopicArn string) *OrderService {
 	return &OrderService{
-		orderRepo:   orderRepo,
-		snsClient:   snsClient,
-		snsTopicArn: snsTopicArn,
+		orderRepo:            orderRepo,
+		snsClient:            snsClient,
+		snsTopicArn:          snsTopicArn,
+		notificationTopicArn: notificationTopicArn,
 	}
 }
 
@@ -111,11 +113,11 @@ func (s *OrderService) CreateOrder(ctx context.Context, userID, email string, re
 		notificationEventBytes, err := json.Marshal(notificationEvent)
 		if err != nil {
 			log.Printf("[OrderService] Failed to marshal order_created notification event: %v", err)
-		} else {
-			if err := s.snsClient.Publish(ctx, s.snsTopicArn, notificationEventBytes); err != nil {
+		} else if s.notificationTopicArn != "" {
+			if err := s.snsClient.Publish(ctx, s.notificationTopicArn, notificationEventBytes); err != nil {
 				log.Printf("[OrderService] Failed to publish order_created notification event: %v", err)
 			} else {
-				log.Printf("[OrderService] order_created notification event published to %s", s.snsTopicArn)
+				log.Printf("[OrderService] order_created notification event published to %s", s.notificationTopicArn)
 			}
 		}
 	} else {

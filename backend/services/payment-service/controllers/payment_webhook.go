@@ -169,7 +169,7 @@ func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, statu
 			pc.Logger.Warn("Failed to marshal payment_failed notification event", zap.Error(err))
 			return
 		}
-		if err := pc.SNS.Publish(context.Background(), pc.TopicArn, payload); err != nil {
+		if err := pc.SNS.Publish(context.Background(), pc.NotificationTopicArn, payload); err != nil {
 			pc.Logger.Warn("Failed to publish payment_failed notification event", zap.Error(err))
 		}
 	}

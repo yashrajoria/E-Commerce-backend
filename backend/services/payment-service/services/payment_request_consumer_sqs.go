@@ -14,29 +14,32 @@ import (
 )
 
 type PaymentRequestConsumer struct {
-	sqsConsumer     *aws_pkg.SQSConsumer
-	snsPublisher    *aws_pkg.SNSClient
-	paymentTopicArn string
-	stripeSvc       *StripeService
-	logger          *zap.Logger
-	repo            repository.PaymentRepository
+	sqsConsumer          *aws_pkg.SQSConsumer
+	snsPublisher         *aws_pkg.SNSClient
+	paymentTopicArn      string
+	notificationTopicArn string
+	stripeSvc            *StripeService
+	logger               *zap.Logger
+	repo                 repository.PaymentRepository
 }
 
 func NewPaymentRequestConsumer(
 	sqsConsumer *aws_pkg.SQSConsumer,
 	snsPublisher *aws_pkg.SNSClient,
 	paymentTopicArn string,
+	notificationTopicArn string,
 	stripeSvc *StripeService,
 	repo repository.PaymentRepository,
 	logger *zap.Logger,
 ) *PaymentRequestConsumer {
 	return &PaymentRequestConsumer{
-		sqsConsumer:     sqsConsumer,
-		snsPublisher:    snsPublisher,
-		paymentTopicArn: paymentTopicArn,
-		stripeSvc:       stripeSvc,
-		logger:          logger,
-		repo:            repo,
+		sqsConsumer:          sqsConsumer,
+		snsPublisher:         snsPublisher,
+		paymentTopicArn:      paymentTopicArn,
+		notificationTopicArn: notificationTopicArn,
+		stripeSvc:            stripeSvc,
+		logger:               logger,
+		repo:                 repo,
 	}
 }
 
@@ -127,7 +130,7 @@ func (c *PaymentRequestConsumer) Start(ctx context.Context) {
 			notificationBytes, nerr := json.Marshal(notificationEvent)
 			if nerr != nil {
 				c.logger.Warn("Failed to marshal payment_failed notification event", zap.Error(nerr))
-			} else if perr := c.snsPublisher.Publish(ctx, c.paymentTopicArn, notificationBytes); perr != nil {
+			} else if perr := c.snsPublisher.Publish(ctx, c.notificationTopicArn, notificationBytes); perr != nil {
 				c.logger.Warn("Failed to publish payment_failed notification event", zap.Error(perr))
 			}
 			return err

@@ -55,6 +55,7 @@ func main() {
 		shippingProvider,
 		snsClient,
 		cfg.ShippingSNSTopicARN,
+		cfg.NotificationSNSTopicARN,
 		cfg.OriginAddress(),
 		logger,
 	)

@@ -116,6 +116,7 @@ func main() {
 		orderRepository,
 		snsClient,
 		cfg.OrderSNSTopicARN,
+		cfg.NotificationSNSTopicARN,
 	)
 	orderController := controllers.NewOrderController(orderService)
 	routes.RegisterOrderRoutes(r, orderController)

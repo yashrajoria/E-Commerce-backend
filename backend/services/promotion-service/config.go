@@ -20,22 +20,24 @@ type Config struct {
 	PostgresSSLMode  string
 	PostgresTimeZone string
 	// SNS topic for promotion events
-	PromotionSNSTopicARN string
+	PromotionSNSTopicARN    string
+	NotificationSNSTopicARN string
 }
 
 // LoadConfig reads configuration from environment variables with optional
 // Secrets Manager override.
 func LoadConfig() (*Config, error) {
 	cfg := &Config{
-		Port:                 getEnv("PORT", "8090"),
-		PostgresUser:         os.Getenv("POSTGRES_USER"),
-		PostgresPassword:     os.Getenv("POSTGRES_PASSWORD"),
-		PostgresDB:           os.Getenv("POSTGRES_DB"),
-		PostgresHost:         os.Getenv("POSTGRES_HOST"),
-		PostgresPort:         getEnv("POSTGRES_PORT", "5432"),
-		PostgresSSLMode:      getEnv("POSTGRES_SSLMODE", "disable"),
-		PostgresTimeZone:     getEnv("POSTGRES_TIMEZONE", "Asia/Kolkata"),
-		PromotionSNSTopicARN: os.Getenv("PROMOTION_SNS_TOPIC_ARN"),
+		Port:                    getEnv("PORT", "8090"),
+		PostgresUser:            os.Getenv("POSTGRES_USER"),
+		PostgresPassword:        os.Getenv("POSTGRES_PASSWORD"),
+		PostgresDB:              os.Getenv("POSTGRES_DB"),
+		PostgresHost:            os.Getenv("POSTGRES_HOST"),
+		PostgresPort:            getEnv("POSTGRES_PORT", "5432"),
+		PostgresSSLMode:         getEnv("POSTGRES_SSLMODE", "disable"),
+		PostgresTimeZone:        getEnv("POSTGRES_TIMEZONE", "Asia/Kolkata"),
+		PromotionSNSTopicARN:    os.Getenv("PROMOTION_SNS_TOPIC_ARN"),
+		NotificationSNSTopicARN: os.Getenv("NOTIFICATION_SNS_TOPIC_ARN"),
 	}
 
 	// Override DB credentials from Secrets Manager when running on AWS

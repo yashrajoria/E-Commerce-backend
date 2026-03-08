@@ -35,10 +35,11 @@ type CouponService interface {
 
 // couponServiceImpl implements CouponService.
 type couponServiceImpl struct {
-	repo        repository.CouponRepository
-	snsClient   aws_pkg.SNSPublisher
-	snsTopicArn string
-	logger      *zap.Logger
+	repo                 repository.CouponRepository
+	snsClient            aws_pkg.SNSPublisher
+	snsTopicArn          string
+	notificationTopicArn string
+	logger               *zap.Logger
 }
 
 // NewCouponService creates a new CouponService.
@@ -46,13 +47,15 @@ func NewCouponService(
 	repo repository.CouponRepository,
 	snsClient aws_pkg.SNSPublisher,
 	snsTopicArn string,
+	notificationTopicArn string,
 	logger *zap.Logger,
 ) CouponService {
 	return &couponServiceImpl{
-		repo:        repo,
-		snsClient:   snsClient,
-		snsTopicArn: snsTopicArn,
-		logger:      logger,
+		repo:                 repo,
+		snsClient:            snsClient,
+		snsTopicArn:          snsTopicArn,
+		notificationTopicArn: notificationTopicArn,
+		logger:               logger,
 	}
 }
 
@@ -195,8 +198,8 @@ func (s *couponServiceImpl) ListCoupons(ctx context.Context, page, limit int) ([
 
 // publishCouponAppliedEvent publishes a coupon_applied event to SNS.
 func (s *couponServiceImpl) publishCouponAppliedEvent(ctx context.Context, coupon *models.Coupon, discount, cartTotal float64) {
-	if s.snsClient == nil || s.snsTopicArn == "" {
-		s.logger.Warn("SNS client not configured, skipping coupon_applied event")
+	if s.snsClient == nil || s.notificationTopicArn == "" {
+		s.logger.Warn("Notification SNS topic not configured, skipping coupon_applied event")
 		return
 	}
 
@@ -212,7 +215,7 @@ func (s *couponServiceImpl) publishCouponAppliedEvent(ctx context.Context, coupo
 		return
 	}
 
-	if err := s.snsClient.Publish(ctx, s.snsTopicArn, eventBytes); err != nil {
+	if err := s.snsClient.Publish(ctx, s.notificationTopicArn, eventBytes); err != nil {
 		s.logger.Error("Failed to publish coupon_applied event", zap.Error(err))
 		return
 	}
