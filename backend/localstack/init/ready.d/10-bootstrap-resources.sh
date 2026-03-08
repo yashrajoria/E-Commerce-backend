@@ -100,7 +100,7 @@ PAYMENT_TOPIC_ARN=$(retry create_topic_if_missing "$PAYMENT_TOPIC_NAME")
 AUTH_TOPIC_ARN=$(retry create_topic_if_missing "$AUTH_TOPIC_NAME")
 SHIPPING_TOPIC_ARN=$(retry create_topic_if_missing "$SHIPPING_TOPIC_NAME")
 PROMOTION_TOPIC_ARN=$(retry create_topic_if_missing "$PROMOTION_TOPIC_NAME")
-NOTIFICATION_TOPIC_ARN=$(retry create_topic_if_missing "notification-topic")
+NOTIFICATION_TOPIC_ARN=$(retry create_topic_if_missing "notification-events")
 
 
 # --------------------------------------------------
@@ -199,19 +199,11 @@ subscribe_if_missing "$ORDER_TOPIC_ARN" "$ORDER_QUEUE_URL"
 ensure_sqs_policy_allows_sns "$PAYMENT_TOPIC_ARN" "$PAYMENT_EVENTS_QUEUE_URL"
 subscribe_if_missing "$PAYMENT_TOPIC_ARN" "$PAYMENT_EVENTS_QUEUE_URL"
 
-# Fan-out order/payment/auth events into the shared notification queue so that
-# notification-service can react to any event type without coupling tightly
-# to individual service queues.
-ensure_sqs_policy_allows_sns "$ORDER_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
-subscribe_if_missing "$ORDER_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
-ensure_sqs_policy_allows_sns "$PAYMENT_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
-subscribe_if_missing "$PAYMENT_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
-ensure_sqs_policy_allows_sns "$AUTH_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
-subscribe_if_missing "$AUTH_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
-ensure_sqs_policy_allows_sns "$SHIPPING_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
-subscribe_if_missing "$SHIPPING_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
-ensure_sqs_policy_allows_sns "$PROMOTION_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
-subscribe_if_missing "$PROMOTION_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
+# Dedicated notification-events topic → notification queue.
+# All publisher services send NotificationEvent messages to this single topic;
+# business events stay on their own topics and never reach the notification queue.
+ensure_sqs_policy_allows_sns "$NOTIFICATION_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
+subscribe_if_missing "$NOTIFICATION_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
 
 
 # --------------------------------------------------
