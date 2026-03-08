@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stripe/stripe-go/v80"
+	"github.com/yashrajoria/common/events"
 	"go.uber.org/zap"
 )
 
@@ -151,4 +153,24 @@ func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, statu
 		Currency:  payment.Currency,
 		Timestamp: now.UTC(),
 	})
+
+	if status == "failed" {
+		email := pi.ReceiptEmail
+		notificationEvent := events.NewPaymentFailedEvent(
+			payment.UserID.String(),
+			email,
+			"",
+			"",
+			payment.OrderID.String(),
+			float64(payment.Amount),
+		)
+		payload, err := json.Marshal(notificationEvent)
+		if err != nil {
+			pc.Logger.Warn("Failed to marshal payment_failed notification event", zap.Error(err))
+			return
+		}
+		if err := pc.SNS.Publish(context.Background(), pc.TopicArn, payload); err != nil {
+			pc.Logger.Warn("Failed to publish payment_failed notification event", zap.Error(err))
+		}
+	}
 }
