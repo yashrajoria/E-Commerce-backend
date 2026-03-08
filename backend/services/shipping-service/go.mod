@@ -9,6 +9,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/stretchr/testify v1.11.1
 	github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws v0.0.0
+	github.com/yashrajoria/common v0.0.0
 	go.uber.org/zap v1.27.1
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.1
@@ -79,3 +80,5 @@ require (
 )
 
 replace github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws => ../../pkg/aws
+
+replace github.com/yashrajoria/common => ../common

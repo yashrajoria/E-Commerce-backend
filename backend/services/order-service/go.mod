@@ -10,8 +10,10 @@ require (
 )
 
 require github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws v0.0.0
+require github.com/yashrajoria/common v0.0.0
 
 replace github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws => ../../pkg/aws
+replace github.com/yashrajoria/common => ../common
 
 require (
 	github.com/bytedance/sonic v1.12.8 // indirect
