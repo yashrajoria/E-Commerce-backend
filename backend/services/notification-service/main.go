@@ -56,8 +56,7 @@ func main() {
 
 	// Dependency injection
 	notificationRepo := repository.NewNotificationRepository(database.DB)
-	// notificationService, err := services.NewNotificationService(notificationRepo, emailSender, smsSender, logger)
-	notificationService, err := services.NewNotificationService(notificationRepo, emailSender, logger)
+	notificationService, err := services.NewNotificationService(notificationRepo, emailSender, nil, logger)
 	if err != nil {
 		logger.Fatal("Failed to initialize notification service", zap.Error(err))
 	}

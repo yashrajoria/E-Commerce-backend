@@ -7,9 +7,11 @@ import (
 	"shipping-service/models"
 	"shipping-service/providers"
 	"shipping-service/repository"
+	"strings"
 	"time"
 
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"github.com/yashrajoria/common/events"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
@@ -160,6 +162,34 @@ func (s *shippingServiceImpl) TrackShipment(ctx context.Context, trackingCode st
 			Status:       status.Status,
 			Timestamp:    time.Now(),
 		})
+
+		recipientEmail := ""
+		recipientName := ""
+		if dbRecord.DestinationJSON != "" {
+			var destination models.Address
+			if err := json.Unmarshal([]byte(dbRecord.DestinationJSON), &destination); err == nil {
+				recipientEmail = destination.Email
+				recipientName = destination.Name
+			}
+		}
+
+		switch strings.ToLower(status.Status) {
+		case "shipped", "in_transit":
+			s.publishEvent(ctx, events.NewOrderShippedEvent(
+				dbRecord.UserID,
+				recipientEmail,
+				recipientName,
+				dbRecord.OrderID,
+				trackingCode,
+			))
+		case "delivered":
+			s.publishEvent(ctx, events.NewOrderDeliveredEvent(
+				dbRecord.UserID,
+				recipientEmail,
+				recipientName,
+				dbRecord.OrderID,
+			))
+		}
 	}
 
 	return &status, nil

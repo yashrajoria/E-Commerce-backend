@@ -225,7 +225,7 @@ services:
       - AWS_REGION=${AWS_REGION:-us-east-1}
       - AWS_ACCESS_KEY_ID=test
       - AWS_SECRET_ACCESS_KEY=test
-      - AWS_SESSION_TOKEN=
+      - AWS_SESSION_TOKEN="test"
       - LOCALSTACK_ENDPOINT=http://localstack:4566
       - AWS_S3_BUCKET=${AWS_S3_BUCKET:-shopswift}
       - DDB_TABLE_PRODUCTS=${DDB_TABLE_PRODUCTS:-Products}
@@ -258,6 +258,11 @@ services:
       - SMTP_EMAIL=${SMTP_EMAIL:-test@example.com}
       - SMTP_PASSWORD=${SMTP_PASSWORD:-password}
       - SMTP_SERVER=${SMTP_SERVER:-smtp.gmail.com}
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_SESSION_TOKEN=
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AUTH_SNS_TOPIC_ARN=arn:aws:sns:${AWS_REGION:-us-east-1}:000000000000:${AUTH_SNS_TOPIC_NAME:-auth-events}
     depends_on:
       localstack-init:
         condition: service_completed_successfully
@@ -340,7 +345,7 @@ services:
       - AWS_REGION=us-east-1
       - AWS_ACCESS_KEY_ID=test
       - AWS_SECRET_ACCESS_KEY=test
-      - AWS_SESSION_TOKEN=
+      - AWS_SESSION_TOKEN="test"
       # Keep both for compatibility; the service code expects SQS_QUEUE_URL
       - NOTIFICATION_SQS_QUEUE_URL=http://localstack:4566/000000000000/${NOTIFICATION_SQS_QUEUE_NAME:-notification-queue}
       - SQS_QUEUE_URL=http://localstack:4566/000000000000/${NOTIFICATION_SQS_QUEUE_NAME:-notification-queue}

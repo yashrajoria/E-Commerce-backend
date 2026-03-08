@@ -1,7 +1,69 @@
-<html>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ShopSwift coupon applied</title>
+    <style>
+      body {
+        background: #f0ede8;
+        font-family: "DM Sans", Arial, sans-serif;
+        color: #1a1a1a;
+        margin: 0;
+        padding: 24px;
+      }
+      .card {
+        max-width: 580px;
+        margin: 0 auto;
+        background: #faf8f5;
+        border-radius: 14px;
+        overflow: hidden;
+      }
+      .hero {
+        background: linear-gradient(145deg, #1a1a1a 0%, #2d2418 100%);
+        color: #f5f0e8;
+        padding: 28px;
+      }
+      .logo {
+        font-family: "Playfair Display", serif;
+        font-size: 24px;
+        font-weight: 600;
+      }
+      .logo span {
+        color: #c9a96e;
+      }
+      .title {
+        margin-top: 10px;
+        font-size: 26px;
+        font-family: "Playfair Display", serif;
+      }
+      .body {
+        padding: 28px;
+      }
+      .coupon {
+        margin-top: 16px;
+        background: #f0ede8;
+        border-left: 3px solid #c9a96e;
+        border-radius: 8px;
+        padding: 14px;
+      }
+    </style>
+  </head>
   <body>
-    <p>Hello {{.UserName}},</p>
-    <p>Your order #{{.OrderID}} has been shipped!</p>
-    <p>Thank you for shopping with us.</p>
+    <div class="card">
+      <div class="hero">
+        <div class="logo">Shop<span>Swift</span></div>
+        <div class="title">Coupon Applied</div>
+      </div>
+      <div class="body">
+        <p>Hello {{.name}},</p>
+        <p>Your coupon has been applied successfully.</p>
+        <div class="coupon">
+          <p><strong>Coupon Code:</strong> {{.code}}</p>
+          <p><strong>Discount:</strong> {{.discount}}</p>
+        </div>
+        <p>Enjoy your savings with ShopSwift.</p>
+      </div>
+    </div>
   </body>
 </html>

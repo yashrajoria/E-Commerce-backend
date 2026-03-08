@@ -9,18 +9,19 @@ const (
 	StatusSent   = "sent"
 	StatusFailed = "failed"
 
-	TypeOrderCreated   = "order_created"
-	TypeOrderShipped   = "order_shipped"
-	TypeOrderDelivered = "order_delivered"
-	TypeUserRegistered = "user_registered"
-	TypeCouponApplied  = "coupon_applied"
-	TypePaymentFailed  = "payment_failed"
-	TypeOTPSMS         = "otp_sms"
+	TypeOrderCreated           = "order_created"
+	TypeOrderShipped           = "order_shipped"
+	TypeOrderDelivered         = "order_delivered"
+	TypeUserRegistered         = "user_registered"
+	TypeUserVerificationResend = "user_verification_resend"
+	TypeCouponApplied          = "coupon_applied"
+	TypePaymentFailed          = "payment_failed"
+	TypeOTPSMS                 = "otp_sms"
 )
 
 type NotificationLog struct {
 	ID         int64     `json:"id" db:"id" gorm:"primaryKey;autoIncrement"`
-	UserID     int64     `json:"user_id" db:"user_id"`
+	UserID     string    `json:"user_id" db:"user_id"`
 	Recipient  string    `json:"recipient" db:"recipient"`
 	Type       string    `json:"type" db:"type"`
 	Channel    string    `json:"channel" db:"channel"`
@@ -31,7 +32,7 @@ type NotificationLog struct {
 }
 
 type NotificationFilter struct {
-	UserID   int64
+	UserID   string
 	Status   string
 	Channel  string
 	Page     int
@@ -40,7 +41,7 @@ type NotificationFilter struct {
 
 type EventPayload struct {
 	EventType string                 `json:"event_type"`
-	UserID    int64                  `json:"user_id"`
+	UserID    string                 `json:"user_id"`
 	Recipient string                 `json:"recipient"`
 	Data      map[string]interface{} `json:"data"`
 }

@@ -50,6 +50,12 @@ var eventConfigs = map[string]eventConfig{
 		subject:  "Welcome!",
 		toKeys:   map[string]string{models.ChannelEmail: "email"},
 	},
+	models.TypeUserVerificationResend: {
+		tmplFile: "templates/verification_resend.html",
+		channels: []string{models.ChannelEmail},
+		subject:  "New Verification Code",
+		toKeys:   map[string]string{models.ChannelEmail: "email"},
+	},
 	models.TypeCouponApplied: {
 		tmplFile: "templates/coupon_applied.html",
 		channels: []string{models.ChannelEmail},
@@ -80,7 +86,7 @@ type notificationService struct {
 func NewNotificationService(
 	repo repository.NotificationRepository,
 	emailSender sender.EmailSender,
-	// smsSender sender.SMSSender,
+	smsSender sender.SMSSender,
 	logger *zap.Logger,
 ) (NotificationService, error) {
 	tmpls := make(map[string]*template.Template)
@@ -94,9 +100,9 @@ func NewNotificationService(
 	return &notificationService{
 		repo:        repo,
 		emailSender: emailSender,
-		// smsSender:   smsSender,
-		templates: tmpls,
-		logger:    logger,
+		smsSender:   smsSender,
+		templates:   tmpls,
+		logger:      logger,
 	}, nil
 }
 
@@ -154,6 +160,13 @@ func (s *notificationService) sendWithRetry(
 		case models.ChannelEmail:
 			result, lastErr = s.emailSender.SendEmail(ctx, to, subject, body)
 		case models.ChannelSMS:
+			if s.smsSender == nil {
+				s.logger.Warn("SMS sender not configured, skipping SMS channel",
+					zap.String("event", payload.EventType),
+					zap.String("recipient", to),
+				)
+				return
+			}
 			result, lastErr = s.smsSender.SendSMS(ctx, to, body)
 		}
 

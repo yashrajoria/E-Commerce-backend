@@ -10,6 +10,7 @@ import (
 	"time"
 
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"github.com/yashrajoria/common/events"
 	"go.uber.org/zap"
 )
 
@@ -199,15 +200,11 @@ func (s *couponServiceImpl) publishCouponAppliedEvent(ctx context.Context, coupo
 		return
 	}
 
-	event := models.CouponAppliedEvent{
-		EventType:      "coupon_applied",
-		CouponID:       coupon.ID.String(),
-		CouponCode:     coupon.Code,
-		CouponType:     string(coupon.Type),
-		DiscountAmount: discount,
-		CartTotal:      cartTotal,
-		Timestamp:      time.Now(),
-	}
+	event := events.NewCouponAppliedEvent("", "", "", coupon.Code, discount)
+	event.Data["coupon_id"] = coupon.ID.String()
+	event.Data["coupon_type"] = string(coupon.Type)
+	event.Data["cart_total"] = cartTotal
+	event.Data["timestamp"] = time.Now()
 
 	eventBytes, err := json.Marshal(event)
 	if err != nil {

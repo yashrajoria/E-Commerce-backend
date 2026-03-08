@@ -1,7 +1,389 @@
-<html>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Verify your ShopSwift account</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600&family=DM+Sans:wght@300;400;500&display=swap");
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        background-color: #f0ede8;
+        font-family: "DM Sans", sans-serif;
+        color: #1a1a1a;
+        padding: 40px 16px;
+      }
+
+      .wrapper {
+        max-width: 580px;
+        margin: 0 auto;
+      }
+
+      /* ── Header ── */
+      .header {
+        background-color: #1a1a1a;
+        border-radius: 16px 16px 0 0;
+        padding: 36px 48px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .logo {
+        font-family: "Playfair Display", serif;
+        font-size: 26px;
+        font-weight: 600;
+        color: #f5f0e8;
+        letter-spacing: -0.5px;
+      }
+
+      .logo span {
+        color: #c9a96e;
+      }
+
+      .header-tag {
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 2.5px;
+        text-transform: uppercase;
+        color: #666;
+        background: #2a2a2a;
+        padding: 6px 14px;
+        border-radius: 20px;
+      }
+
+      /* ── Hero ── */
+      .hero {
+        background: linear-gradient(145deg, #1a1a1a 0%, #2d2418 100%);
+        padding: 56px 48px 48px;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .hero::before {
+        content: "";
+        position: absolute;
+        top: -60px;
+        right: -60px;
+        width: 220px;
+        height: 220px;
+        background: radial-gradient(
+          circle,
+          rgba(201, 169, 110, 0.15) 0%,
+          transparent 70%
+        );
+        border-radius: 50%;
+      }
+
+      .hero::after {
+        content: "";
+        position: absolute;
+        bottom: -40px;
+        left: 30px;
+        width: 140px;
+        height: 140px;
+        background: radial-gradient(
+          circle,
+          rgba(201, 169, 110, 0.08) 0%,
+          transparent 70%
+        );
+        border-radius: 50%;
+      }
+
+      .hero-eyebrow {
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 3px;
+        text-transform: uppercase;
+        color: #c9a96e;
+        margin-bottom: 18px;
+      }
+
+      .hero-title {
+        font-family: "Playfair Display", serif;
+        font-size: 38px;
+        font-weight: 600;
+        color: #f5f0e8;
+        line-height: 1.15;
+        margin-bottom: 16px;
+        letter-spacing: -0.5px;
+      }
+
+      .hero-title em {
+        color: #c9a96e;
+        font-style: normal;
+      }
+
+      .hero-subtitle {
+        font-size: 15px;
+        font-weight: 300;
+        color: #a09080;
+        line-height: 1.6;
+        max-width: 380px;
+      }
+
+      /* ── Body ── */
+      .body {
+        background: #faf8f5;
+        padding: 48px;
+      }
+
+      .greeting {
+        font-size: 17px;
+        font-weight: 400;
+        color: #3a3a3a;
+        margin-bottom: 14px;
+        line-height: 1.5;
+      }
+
+      .greeting strong {
+        color: #1a1a1a;
+        font-weight: 500;
+      }
+
+      .body-text {
+        font-size: 15px;
+        font-weight: 300;
+        color: #666;
+        line-height: 1.7;
+        margin-bottom: 36px;
+      }
+
+      /* ── Code Block ── */
+      .code-section {
+        margin-bottom: 36px;
+      }
+
+      .code-label {
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 2.5px;
+        text-transform: uppercase;
+        color: #999;
+        margin-bottom: 14px;
+      }
+
+      .code-box {
+        background: #1a1a1a;
+        border-radius: 12px;
+        padding: 28px;
+        text-align: center;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .code-box::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(
+          135deg,
+          rgba(201, 169, 110, 0.05) 0%,
+          transparent 60%
+        );
+      }
+
+      .verification-code {
+        font-family: "Playfair Display", serif;
+        font-size: 48px;
+        font-weight: 600;
+        letter-spacing: 12px;
+        color: #c9a96e;
+        position: relative;
+        z-index: 1;
+      }
+
+      .code-hint {
+        font-size: 12px;
+        color: #555;
+        margin-top: 10px;
+        position: relative;
+        z-index: 1;
+      }
+
+      /* ── Divider ── */
+      .divider {
+        height: 1px;
+        background: linear-gradient(90deg, transparent, #e0d8cc, transparent);
+        margin: 32px 0;
+      }
+
+      /* ── Info Row ── */
+      .info-row {
+        display: flex;
+        gap: 16px;
+        margin-bottom: 32px;
+      }
+
+      .info-card {
+        flex: 1;
+        background: #f0ede8;
+        border-radius: 10px;
+        padding: 18px 20px;
+        border-left: 3px solid #c9a96e;
+      }
+
+      .info-card-title {
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        color: #c9a96e;
+        margin-bottom: 6px;
+      }
+
+      .info-card-text {
+        font-size: 13px;
+        color: #666;
+        line-height: 1.5;
+        font-weight: 300;
+      }
+
+      /* ── Sign off ── */
+      .signoff {
+        font-size: 15px;
+        color: #555;
+        line-height: 1.7;
+        font-weight: 300;
+      }
+
+      .signoff strong {
+        color: #1a1a1a;
+        font-weight: 500;
+        display: block;
+        margin-top: 16px;
+        font-family: "Playfair Display", serif;
+        font-size: 17px;
+      }
+
+      /* ── Footer ── */
+      .footer {
+        background: #1a1a1a;
+        border-radius: 0 0 16px 16px;
+        padding: 28px 48px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .footer-brand {
+        font-family: "Playfair Display", serif;
+        font-size: 15px;
+        color: #555;
+      }
+
+      .footer-brand span {
+        color: #c9a96e;
+      }
+
+      .footer-note {
+        font-size: 11px;
+        color: #444;
+        text-align: right;
+        line-height: 1.6;
+        font-weight: 300;
+      }
+
+      /* ── Bottom caption ── */
+      .caption {
+        text-align: center;
+        margin-top: 24px;
+        font-size: 12px;
+        color: #aaa;
+        font-weight: 300;
+        line-height: 1.6;
+      }
+
+      .caption a {
+        color: #c9a96e;
+        text-decoration: none;
+      }
+    </style>
+  </head>
   <body>
-    <p>Hello {{.UserName}},</p>
-    <p>Your order #{{.OrderID}} has been shipped!</p>
-    <p>Thank you for shopping with us.</p>
+    <div class="wrapper">
+      <!-- Header -->
+      <div class="header">
+        <div class="logo">Shop<span>Swift</span></div>
+        <div class="header-tag">Email Verification</div>
+      </div>
+
+      <!-- Hero -->
+      <div class="hero">
+        <div class="hero-eyebrow">Welcome aboard</div>
+        <div class="hero-title">Almost there,<br /><em>{{.name}}.</em></div>
+        <div class="hero-subtitle">
+          One quick step and your ShopSwift account will be ready to go.
+        </div>
+      </div>
+
+      <!-- Body -->
+      <div class="body">
+        <p class="greeting">Hi <strong>{{.name}}</strong>,</p>
+        <p class="body-text">
+          Thanks for joining ShopSwift. To complete your registration and secure
+          your account, please use the verification code below. Enter it on the
+          verification page to activate your account.
+        </p>
+
+        <!-- Code -->
+        <div class="code-section">
+          <div class="code-label">Your verification code</div>
+          <div class="code-box">
+            <div class="verification-code">{{.verification_code}}</div>
+            <div class="code-hint">
+              Valid for 15 minutes &nbsp;·&nbsp; Do not share this code
+            </div>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- Info cards -->
+        <div class="info-row">
+          <div class="info-card">
+            <div class="info-card-title">⏱ Expires in</div>
+            <div class="info-card-text">
+              15 minutes from when this email was sent
+            </div>
+          </div>
+          <div class="info-card">
+            <div class="info-card-title">🔒 Stay safe</div>
+            <div class="info-card-text">
+              ShopSwift will never ask for this code via phone or chat
+            </div>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- Sign off -->
+        <p class="signoff">
+          If you didn't create a ShopSwift account, you can safely ignore this
+          email. Someone may have entered your email address by mistake.
+          <strong>The ShopSwift Team</strong>
+        </p>
+      </div>
+
+      <!-- Footer -->
+      <div class="footer">
+        <div class="footer-brand">Shop<span>Swift</span> &copy; 2025</div>
+        <div class="footer-note">
+          This is an automated message.<br />Please do not reply to this email.
+        </div>
+      </div>
+
+      <!-- Bottom caption -->
+      <p class="caption">
+        You're receiving this because an account was created with this email.<br />
+        Questions? <a href="#">Contact Support</a>
+      </p>
+    </div>
   </body>
 </html>

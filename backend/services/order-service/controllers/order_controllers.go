@@ -36,7 +36,14 @@ func (oc *OrderController) CreateOrder(ctx *gin.Context) {
 		return
 	}
 
-	if err := oc.orderService.CreateOrder(ctx.Request.Context(), userID, &req); err != nil {
+	email := ""
+	if emailVal, exists := ctx.Get("email"); exists {
+		if emailStr, ok := emailVal.(string); ok {
+			email = emailStr
+		}
+	}
+
+	if err := oc.orderService.CreateOrder(ctx.Request.Context(), userID, email, &req); err != nil {
 		ctx.JSON(err.StatusCode, gin.H{"error": err.Message})
 		return
 	}

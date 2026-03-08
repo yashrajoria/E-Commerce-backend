@@ -8,6 +8,7 @@ import (
 	repositories "order-service/repository"
 
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"github.com/yashrajoria/common/events"
 
 	"time"
 
@@ -59,13 +60,15 @@ func NewOrderServiceSQS(orderRepo repositories.OrderRepository, snsClient aws_pk
 }
 
 // CreateOrder processes order creation via SNS
-func (s *OrderService) CreateOrder(ctx context.Context, userID string, req *CreateOrderRequest) *ServiceError {
+func (s *OrderService) CreateOrder(ctx context.Context, userID, email string, req *CreateOrderRequest) *ServiceError {
 	if len(req.Items) == 0 {
 		return &ServiceError{
 			StatusCode: 400,
 			Message:    "At least one item is required",
 		}
 	}
+
+	orderID := uuid.New().String()
 
 	// Build event items
 	eventItems := make([]models.CheckoutItem, 0, len(req.Items))
@@ -79,7 +82,7 @@ func (s *OrderService) CreateOrder(ctx context.Context, userID string, req *Crea
 	// Create checkout event
 	checkoutEvent := models.CheckoutEvent{
 		UserID:    userID,
-		OrderID:   uuid.New().String(),
+		OrderID:   orderID,
 		Items:     eventItems,
 		Timestamp: time.Now(),
 	}
@@ -103,6 +106,18 @@ func (s *OrderService) CreateOrder(ctx context.Context, userID string, req *Crea
 			}
 		}
 		log.Printf("[OrderService] SNS published to %s", s.snsTopicArn)
+
+		notificationEvent := events.NewOrderCreatedEvent(userID, email, "", "", orderID, 0)
+		notificationEventBytes, err := json.Marshal(notificationEvent)
+		if err != nil {
+			log.Printf("[OrderService] Failed to marshal order_created notification event: %v", err)
+		} else {
+			if err := s.snsClient.Publish(ctx, s.snsTopicArn, notificationEventBytes); err != nil {
+				log.Printf("[OrderService] Failed to publish order_created notification event: %v", err)
+			} else {
+				log.Printf("[OrderService] order_created notification event published to %s", s.snsTopicArn)
+			}
+		}
 	} else {
 		log.Printf("[OrderService] Warning: SNS client not configured, order event not published")
 	}

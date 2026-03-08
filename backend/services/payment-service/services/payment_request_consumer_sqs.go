@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"github.com/yashrajoria/common/events"
 	"go.uber.org/zap"
 )
 
@@ -114,6 +115,21 @@ func (c *PaymentRequestConsumer) Start(ctx context.Context) {
 			}
 			eventBytes, _ := json.Marshal(eventMsg)
 			c.snsPublisher.Publish(ctx, c.paymentTopicArn, eventBytes)
+
+			notificationEvent := events.NewPaymentFailedEvent(
+				userID.String(),
+				"",
+				"",
+				"",
+				orderID.String(),
+				float64(payment.Amount),
+			)
+			notificationBytes, nerr := json.Marshal(notificationEvent)
+			if nerr != nil {
+				c.logger.Warn("Failed to marshal payment_failed notification event", zap.Error(nerr))
+			} else if perr := c.snsPublisher.Publish(ctx, c.paymentTopicArn, notificationBytes); perr != nil {
+				c.logger.Warn("Failed to publish payment_failed notification event", zap.Error(perr))
+			}
 			return err
 		}
 

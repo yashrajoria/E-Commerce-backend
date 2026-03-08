@@ -45,15 +45,7 @@ func parsePaginationParams(ctx *gin.Context) (int, int) {
 
 func (cc *NotificationController) GetNotificationLogs(ctx *gin.Context) {
 	// Parse optional user_id filter
-	var userID int64
-	if userIDStr := ctx.Query("user_id"); userIDStr != "" {
-		parsed, err := strconv.ParseInt(userIDStr, 10, 64)
-		if err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid user_id"})
-			return
-		}
-		userID = parsed
-	}
+	userID := ctx.Query("user_id")
 
 	page, pageSize := parsePaginationParams(ctx)
 
