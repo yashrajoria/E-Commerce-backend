@@ -10,6 +10,7 @@ const (
 	StatusFailed = "failed"
 
 	TypeOrderCreated           = "order_created"
+	TypeOrderConfirmed         = "order_confirmed"
 	TypeOrderShipped           = "order_shipped"
 	TypeOrderDelivered         = "order_delivered"
 	TypeUserRegistered         = "user_registered"
