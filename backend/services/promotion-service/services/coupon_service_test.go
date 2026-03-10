@@ -82,7 +82,13 @@ func (m *mockSNSPublisher) Publish(_ context.Context, topicArn string, _ []byte)
 
 func newTestService(repo repository.CouponRepository, sns *mockSNSPublisher) services.CouponService {
 	logger, _ := zap.NewDevelopment()
-	return services.NewCouponService(repo, sns, "arn:aws:sns:us-east-1:000000000000:promotion-events", logger)
+	return services.NewCouponService(
+		repo,
+		sns,
+		"arn:aws:sns:us-east-1:000000000000:promotion-events",
+		"arn:aws:sns:us-east-1:000000000000:notification-events",
+		logger,
+	)
 }
 
 func activeCoupon(code string, couponType models.CouponType, value, minOrder float64, usageLimit, usedCount int) *models.Coupon {
