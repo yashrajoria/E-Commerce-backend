@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -213,8 +214,16 @@ func (pc *PaymentController) VerifyPayment(c *gin.Context) {
 
 	sess, err := session.Get(req.SessionID, nil)
 	if err != nil {
+		var stripeErr *stripe.Error
+		if errors.As(err, &stripeErr) {
+			if stripeErr.HTTPStatusCode >= 400 && stripeErr.HTTPStatusCode < 500 {
+				pc.Logger.Warn("Invalid Stripe session", zap.String("session_id", req.SessionID), zap.Error(err))
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid Stripe session"})
+				return
+			}
+		}
 		pc.Logger.Error("Error fetching Stripe session", zap.String("session_id", req.SessionID), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch Stripe session"})
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch Stripe session"})
 		return
 	}
 

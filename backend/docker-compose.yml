@@ -130,6 +130,9 @@ services:
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_REGION=${AWS_REGION}
       - AWS_EC2_METADATA_DISABLED=true
+      - USE_LOCALSTACK=true
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
+      - ORDER_SNS_TOPIC_ARN=${ORDER_SNS_TOPIC_ARN:-arn:aws:sns:us-east-1:000000000000:order-events}
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
@@ -159,9 +162,8 @@ services:
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_EC2_METADATA_DISABLED=true
-      # USE_LOCALSTACK and LOCALSTACK_ENDPOINT are intentionally NOT set here.
-      # They are injected only by docker-compose.localstack.yml to avoid
-      # accidentally routing prod traffic to LocalStack.
+      - USE_LOCALSTACK=true
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
       - AWS_S3_BUCKET=${AWS_S3_BUCKET:-shopswift}
       - AWS_S3_PREFIX=products/
       - DDB_TABLE_PRODUCTS=${DDB_TABLE_PRODUCTS:-Products}
@@ -194,6 +196,9 @@ services:
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_REGION=${AWS_REGION}
       - AWS_EC2_METADATA_DISABLED=true
+      - USE_LOCALSTACK=true
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
+      - ORDER_SNS_TOPIC_ARN=${ORDER_SNS_TOPIC_ARN:-arn:aws:sns:us-east-1:000000000000:order-events}
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
@@ -225,6 +230,8 @@ services:
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_REGION=${AWS_REGION}
       - AWS_EC2_METADATA_DISABLED=true
+      - USE_LOCALSTACK=true
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
       - DDB_TABLE=${DDB_TABLE:-Inventory}
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
@@ -252,12 +259,14 @@ services:
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_REGION=${AWS_REGION}
       - AWS_EC2_METADATA_DISABLED=true
+      - USE_LOCALSTACK=true
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
       - INVENTORY_SERVICE_URL=${INVENTORY_SERVICE_URL:-http://inventory-service:8084}
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
-      - ORDER_SNS_TOPIC_ARN=${ORDER_SNS_TOPIC_ARN:-}
-      - NOTIFICATION_SNS_TOPIC_ARN=${NOTIFICATION_SNS_TOPIC_ARN:-}
+      - ORDER_SNS_TOPIC_ARN=${ORDER_SNS_TOPIC_ARN:-arn:aws:sns:us-east-1:000000000000:order-events}
+      - NOTIFICATION_SNS_TOPIC_ARN=${NOTIFICATION_SNS_TOPIC_ARN:-arn:aws:sns:us-east-1:000000000000:notification-events}
       # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
       # - OTEL_SERVICE_NAME=order-service
     depends_on:
@@ -284,11 +293,13 @@ services:
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_REGION=${AWS_REGION}
       - AWS_EC2_METADATA_DISABLED=true
+      - USE_LOCALSTACK=true
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
-      - PAYMENT_SNS_TOPIC_ARN=${PAYMENT_SNS_TOPIC_ARN:-}
-      - NOTIFICATION_SNS_TOPIC_ARN=${NOTIFICATION_SNS_TOPIC_ARN:-}
+      - PAYMENT_SNS_TOPIC_ARN=${PAYMENT_SNS_TOPIC_ARN:-arn:aws:sns:us-east-1:000000000000:payment-events}
+      - NOTIFICATION_SNS_TOPIC_ARN=${NOTIFICATION_SNS_TOPIC_ARN:-arn:aws:sns:us-east-1:000000000000:notification-events}
       # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
       # - OTEL_SERVICE_NAME=payment-service
     depends_on:
