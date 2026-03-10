@@ -1,0 +1,3 @@
+extends: "spectral:oas"
+
+# Local overrides can go here. Keeping default OAS ruleset to validate OpenAPI 3.x files.

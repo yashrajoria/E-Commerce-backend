@@ -15,8 +15,9 @@ type PaymentEvent struct {
 }
 
 type PaymentRequest struct {
-	OrderID  string `json:"order_id"`
-	UserID   string `json:"user_id"`
-	Amount   int    `json:"amount"`
-	Currency string `json:"currency"`
+	OrderID        string `json:"order_id"`
+	UserID         string `json:"user_id"`
+	Amount         int    `json:"amount"`
+	Currency       string `json:"currency"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
 }

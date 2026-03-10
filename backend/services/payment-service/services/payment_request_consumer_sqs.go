@@ -9,33 +9,37 @@ import (
 
 	"github.com/google/uuid"
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"github.com/yashrajoria/common/events"
 	"go.uber.org/zap"
 )
 
 type PaymentRequestConsumer struct {
-	sqsConsumer     *aws_pkg.SQSConsumer
-	snsPublisher    *aws_pkg.SNSClient
-	paymentTopicArn string
-	stripeSvc       *StripeService
-	logger          *zap.Logger
-	repo            repository.PaymentRepository
+	sqsConsumer          *aws_pkg.SQSConsumer
+	snsPublisher         *aws_pkg.SNSClient
+	paymentTopicArn      string
+	notificationTopicArn string
+	stripeSvc            *StripeService
+	logger               *zap.Logger
+	repo                 repository.PaymentRepository
 }
 
 func NewPaymentRequestConsumer(
 	sqsConsumer *aws_pkg.SQSConsumer,
 	snsPublisher *aws_pkg.SNSClient,
 	paymentTopicArn string,
+	notificationTopicArn string,
 	stripeSvc *StripeService,
 	repo repository.PaymentRepository,
 	logger *zap.Logger,
 ) *PaymentRequestConsumer {
 	return &PaymentRequestConsumer{
-		sqsConsumer:     sqsConsumer,
-		snsPublisher:    snsPublisher,
-		paymentTopicArn: paymentTopicArn,
-		stripeSvc:       stripeSvc,
-		logger:          logger,
-		repo:            repo,
+		sqsConsumer:          sqsConsumer,
+		snsPublisher:         snsPublisher,
+		paymentTopicArn:      paymentTopicArn,
+		notificationTopicArn: notificationTopicArn,
+		stripeSvc:            stripeSvc,
+		logger:               logger,
+		repo:                 repo,
 	}
 }
 
@@ -61,6 +65,14 @@ func (c *PaymentRequestConsumer) Start(ctx context.Context) {
 			return err
 		}
 
+		// Idempotency: if idempotency key present, check existing payment
+		if req.IdempotencyKey != "" {
+			if existing, err := c.repo.GetPaymentByIdempotencyKey(ctx, req.IdempotencyKey); err == nil && existing != nil {
+				c.logger.Info("Payment already exists for idempotency key, skipping", zap.String("idempotency_key", req.IdempotencyKey), zap.String("payment_id", existing.Payment_ID.String()))
+				return nil
+			}
+		}
+
 		// Create payment record
 		payment := models.Payment{
 			Payment_ID: uuid.New(),
@@ -71,6 +83,9 @@ func (c *PaymentRequestConsumer) Start(ctx context.Context) {
 			Status:     "pending",
 			CreatedAt:  time.Now().UTC(),
 		}
+		if req.IdempotencyKey != "" {
+			payment.IdempotencyKey = &req.IdempotencyKey
+		}
 
 		if err := c.repo.CreatePayment(ctx, &payment); err != nil {
 			c.logger.Error("Failed to create payment record", zap.Error(err))
@@ -80,7 +95,9 @@ func (c *PaymentRequestConsumer) Start(ctx context.Context) {
 		c.logger.Info("Payment record created", zap.String("payment_id", payment.Payment_ID.String()))
 
 		// Create Stripe Checkout Session (provides a hosted URL for the user to complete payment)
-		sess, err := c.stripeSvc.CreateCheckoutSession(int64(req.Amount*100), "usd", req.OrderID, req.UserID)
+		// Amount is already in the smallest currency unit (cents for USD) as set by the order-service.
+		// Do NOT multiply by 100 here; prices are stored and passed in cents throughout the system.
+		sess, err := c.stripeSvc.CreateCheckoutSession(int64(req.Amount), "usd", req.OrderID, req.UserID)
 		if err != nil {
 			c.logger.Error("Failed to create Stripe Checkout Session", zap.Error(err))
 			payment.Status = "failed"
@@ -101,6 +118,21 @@ func (c *PaymentRequestConsumer) Start(ctx context.Context) {
 			}
 			eventBytes, _ := json.Marshal(eventMsg)
 			c.snsPublisher.Publish(ctx, c.paymentTopicArn, eventBytes)
+
+			notificationEvent := events.NewPaymentFailedEvent(
+				userID.String(),
+				"",
+				"",
+				"",
+				orderID.String(),
+				float64(payment.Amount),
+			)
+			notificationBytes, nerr := json.Marshal(notificationEvent)
+			if nerr != nil {
+				c.logger.Warn("Failed to marshal payment_failed notification event", zap.Error(nerr))
+			} else if perr := c.snsPublisher.Publish(ctx, c.notificationTopicArn, notificationBytes); perr != nil {
+				c.logger.Warn("Failed to publish payment_failed notification event", zap.Error(perr))
+			}
 			return err
 		}
 

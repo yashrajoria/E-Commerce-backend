@@ -9,6 +9,7 @@ import (
 
 type Payment struct {
 	Payment_ID         uuid.UUID `gorm:"type:uuid;json default:gen_random_uuid();primaryKey"`
+	IdempotencyKey     *string   `gorm:"type:varchar(128);uniqueIndex"`
 	OrderID            uuid.UUID `gorm:"type:uuid;index;not null"`
 	UserID             uuid.UUID `gorm:"type:uuid;index;not null"`
 	Amount             int       `gorm:"not null"` // in cents/paise

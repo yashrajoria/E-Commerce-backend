@@ -116,6 +116,7 @@ func main() {
 		orderRepository,
 		snsClient,
 		cfg.OrderSNSTopicARN,
+		cfg.NotificationSNSTopicARN,
 	)
 	orderController := controllers.NewOrderController(orderService)
 	routes.RegisterOrderRoutes(r, orderController)
@@ -179,6 +180,9 @@ func main() {
 			database.DB,
 			inventoryClient,
 			metricsClient,
+			cfg.ProductServiceURL,
+			snsClient,
+			cfg.NotificationSNSTopicARN,
 		)
 		go checkoutConsumer.Start(shutdownCtx)
 		logger.Info("Started SQS checkout consumer", zap.String("queue", checkoutQueueURL))
@@ -192,6 +196,9 @@ func main() {
 			database.DB,
 			inventoryClient,
 			metricsClient,
+			snsClient,
+			cfg.NotificationSNSTopicARN,
+			cfg.ProductServiceURL,
 		)
 		go paymentConsumer.Start(shutdownCtx)
 		logger.Info("Started SQS payment events consumer", zap.String("queue", paymentEventsQueueURL))

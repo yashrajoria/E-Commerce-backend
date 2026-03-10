@@ -37,6 +37,49 @@ services:
     networks:
       - ecommerce-network
 
+  # ── NEW: OpenSearch for search-service ──────────────────────────────────────
+  # opensearch:
+  #   image: opensearchproject/opensearch:2.11.0
+  #   restart: unless-stopped
+  #   environment:
+  #     - discovery.type=single-node
+  #     - DISABLE_SECURITY_PLUGIN=true # fine for local dev
+  #     - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+  #   ports:
+  #     - "9200:9200"
+  #   healthcheck:
+  #     test:
+  #       [
+  #         "CMD-SHELL",
+  #         "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'",
+  #       ]
+  #     interval: 15s
+  #     timeout: 10s
+  #     retries: 10
+  #     start_period: 30s
+  #   volumes:
+  #     - opensearch_data:/usr/share/opensearch/data
+  #   networks:
+  #     - ecommerce-network
+
+  # # ── NEW: Jaeger for distributed tracing ─────────────────────────────────────
+  # jaeger:
+  #   image: jaegertracing/all-in-one:1.52
+  #   restart: unless-stopped
+  #   ports:
+  #     - "16686:16686" # Jaeger UI
+  #     - "4317:4317"   # OTLP gRPC
+  #     - "4318:4318"   # OTLP HTTP
+  #   environment:
+  #     - COLLECTOR_OTLP_ENABLED=true
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "wget -qO- http://localhost:16686 > /dev/null"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   networks:
+  #     - ecommerce-network
+
   auth-service:
     build:
       context: .
@@ -57,6 +100,12 @@ services:
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
+      - AUTH_SNS_TOPIC_ARN=${AUTH_SNS_TOPIC_ARN:-arn:aws:sns:us-east-1:000000000000:auth-events}
+      - NOTIFICATION_SNS_TOPIC_ARN=${NOTIFICATION_SNS_TOPIC_ARN:-arn:aws:sns:us-east-1:000000000000:notification-events}
+      - USE_LOCALSTACK=true
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      # - OTEL_SERVICE_NAME=auth-service
     depends_on:
       postgres:
         condition: service_healthy
@@ -71,6 +120,7 @@ services:
     volumes:
       - ./services/user-service:/app
       - ./services/common:/common
+      - ./pkg/aws:/pkg/aws
     ports:
       - "8085:8085"
     env_file:
@@ -83,6 +133,8 @@ services:
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      # - OTEL_SERVICE_NAME=user-service
     depends_on:
       postgres:
         condition: service_healthy
@@ -97,6 +149,7 @@ services:
     volumes:
       - ./services/product-service:/app
       - ./services/common:/common
+      - ./pkg/aws:/pkg/aws
     ports:
       - "8082:8082"
     env_file:
@@ -106,17 +159,20 @@ services:
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_EC2_METADATA_DISABLED=true
-      - USE_LOCALSTACK=${USE_LOCALSTACK:-false}
-      - LOCALSTACK_ENDPOINT=${LOCALSTACK_ENDPOINT:-http://localstack:4566}
-      - AWS_S3_BUCKET=shopswift
+      # USE_LOCALSTACK and LOCALSTACK_ENDPOINT are intentionally NOT set here.
+      # They are injected only by docker-compose.localstack.yml to avoid
+      # accidentally routing prod traffic to LocalStack.
+      - AWS_S3_BUCKET=${AWS_S3_BUCKET:-shopswift}
       - AWS_S3_PREFIX=products/
-      - DDB_TABLE_PRODUCTS=Products
-      - DDB_TABLE_CATEGORIES=Categories
+      - DDB_TABLE_PRODUCTS=${DDB_TABLE_PRODUCTS:-Products}
+      - DDB_TABLE_CATEGORIES=${DDB_TABLE_CATEGORIES:-Categories}
       - INVENTORY_SERVICE_URL=http://inventory-service:8084
-      - CLOUDWATCH_ENABLED=true
-      - CLOUDWATCH_LOG_GROUP=/ecommerce/services
-      - CLOUDWATCH_NAMESPACE=ECommerce
-    # local development overrides should be provided via a local compose override (e.g. docker-compose.override.yml)
+      - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
+      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
+      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
+      - PRODUCT_SNS_TOPIC_ARN=${PRODUCT_SNS_TOPIC_ARN:-}
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      # - OTEL_SERVICE_NAME=product-service
     networks:
       - ecommerce-network
 
@@ -128,6 +184,7 @@ services:
     volumes:
       - ./services/cart-service:/app
       - ./services/common:/common
+      - ./pkg/aws:/pkg/aws
     ports:
       - "8086:8086"
     env_file:
@@ -140,6 +197,8 @@ services:
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      # - OTEL_SERVICE_NAME=cart-service
     depends_on:
       postgres:
         condition: service_healthy
@@ -155,6 +214,8 @@ services:
     restart: unless-stopped
     volumes:
       - ./services/inventory-service:/app
+      - ./services/common:/common
+      - ./pkg/aws:/pkg/aws
     ports:
       - "8084:8084"
     env_file:
@@ -168,7 +229,8 @@ services:
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
-    # local development overrides should be provided via a local compose override (e.g. docker-compose.override.yml)
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      # - OTEL_SERVICE_NAME=inventory-service
     networks:
       - ecommerce-network
 
@@ -179,6 +241,8 @@ services:
     restart: unless-stopped
     volumes:
       - ./services/order-service:/app
+      - ./services/common:/common
+      - ./pkg/aws:/pkg/aws
     ports:
       - "8083:8083"
     env_file:
@@ -192,6 +256,10 @@ services:
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
+      - ORDER_SNS_TOPIC_ARN=${ORDER_SNS_TOPIC_ARN:-}
+      - NOTIFICATION_SNS_TOPIC_ARN=${NOTIFICATION_SNS_TOPIC_ARN:-}
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      # - OTEL_SERVICE_NAME=order-service
     depends_on:
       postgres:
         condition: service_healthy
@@ -206,6 +274,7 @@ services:
     volumes:
       - ./services/payment-service:/app
       - ./services/common:/common
+      - ./pkg/aws:/pkg/aws
     ports:
       - "8087:8087"
     env_file:
@@ -218,9 +287,130 @@ services:
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
+      - PAYMENT_SNS_TOPIC_ARN=${PAYMENT_SNS_TOPIC_ARN:-}
+      - NOTIFICATION_SNS_TOPIC_ARN=${NOTIFICATION_SNS_TOPIC_ARN:-}
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      # - OTEL_SERVICE_NAME=payment-service
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - ecommerce-network
+
+  promotion-service:
+    build:
+      context: .
+      dockerfile: services/promotion-service/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./services/promotion-service:/app
+      - ./services/common:/common
+      - ./pkg/aws:/pkg/aws
+    ports:
+      - "8090:8090"
+    env_file:
+      - .env
+    environment:
+      - PORT=8090
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_EC2_METADATA_DISABLED=true
+      - PROMOTION_SNS_TOPIC_ARN=arn:aws:sns:us-east-1:000000000000:promotion-events
+      - NOTIFICATION_SNS_TOPIC_ARN=arn:aws:sns:us-east-1:000000000000:notification-events
+      - USE_LOCALSTACK=true
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
+      - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
+      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
+      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      # - OTEL_SERVICE_NAME=promotion-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+
+  shipping-service:
+    build:
+      context: .
+      dockerfile: services/shipping-service/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./services/shipping-service:/app
+      - ./services/common:/common
+      - ./pkg/aws:/pkg/aws
+    ports:
+      - "8091:8091"
+    env_file:
+      - .env
+    environment:
+      - PORT=8091
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_EC2_METADATA_DISABLED=true
+      - SHIPPO_API_KEY=${SHIPPO_API_KEY:-}
+      - SHIPPING_SNS_TOPIC_ARN=arn:aws:sns:us-east-1:000000000000:shipping-events
+      - NOTIFICATION_SNS_TOPIC_ARN=arn:aws:sns:us-east-1:000000000000:notification-events
+      - USE_LOCALSTACK=true
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
+      - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
+      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
+      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      # - OTEL_SERVICE_NAME=shipping-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: services/notification-service/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./services/notification-service:/app
+      - ./services/common:/common
+      - ./pkg/aws:/pkg/aws
+    ports:
+      - "8092:8092"
+    env_file:
+      - .env
+    environment:
+      - PORT=8092
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_EC2_METADATA_DISABLED=true
+      - USE_LOCALSTACK=true
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
+      # SQS queue that receives all notification events from SNS
+      - SQS_QUEUE_URL=${NOTIFICATION_SQS_QUEUE_URL:-}
+      # SMTP config
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_EMAIL:-}
+      - SMTP_PASS=${SMTP_PASSWORD:-}
+      # Postgres (for notification logs)
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=ecommerce
+      - POSTGRES_SSLMODE=disable
+      - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
+      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
+      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      # - OTEL_SERVICE_NAME=notification-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # jaeger:
+      #   condition: service_healthy
     networks:
       - ecommerce-network
 
@@ -233,6 +423,8 @@ services:
       - "8080:8080"
     volumes:
       - ./api-gateway:/app
+      - ./services/common:/common
+      - ./pkg/aws:/pkg/aws
     env_file:
       - .env
     environment:
@@ -244,6 +436,8 @@ services:
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      # - OTEL_SERVICE_NAME=api-gateway
     depends_on:
       - auth-service
       - product-service
@@ -252,6 +446,9 @@ services:
       - user-service
       - cart-service
       - payment-service
+      - promotion-service
+      - shipping-service
+      - notification-service
     networks:
       - ecommerce-network
 
@@ -263,6 +460,8 @@ services:
     volumes:
       - ./services/bff-service:/app
       - ./docs:/docs:ro
+      - ./services/common:/common
+      - ./pkg/aws:/pkg/aws
     ports:
       - "8088:8088"
     env_file:
@@ -272,11 +471,22 @@ services:
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_REGION=${AWS_REGION}
       - AWS_EC2_METADATA_DISABLED=true
-      - CLOUDWATCH_ENABLED=true
-      - CLOUDWATCH_LOG_GROUP=/ecommerce/services
-      - CLOUDWATCH_NAMESPACE=ECommerce
+      - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
+      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
+      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
+      - REDIS_URL=redis://redis:6379/0
+      - REQUEST_TIMEOUT=40s
+      - API_GATEWAY_URL=http://api-gateway:8080
+      - ANALYTICS_SERVICE_URL=http://analytics-service:8093
+      - NOTIFICATION_SERVICE_URL=http://notification-service:8092
+      - REVIEW_SERVICE_URL=http://review-service:8094
+      - PROMOTION_SERVICE_URL=http://promotion-service:8090
+      - SHIPPING_SERVICE_URL=http://shipping-service:8091
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      # - OTEL_SERVICE_NAME=bff-service
     depends_on:
       - api-gateway
+      - redis
     networks:
       - ecommerce-network
 
@@ -291,6 +501,18 @@ services:
     networks:
       - ecommerce-network
 
+  docs:
+    image: swaggerapi/swagger-ui:latest
+    restart: unless-stopped
+    ports:
+      - "8099:8080"
+    volumes:
+      - ./docs/openapi.yaml:/tmp/openapi.yaml:ro
+    environment:
+      - SWAGGER_JSON=/tmp/openapi.yaml
+    networks:
+      - ecommerce-network
+
 networks:
   ecommerce-network:
     driver: bridge
@@ -298,3 +520,4 @@ networks:
 volumes:
   postgres_data:
   redis_data:
+  # opensearch_data:

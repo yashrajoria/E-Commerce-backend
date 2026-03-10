@@ -26,7 +26,7 @@ func NewDynamoCategoryAdapter(client *dynamodb.Client, table, productTable strin
 }
 
 type ddbCategory struct {
-	CategoryID string   `dynamodbav:"category_id"`
+	CategoryID string   `dynamodbav:"id"`
 	Name       string   `dynamodbav:"name"`
 	ParentIDs  []string `dynamodbav:"parent_ids,omitempty"`
 	Image      string   `dynamodbav:"image,omitempty"`
@@ -100,7 +100,7 @@ func (d *DynamoCategoryAdapter) toDDB(cat *models.Category) *ddbCategory {
 }
 
 func (d *DynamoCategoryAdapter) FindByID(ctx context.Context, id uuid.UUID) (*models.Category, error) {
-	key, err := attributevalue.MarshalMap(map[string]string{"category_id": id.String()})
+	key, err := attributevalue.MarshalMap(map[string]string{"id": id.String()})
 	if err != nil {
 		return nil, fmt.Errorf("marshal key: %w", err)
 	}
@@ -251,7 +251,7 @@ func (d *DynamoCategoryAdapter) Update(ctx context.Context, id uuid.UUID, update
 		i++
 	}
 
-	key, err := attributevalue.MarshalMap(map[string]string{"category_id": id.String()})
+	key, err := attributevalue.MarshalMap(map[string]string{"id": id.String()})
 	if err != nil {
 		return fmt.Errorf("marshal key: %w", err)
 	}

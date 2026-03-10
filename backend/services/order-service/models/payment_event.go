@@ -4,11 +4,13 @@ import "time"
 
 // From cart-service → order-service
 type CheckoutEvent struct {
-	Event     string         `json:"event"`   // expected: "checkout.requested"
-	UserID    string         `json:"user_id"` // must be UUID string
-	Items     []CheckoutItem `json:"items"`
-	Timestamp time.Time      `json:"timestamp"`
-	OrderID   string         `json:"order_id"`
+	Event          string         `json:"event"`   // expected: "checkout.requested"
+	UserID         string         `json:"user_id"` // must be UUID string
+	Email          string         `json:"email,omitempty"`
+	IdempotencyKey string         `json:"idempotency_key,omitempty"`
+	Items          []CheckoutItem `json:"items"`
+	Timestamp      time.Time      `json:"timestamp"`
+	OrderID        string         `json:"order_id"`
 }
 
 type CheckoutItem struct {
@@ -18,9 +20,10 @@ type CheckoutItem struct {
 
 // order-service → payment-service
 type PaymentRequest struct {
-	OrderID string `json:"order_id"`
-	UserID  string `json:"user_id"`
-	Amount  int    `json:"amount"` // minor units
+	OrderID        string `json:"order_id"`
+	UserID         string `json:"user_id"`
+	Amount         int    `json:"amount"` // minor units
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
 }
 
 // payment-service → order-service

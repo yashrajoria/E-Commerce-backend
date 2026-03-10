@@ -44,28 +44,32 @@ func (e *ServiceError) Error() string {
 }
 
 type OrderService struct {
-	orderRepo   repositories.OrderRepository
-	snsClient   aws_pkg.SNSPublisher
-	snsTopicArn string
+	orderRepo            repositories.OrderRepository
+	snsClient            aws_pkg.SNSPublisher
+	snsTopicArn          string
+	notificationTopicArn string
 }
 
 // NewOrderServiceSQS creates an OrderService that uses SNS/SQS instead of Kafka
-func NewOrderServiceSQS(orderRepo repositories.OrderRepository, snsClient aws_pkg.SNSPublisher, snsTopicArn string) *OrderService {
+func NewOrderServiceSQS(orderRepo repositories.OrderRepository, snsClient aws_pkg.SNSPublisher, snsTopicArn, notificationTopicArn string) *OrderService {
 	return &OrderService{
-		orderRepo:   orderRepo,
-		snsClient:   snsClient,
-		snsTopicArn: snsTopicArn,
+		orderRepo:            orderRepo,
+		snsClient:            snsClient,
+		snsTopicArn:          snsTopicArn,
+		notificationTopicArn: notificationTopicArn,
 	}
 }
 
 // CreateOrder processes order creation via SNS
-func (s *OrderService) CreateOrder(ctx context.Context, userID string, req *CreateOrderRequest) *ServiceError {
+func (s *OrderService) CreateOrder(ctx context.Context, userID, email string, req *CreateOrderRequest) *ServiceError {
 	if len(req.Items) == 0 {
 		return &ServiceError{
 			StatusCode: 400,
 			Message:    "At least one item is required",
 		}
 	}
+
+	orderID := uuid.New().String()
 
 	// Build event items
 	eventItems := make([]models.CheckoutItem, 0, len(req.Items))
@@ -79,7 +83,8 @@ func (s *OrderService) CreateOrder(ctx context.Context, userID string, req *Crea
 	// Create checkout event
 	checkoutEvent := models.CheckoutEvent{
 		UserID:    userID,
-		OrderID:   uuid.New().String(),
+		Email:     email,
+		OrderID:   orderID,
 		Items:     eventItems,
 		Timestamp: time.Now(),
 	}
@@ -103,6 +108,8 @@ func (s *OrderService) CreateOrder(ctx context.Context, userID string, req *Crea
 			}
 		}
 		log.Printf("[OrderService] SNS published to %s", s.snsTopicArn)
+		// NOTE: order_created notification is now published by the checkout consumer
+		// after the order is actually created in DB with correct total and items.
 	} else {
 		log.Printf("[OrderService] Warning: SNS client not configured, order event not published")
 	}

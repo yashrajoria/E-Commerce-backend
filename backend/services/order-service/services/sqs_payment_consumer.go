@@ -3,29 +3,37 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"order-service/models"
 	"time"
 
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"github.com/yashrajoria/common/events"
 	"gorm.io/gorm"
 )
 
 // SQSPaymentConsumer consumes payment events from SQS and updates order status
 type SQSPaymentConsumer struct {
-	sqsConsumer     *aws_pkg.SQSConsumer
-	db              *gorm.DB
-	inventoryClient *InventoryClient
-	metricsClient   *aws_pkg.MetricsClient
+	sqsConsumer          *aws_pkg.SQSConsumer
+	db                   *gorm.DB
+	inventoryClient      *InventoryClient
+	metricsClient        *aws_pkg.MetricsClient
+	snsClient            aws_pkg.SNSPublisher
+	notificationTopicArn string
+	productServiceURL    string
 }
 
 // NewSQSPaymentConsumer creates a new SQS-based payment event consumer
-func NewSQSPaymentConsumer(sqsConsumer *aws_pkg.SQSConsumer, db *gorm.DB, inventoryClient *InventoryClient, metricsClient *aws_pkg.MetricsClient) *SQSPaymentConsumer {
+func NewSQSPaymentConsumer(sqsConsumer *aws_pkg.SQSConsumer, db *gorm.DB, inventoryClient *InventoryClient, metricsClient *aws_pkg.MetricsClient, snsClient aws_pkg.SNSPublisher, notificationTopicArn string, productServiceURL string) *SQSPaymentConsumer {
 	return &SQSPaymentConsumer{
-		sqsConsumer:     sqsConsumer,
-		db:              db,
-		inventoryClient: inventoryClient,
-		metricsClient:   metricsClient,
+		sqsConsumer:          sqsConsumer,
+		db:                   db,
+		inventoryClient:      inventoryClient,
+		metricsClient:        metricsClient,
+		snsClient:            snsClient,
+		notificationTopicArn: notificationTopicArn,
+		productServiceURL:    productServiceURL,
 	}
 }
 
@@ -70,6 +78,8 @@ func (c *SQSPaymentConsumer) handleMessage(ctx context.Context, body string) err
 	case "payment_succeeded":
 		c.updateOrderStatusWithTime(evt.OrderID, "paid", &now, nil)
 		c.confirmInventory(ctx, evt.OrderID)
+		// Send order_confirmed notification with product details
+		c.publishOrderConfirmedNotification(ctx, evt)
 		// Emit metrics
 		if c.metricsClient != nil && c.metricsClient.IsEnabled() {
 			go func() {
@@ -192,5 +202,60 @@ func (c *SQSPaymentConsumer) releaseInventory(ctx context.Context, orderID strin
 		log.Printf("❌ [OrderService][SQSPaymentConsumer] inventory release failed: order=%s err=%v", orderID, err)
 	} else {
 		log.Printf("✅ [OrderService][SQSPaymentConsumer] inventory released for order=%s", orderID)
+	}
+}
+
+// publishOrderConfirmedNotification sends an order_confirmed notification with product details
+// after a successful payment, so the user receives an email with what they purchased.
+func (c *SQSPaymentConsumer) publishOrderConfirmedNotification(ctx context.Context, evt models.PaymentEvent) {
+	if c.snsClient == nil || c.notificationTopicArn == "" {
+		log.Printf("⚠️ [OrderService][SQSPaymentConsumer] SNS not configured, skipping order_confirmed notification")
+		return
+	}
+
+	// Load the order to get total amount and user info
+	var order models.Order
+	if err := c.db.Preload("OrderItems").First(&order, "id = ?", evt.OrderID).Error; err != nil {
+		log.Printf("⚠️ [OrderService][SQSPaymentConsumer] failed to load order for notification: order=%s err=%v", evt.OrderID, err)
+		return
+	}
+
+	// Fetch product names for each order item
+	productServiceURL := c.productServiceURL
+	if productServiceURL == "" {
+		productServiceURL = "http://product-service:8082"
+	}
+
+	notifItems := make([]events.NotificationItem, 0, len(order.OrderItems))
+	for _, oi := range order.OrderItems {
+		product, err := FetchProductByID(ctx, productServiceURL, oi.ProductID)
+		name := fmt.Sprintf("Product %s", oi.ProductID.String()[:8])
+		price := float64(oi.Price)
+		if err == nil && product.Name != "" {
+			name = product.Name
+			price = product.Price
+		}
+		notifItems = append(notifItems, events.NotificationItem{
+			ProductName: name,
+			Quantity:    oi.Quantity,
+			Price:       price,
+		})
+	}
+
+	// evt.UserID comes from the payment event; email is not available in the payment event,
+	// so we pass it as empty and rely on the notification service to use the Recipient field.
+	// TODO: consider storing email in the order record for better reliability.
+	notifEvent := events.NewOrderConfirmedEvent(
+		evt.UserID, "", "", evt.OrderID, float64(order.Amount), notifItems,
+	)
+	notifBytes, err := json.Marshal(notifEvent)
+	if err != nil {
+		log.Printf("⚠️ [OrderService][SQSPaymentConsumer] failed to marshal order_confirmed notification: %v", err)
+		return
+	}
+	if err := c.snsClient.Publish(ctx, c.notificationTopicArn, notifBytes); err != nil {
+		log.Printf("⚠️ [OrderService][SQSPaymentConsumer] failed to publish order_confirmed notification: %v", err)
+	} else {
+		log.Printf("✅ [OrderService][SQSPaymentConsumer] order_confirmed notification published for order=%s", evt.OrderID)
 	}
 }

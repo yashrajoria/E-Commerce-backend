@@ -61,6 +61,8 @@ type ProductFilters struct {
 	MinPrice         *float64
 	MaxPrice         *float64
 	IsFeaturedParsed *bool
+	Brand            string
+	InStockParsed    *bool
 }
 
 // RequestValidator handles all input validation
@@ -122,7 +124,37 @@ func (rv *RequestValidator) ParseFilters(c *gin.Context) (*ProductFilters, error
 		return nil, err
 	}
 
+	// Parse brand
+	if err := rv.parseBrand(c, filters); err != nil {
+		return nil, err
+	}
+
+	// Parse in_stock
+	if err := rv.parseInStock(c, filters); err != nil {
+		return nil, err
+	}
+
 	return filters, nil
+}
+
+func (rv *RequestValidator) parseBrand(c *gin.Context, filters *ProductFilters) error {
+	brand := strings.TrimSpace(c.Query("brand"))
+	if brand != "" {
+		filters.Brand = brand
+	}
+	return nil
+}
+
+func (rv *RequestValidator) parseInStock(c *gin.Context, filters *ProductFilters) error {
+	inStockStr := strings.TrimSpace(c.Query("in_stock"))
+	if inStockStr != "" {
+		v, err := strconv.ParseBool(inStockStr)
+		if err != nil {
+			return errors.New("invalid boolean value for 'in_stock'")
+		}
+		filters.InStockParsed = &v
+	}
+	return nil
 }
 
 // ParseCreateProductRequest validates and parses product creation request

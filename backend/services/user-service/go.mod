@@ -4,7 +4,7 @@ go 1.25
 
 // toolchain go1.23.5
 
-require gorm.io/gorm v1.30.1
+require gorm.io/gorm v1.31.1
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.41.1 // indirect

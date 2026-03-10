@@ -78,20 +78,26 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 		req.Header[k] = v
 	}
 
-	// Inject user claims headers for downstream services
+	// Propagate user claims to downstream services.
+	// Set both X-User-* headers (for services that check headers) and cookies
+	// (for services that check cookies). This dual-injection ensures compatibility
+	// across all microservices regardless of how they read the user identity.
 	if userID, exists := c.Get("user_id"); exists {
-		if uid, ok := userID.(string); ok {
+		if uid, ok := userID.(string); ok && uid != "" {
 			req.Header.Set("X-User-ID", uid)
+			req.AddCookie(&http.Cookie{Name: "user_id", Value: uid})
 		}
 	}
 	if email, exists := c.Get("email"); exists {
-		if e, ok := email.(string); ok {
+		if e, ok := email.(string); ok && e != "" {
 			req.Header.Set("X-User-Email", e)
+			req.AddCookie(&http.Cookie{Name: "user_email", Value: e})
 		}
 	}
 	if role, exists := c.Get("role"); exists {
-		if r, ok := role.(string); ok {
+		if r, ok := role.(string); ok && r != "" {
 			req.Header.Set("X-User-Role", r)
+			req.AddCookie(&http.Cookie{Name: "user_role", Value: r})
 		}
 	}
 

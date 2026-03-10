@@ -35,6 +35,11 @@ func NewCartController(repo *database.CartRepository, snsClient *aws_pkg.SNSClie
 func (cc *CartController) GetCart(c *gin.Context) {
 	userID := c.GetHeader("X-User-ID")
 	if userID == "" {
+		if v, err := c.Cookie("user_id"); err == nil && v != "" {
+			userID = v
+		}
+	}
+	if userID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authorized"})
 		return
 	}
@@ -68,6 +73,11 @@ type AddItemsRequest struct {
 
 func (cc *CartController) AddItems(c *gin.Context) {
 	userID := c.GetHeader("X-User-ID")
+	if userID == "" {
+		if v, err := c.Cookie("user_id"); err == nil && v != "" {
+			userID = v
+		}
+	}
 	if userID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authorized"})
 		return
@@ -125,6 +135,11 @@ func (cc *CartController) RemoveItem(c *gin.Context) {
 	userID := c.GetHeader("X-User-ID")
 	productID := c.Param("product_id")
 	if userID == "" {
+		if v, err := c.Cookie("user_id"); err == nil && v != "" {
+			userID = v
+		}
+	}
+	if userID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authorized"})
 		return
 	}
@@ -161,6 +176,11 @@ func (cc *CartController) RemoveItem(c *gin.Context) {
 func (cc *CartController) ClearCart(c *gin.Context) {
 	userID := c.GetHeader("X-User-ID")
 	if userID == "" {
+		if v, err := c.Cookie("user_id"); err == nil && v != "" {
+			userID = v
+		}
+	}
+	if userID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authorized"})
 		return
 	}
@@ -182,12 +202,12 @@ func (cc *CartController) ClearCart(c *gin.Context) {
 func (cc *CartController) Checkout(c *gin.Context) {
 	userID := c.GetHeader("X-User-ID")
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authorized"})
-		return
+		if v, err := c.Cookie("user_id"); err == nil && v != "" {
+			userID = v
+		}
 	}
-
 	if userID == "" {
-		log.Println("❌ [Checkout] Unauthorized: missing or empty user ID header")
+		log.Println("❌ [Checkout] Unauthorized: missing or empty user ID header/cookie")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
@@ -200,14 +220,51 @@ func (cc *CartController) Checkout(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "cart not found"})
 		return
 	}
+	// support idempotency: if Idempotency-Key header present, check Redis for existing order
+	idemKey := c.GetHeader("Idempotency-Key")
+	if idemKey != "" {
+		if existing, err := cc.Repo.GetIdempotency(context.Background(), idemKey); err == nil && existing != "" {
+			c.JSON(http.StatusOK, gin.H{"order_id": existing, "status": "PENDING"})
+			return
+		}
+	}
+
+	// Validate products exist via product-service internal API before publishing
+	invalid := []string{}
+	productServiceURL := os.Getenv("PRODUCT_SERVICE_URL")
+	if productServiceURL == "" {
+		productServiceURL = "http://product-service:8082"
+	}
+	// simple per-item check
+	for _, it := range cart.Items {
+		// GET /products/internal/:id
+		resp, err := http.Get(productServiceURL + "/products/internal/" + it.ProductID)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			invalid = append(invalid, it.ProductID)
+			continue
+		}
+		// drain body
+		_ = resp.Body.Close()
+	}
+
+	if len(invalid) > 0 {
+		// return a clear frontend-visible error listing invalid items
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":            "some items in cart are invalid or missing",
+			"invalid_product_ids": invalid,
+		})
+		return
+	}
+
 	orderID := uuid.New().String()
 	// Build SNS payload
 	event := models.CheckoutEvent{
-		Event:     "checkout.requested",
-		UserID:    userID,
-		Items:     cart.Items,
-		Timestamp: time.Now(),
-		OrderID:   orderID,
+		Event:          "checkout.requested",
+		UserID:         userID,
+		Items:          cart.Items,
+		IdempotencyKey: idemKey,
+		Timestamp:      time.Now(),
+		OrderID:        orderID,
 	}
 
 	eventBytes, _ := json.Marshal(event)
@@ -224,6 +281,11 @@ func (cc *CartController) Checkout(c *gin.Context) {
 
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to publish checkout event"})
 		return
+	}
+
+	// persist idempotency mapping if key provided
+	if idemKey != "" {
+		_ = cc.Repo.SetIdempotency(context.Background(), idemKey, orderID, cc.Config.CartTTL)
 	}
 
 	// Clear cart after sending

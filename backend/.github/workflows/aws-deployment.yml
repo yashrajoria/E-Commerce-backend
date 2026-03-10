@@ -23,6 +23,8 @@ jobs:
           - order-service
           - payment-service
           - product-service
+          - promotion-service
+          - shipping-service
           - user-service
     steps:
       - name: Checkout
@@ -57,6 +59,8 @@ jobs:
           - order-service
           - payment-service
           - product-service
+          - promotion-service
+          - shipping-service
           - user-service
     steps:
       - name: Checkout

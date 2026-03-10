@@ -1,54 +1,220 @@
 #!/bin/bash
 set -euo pipefail
 
-# Enable debug mode to see commands in logs
 set -x
 
 echo "Initializing LocalStack resources..."
 
-# 1. S3
-awslocal s3 mb s3://${AWS_S3_BUCKET:-shopswift} || true
+# --------------------------------------------------
+# Config (names driven by env; safe defaults)
+# --------------------------------------------------
+ORDER_TOPIC_NAME="${ORDER_SNS_TOPIC_NAME:-order-events}"
+PAYMENT_TOPIC_NAME="${PAYMENT_SNS_TOPIC_NAME:-payment-events}"
+AUTH_TOPIC_NAME="${AUTH_SNS_TOPIC_NAME:-auth-events}"
+SHIPPING_TOPIC_NAME="${SHIPPING_SNS_TOPIC_NAME:-shipping-events}"
+PROMOTION_TOPIC_NAME="${PROMOTION_SNS_TOPIC_NAME:-promotion-events}"
 
-# 2. DynamoDB Tables
-awslocal dynamodb create-table \
-    --table-name ${DDB_TABLE_PRODUCTS:-Products} \
-    --attribute-definitions AttributeName=id,AttributeType=S \
-    --key-schema AttributeName=id,KeyType=HASH \
-    --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 || true
+ORDER_QUEUE_NAME="${ORDER_PROCESSING_QUEUE_NAME:-order-processing-queue}"
+PAYMENT_EVENTS_QUEUE_NAME="${PAYMENT_EVENTS_QUEUE_NAME:-payment-events-queue}"
+PAYMENT_REQUEST_QUEUE_NAME="${PAYMENT_REQUEST_QUEUE_NAME:-payment-request-queue}"
+NOTIFICATION_QUEUE_NAME="${NOTIFICATION_SQS_QUEUE_NAME:-notification-queue}"
 
-awslocal dynamodb create-table \
-    --table-name ${DDB_TABLE_CATEGORIES:-Categories} \
-    --attribute-definitions AttributeName=id,AttributeType=S \
-    --key-schema AttributeName=id,KeyType=HASH \
-    --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 || true
+# --------------------------------------------------
+# Retry helper (ONLY for transient failures)
+# --------------------------------------------------
+retry() {
+    local n=0
+    local max=6
+    local delay=2
 
-awslocal dynamodb create-table \
-    --table-name ${DDB_TABLE_INVENTORY:-Inventory} \
-    --attribute-definitions AttributeName=id,AttributeType=S \
-    --key-schema AttributeName=id,KeyType=HASH \
-    --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 || true
+    while true; do
+        if "$@"; then
+            return 0
+        fi
 
-# 3. SNS Topics
-ORDER_TOPIC_ARN=$(awslocal sns create-topic --name order-events --query "TopicArn" --output text)
-PAYMENT_TOPIC_ARN=$(awslocal sns create-topic --name payment-events --query "TopicArn" --output text)
+        n=$((n+1))
+        if [ "$n" -ge "$max" ]; then
+            echo "Command failed after $n attempts: $*" >&2
+            return 1
+        fi
 
-# 4. SQS Queues
-ORDER_QUEUE_URL=$(awslocal sqs create-queue --queue-name order-processing-queue --query "QueueUrl" --output text)
-PAYMENT_EVENTS_QUEUE_URL=$(awslocal sqs create-queue --queue-name payment-events-queue --query "QueueUrl" --output text)
-awslocal sqs create-queue --queue-name payment-request-queue
+        sleep "$delay"
+        delay=$((delay * 2))
+    done
+}
 
-# 5. SNS -> SQS Subscriptions
-ORDER_QUEUE_ARN=$(awslocal sqs get-queue-attributes --queue-url $ORDER_QUEUE_URL --attribute-names QueueArn --query "Attributes.QueueArn" --output text)
-awslocal sns subscribe --topic-arn $ORDER_TOPIC_ARN --protocol sqs --notification-endpoint $ORDER_QUEUE_ARN
+# --------------------------------------------------
+# S3 (idempotent)
+# --------------------------------------------------
+BUCKET_NAME="${AWS_S3_BUCKET:-shopswift}"
 
-PAYMENT_EVENTS_QUEUE_ARN=$(awslocal sqs get-queue-attributes --queue-url $PAYMENT_EVENTS_QUEUE_URL --attribute-names QueueArn --query "Attributes.QueueArn" --output text)
-awslocal sns subscribe --topic-arn $PAYMENT_TOPIC_ARN --protocol sqs --notification-endpoint $PAYMENT_EVENTS_QUEUE_ARN
+if ! awslocal s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+    retry awslocal s3 mb "s3://$BUCKET_NAME"
+else
+    echo "S3 bucket '$BUCKET_NAME' already exists"
+fi
 
-# 6. EC2 Instance
-awslocal ec2 run-instances \
+
+# --------------------------------------------------
+# DynamoDB (idempotent)
+# --------------------------------------------------
+create_table_if_missing() {
+    local tbl_name="$1"
+
+    if awslocal dynamodb describe-table --table-name "$tbl_name" >/dev/null 2>&1; then
+        echo "DynamoDB table '$tbl_name' already exists"
+        return 0
+    fi
+
+    echo "Creating DynamoDB table '$tbl_name'..."
+
+    retry awslocal dynamodb create-table \
+        --table-name "$tbl_name" \
+        --attribute-definitions AttributeName=id,AttributeType=S \
+        --key-schema AttributeName=id,KeyType=HASH \
+        --billing-mode PAY_PER_REQUEST
+
+    # wait until ACTIVE
+    retry awslocal dynamodb wait table-exists --table-name "$tbl_name"
+}
+
+create_table_if_missing "${DDB_TABLE_PRODUCTS:-Products}"
+create_table_if_missing "${DDB_TABLE_CATEGORIES:-Categories}"
+create_table_if_missing "${DDB_TABLE_INVENTORY:-Inventory}"
+
+
+# --------------------------------------------------
+# SNS (idempotent)
+# --------------------------------------------------
+create_topic_if_missing() {
+    local topic_name="$1"
+
+    awslocal sns create-topic \
+        --name "$topic_name" \
+        --query "TopicArn" \
+        --output text
+}
+
+ORDER_TOPIC_ARN=$(retry create_topic_if_missing "$ORDER_TOPIC_NAME")
+PAYMENT_TOPIC_ARN=$(retry create_topic_if_missing "$PAYMENT_TOPIC_NAME")
+AUTH_TOPIC_ARN=$(retry create_topic_if_missing "$AUTH_TOPIC_NAME")
+SHIPPING_TOPIC_ARN=$(retry create_topic_if_missing "$SHIPPING_TOPIC_NAME")
+PROMOTION_TOPIC_ARN=$(retry create_topic_if_missing "$PROMOTION_TOPIC_NAME")
+NOTIFICATION_TOPIC_ARN=$(retry create_topic_if_missing "notification-events")
+
+
+# --------------------------------------------------
+# SQS (idempotent)
+# --------------------------------------------------
+create_queue_if_missing() {
+    local queue_name="$1"
+
+    awslocal sqs create-queue \
+        --queue-name "$queue_name" \
+        --query "QueueUrl" \
+        --output text
+}
+
+ORDER_QUEUE_URL=$(retry create_queue_if_missing "$ORDER_QUEUE_NAME")
+PAYMENT_EVENTS_QUEUE_URL=$(retry create_queue_if_missing "$PAYMENT_EVENTS_QUEUE_NAME")
+PAYMENT_REQUEST_QUEUE_URL=$(retry create_queue_if_missing "$PAYMENT_REQUEST_QUEUE_NAME")
+NOTIFICATION_QUEUE_URL=$(retry create_queue_if_missing "$NOTIFICATION_QUEUE_NAME")
+
+
+# --------------------------------------------------
+# SNS → SQS Subscription (idempotent)
+# NOTE: In real AWS, SQS also needs a queue policy allowing the SNS topic to
+# send messages. LocalStack can be permissive, but we set it anyway to avoid
+# silent non-delivery and to keep parity with AWS.
+# --------------------------------------------------
+ensure_sqs_policy_allows_sns() {
+    local topic_arn="$1"
+    local queue_url="$2"
+
+    local queue_arn
+    queue_arn=$(awslocal sqs get-queue-attributes \
+        --queue-url "$queue_url" \
+        --attribute-names QueueArn \
+        --query "Attributes.QueueArn" \
+        --output text)
+
+    local existing_policy
+    existing_policy=$(awslocal sqs get-queue-attributes \
+        --queue-url "$queue_url" \
+        --attribute-names Policy \
+        --query "Attributes.Policy" \
+        --output text 2>/dev/null || true)
+
+    # If the policy already references this topic ARN, assume it's fine.
+    if [ -n "$existing_policy" ] && echo "$existing_policy" | grep -q "$topic_arn"; then
+        echo "SQS policy already allows SNS topic $topic_arn"
+        return 0
+    fi
+
+    local attrs_file
+    attrs_file=$(mktemp)
+
+    # The --attributes value must be a JSON object where the Policy value is
+    # itself a JSON-encoded string (double-escaped). Using file:// avoids all
+    # shell quoting issues with embedded double quotes.
+    cat > "$attrs_file" <<EOF
+{"Policy":"{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"Allow-SNS-SendMessage\",\"Effect\":\"Allow\",\"Principal\":\"*\",\"Action\":\"sqs:SendMessage\",\"Resource\":\"${queue_arn}\",\"Condition\":{\"ArnEquals\":{\"aws:SourceArn\":\"${topic_arn}\"}}}]}"}
+EOF
+
+    retry awslocal sqs set-queue-attributes \
+        --queue-url "$queue_url" \
+        --attributes "file://$attrs_file" >/dev/null
+
+    rm -f "$attrs_file"
+}
+
+subscribe_if_missing() {
+    local topic_arn="$1"
+    local queue_url="$2"
+
+    local queue_arn
+    queue_arn=$(awslocal sqs get-queue-attributes \
+        --queue-url "$queue_url" \
+        --attribute-names QueueArn \
+        --query "Attributes.QueueArn" \
+        --output text)
+
+    # check existing subscriptions
+    if awslocal sns list-subscriptions-by-topic \
+        --topic-arn "$topic_arn" \
+        --query "Subscriptions[?Endpoint=='$queue_arn']" \
+        --output text | grep -q "$queue_arn"; then
+        echo "Subscription already exists for $queue_arn"
+        return 0
+    fi
+
+    retry awslocal sns subscribe \
+        --topic-arn "$topic_arn" \
+        --protocol sqs \
+        --notification-endpoint "$queue_arn"
+}
+
+ensure_sqs_policy_allows_sns "$ORDER_TOPIC_ARN" "$ORDER_QUEUE_URL"
+subscribe_if_missing "$ORDER_TOPIC_ARN" "$ORDER_QUEUE_URL"
+ensure_sqs_policy_allows_sns "$PAYMENT_TOPIC_ARN" "$PAYMENT_EVENTS_QUEUE_URL"
+subscribe_if_missing "$PAYMENT_TOPIC_ARN" "$PAYMENT_EVENTS_QUEUE_URL"
+
+# Dedicated notification-events topic → notification queue.
+# All publisher services send NotificationEvent messages to this single topic;
+# business events stay on their own topics and never reach the notification queue.
+ensure_sqs_policy_allows_sns "$NOTIFICATION_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
+subscribe_if_missing "$NOTIFICATION_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
+
+
+# --------------------------------------------------
+# EC2 (dev-only, safe ignore if already exists)
+# --------------------------------------------------
+retry awslocal ec2 run-instances \
     --image-id ami-ff000000 \
     --count 1 \
     --instance-type t2.micro \
-    --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=local-dev-instance}]'
+    --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=local-dev-instance}]' \
+    || echo "EC2 instance may already exist (ignored for local dev)"
+
 
 echo "LocalStack resources initialized successfully."

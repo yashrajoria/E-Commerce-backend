@@ -11,6 +11,8 @@ type ListProductsParams struct {
 	CategoryID []uuid.UUID
 	MinPrice   *float64
 	MaxPrice   *float64
+	Brand      *string
+	InStock    *bool
 }
 
 // ProductCreateRequest is the request payload for creating a product

@@ -5,31 +5,40 @@ import (
 	"encoding/json"
 	"log"
 	"order-service/models"
-	"os"
 	"time"
 
 	"github.com/google/uuid"
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"github.com/yashrajoria/common/events"
 	"gorm.io/gorm"
 )
 
 // SQSCheckoutConsumer consumes checkout events from SQS and creates orders
 type SQSCheckoutConsumer struct {
-	sqsConsumer     *aws_pkg.SQSConsumer
-	sqsPublisher    *aws_pkg.SQSConsumer // For sending payment requests
-	db              *gorm.DB
-	inventoryClient *InventoryClient
-	metricsClient   *aws_pkg.MetricsClient
+	sqsConsumer          *aws_pkg.SQSConsumer
+	sqsPublisher         *aws_pkg.SQSConsumer // For sending payment requests
+	db                   *gorm.DB
+	inventoryClient      *InventoryClient
+	metricsClient        *aws_pkg.MetricsClient
+	productServiceURL    string // Base URL for the product service (internal endpoint)
+	snsClient            aws_pkg.SNSPublisher
+	notificationTopicArn string
 }
 
 // NewSQSCheckoutConsumer creates a new SQS-based checkout consumer
-func NewSQSCheckoutConsumer(sqsConsumer *aws_pkg.SQSConsumer, sqsPublisher *aws_pkg.SQSConsumer, db *gorm.DB, inventoryClient *InventoryClient, metricsClient *aws_pkg.MetricsClient) *SQSCheckoutConsumer {
+func NewSQSCheckoutConsumer(sqsConsumer *aws_pkg.SQSConsumer, sqsPublisher *aws_pkg.SQSConsumer, db *gorm.DB, inventoryClient *InventoryClient, metricsClient *aws_pkg.MetricsClient, productServiceURL string, snsClient aws_pkg.SNSPublisher, notificationTopicArn string) *SQSCheckoutConsumer {
+	if productServiceURL == "" {
+		productServiceURL = "http://product-service:8082"
+	}
 	return &SQSCheckoutConsumer{
-		sqsConsumer:     sqsConsumer,
-		sqsPublisher:    sqsPublisher,
-		db:              db,
-		inventoryClient: inventoryClient,
-		metricsClient:   metricsClient,
+		sqsConsumer:          sqsConsumer,
+		sqsPublisher:         sqsPublisher,
+		db:                   db,
+		inventoryClient:      inventoryClient,
+		metricsClient:        metricsClient,
+		productServiceURL:    productServiceURL,
+		snsClient:            snsClient,
+		notificationTopicArn: notificationTopicArn,
 	}
 }
 
@@ -78,11 +87,21 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		return nil
 	}
 
+	// Idempotency: if CheckoutEvent contains an idempotency key, check DB for existing order
+	if evt.IdempotencyKey != "" {
+		var existing models.Order
+		if err := c.db.WithContext(ctx).Where("idempotency_key = ?", evt.IdempotencyKey).First(&existing).Error; err == nil {
+			log.Printf("⚠️ order already exists for idempotency_key=%s order_id=%s, skipping creation", evt.IdempotencyKey, existing.ID.String())
+			return nil
+		}
+	}
+
 	orderItems := make([]models.OrderItem, 0, len(evt.Items))
 	totalAmount := 0
 	validItems := 0
-	productServiceURL := os.Getenv("PRODUCT_SERVICE_URL")
+	productServiceURL := c.productServiceURL
 	inventoryItems := make([]ReserveItem, 0, len(evt.Items))
+	notificationItems := make([]events.NotificationItem, 0, len(evt.Items))
 
 	for _, it := range evt.Items {
 		pid, err := uuid.Parse(it.ProductID)
@@ -115,6 +134,11 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 			ProductID: it.ProductID,
 			Quantity:  it.Quantity,
 		})
+		notificationItems = append(notificationItems, events.NotificationItem{
+			ProductName: product.Name,
+			Quantity:    it.Quantity,
+			Price:       product.Price,
+		})
 		validItems++
 	}
 
@@ -123,13 +147,16 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		return nil
 	}
 
-	// Reserve inventory via inventory service
+	// Reserve inventory via inventory service (non-fatal: proceed even on failure)
 	if c.inventoryClient != nil {
 		if err := c.inventoryClient.ReserveStock(ctx, orderIDUUID.String(), inventoryItems); err != nil {
-			log.Printf("❌ inventory reservation failed for order=%s: %v", orderIDUUID.String(), err)
-			return nil // Don't retry — stock is insufficient or service is down
+			// Log as a warning but do NOT abort order creation.
+			// Inventory can be reconciled later; blocking checkout on inventory failures
+			// causes silent order drops which break the entire checkout_url flow.
+			log.Printf("⚠️ inventory reservation failed for order=%s (proceeding anyway): %v", orderIDUUID.String(), err)
+		} else {
+			log.Printf("✅ inventory reserved for order=%s items=%d", orderIDUUID.String(), len(inventoryItems))
 		}
-		log.Printf("✅ inventory reserved for order=%s items=%d", orderIDUUID.String(), len(inventoryItems))
 	} else {
 		log.Printf("⚠️ inventory client not configured, skipping reservation")
 	}
@@ -142,6 +169,9 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		OrderNumber: "ORD-" + time.Now().Format("20060102-150405") + "-" + uuid.New().String()[:8],
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
+	}
+	if evt.IdempotencyKey != "" {
+		order.IdempotencyKey = &evt.IdempotencyKey
 	}
 
 	err = c.db.Transaction(func(tx *gorm.DB) error {
@@ -161,6 +191,22 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 	log.Printf("✅ order created id=%s user=%s items=%d total_amount=%d",
 		order.ID.String(), order.UserID.String(), validItems, order.Amount)
 
+	// Publish order_created notification with correct total and items
+	if c.snsClient != nil && c.notificationTopicArn != "" {
+		notifEvent := events.NewOrderCreatedEvent(
+			evt.UserID, evt.Email, "", "", order.ID.String(),
+			float64(order.Amount), notificationItems,
+		)
+		notifBytes, err := json.Marshal(notifEvent)
+		if err != nil {
+			log.Printf("⚠️ failed to marshal order_created notification: %v", err)
+		} else if err := c.snsClient.Publish(ctx, c.notificationTopicArn, notifBytes); err != nil {
+			log.Printf("⚠️ failed to publish order_created notification: %v", err)
+		} else {
+			log.Printf("✅ order_created notification published for order=%s", order.ID.String())
+		}
+	}
+
 	// Emit metrics
 	if c.metricsClient != nil && c.metricsClient.IsEnabled() {
 		go func() {
@@ -174,9 +220,10 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 
 	// Send payment request to SQS
 	req := models.PaymentRequest{
-		OrderID: order.ID.String(),
-		UserID:  order.UserID.String(),
-		Amount:  order.Amount,
+		OrderID:        order.ID.String(),
+		UserID:         order.UserID.String(),
+		Amount:         order.Amount,
+		IdempotencyKey: evt.IdempotencyKey,
 	}
 	reqBytes, _ := json.Marshal(req)
 	if err := c.sqsPublisher.SendMessage(ctx, string(reqBytes)); err != nil {

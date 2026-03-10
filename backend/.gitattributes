@@ -1,0 +1,2 @@
+# Ensure LocalStack init scripts are executable in Linux containers.
+localstack/init/ready.d/*.sh text eol=lf

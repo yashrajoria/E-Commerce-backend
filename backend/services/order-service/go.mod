@@ -6,12 +6,14 @@ require (
 	github.com/gin-gonic/gin v1.10.1
 	github.com/google/uuid v1.6.0
 	go.uber.org/zap v1.27.1
-	gorm.io/gorm v1.30.1
+	gorm.io/gorm v1.31.1
 )
 
 require github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws v0.0.0
+require github.com/yashrajoria/common v0.0.0
 
 replace github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws => ../../pkg/aws
+replace github.com/yashrajoria/common => ../common
 
 require (
 	github.com/bytedance/sonic v1.12.8 // indirect
