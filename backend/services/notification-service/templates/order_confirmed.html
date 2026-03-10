@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Your ShopSwift order is confirmed</title>
+    <title>Payment Confirmed – ShopSwift</title>
     <style>
       body {
         background: #f0ede8;
@@ -43,7 +43,7 @@
       .summary {
         margin-top: 16px;
         background: #f0ede8;
-        border-left: 3px solid #c9a96e;
+        border-left: 3px solid #27ae60;
         border-radius: 8px;
         padding: 14px;
       }
@@ -57,6 +57,16 @@
         font-size: 16px;
         color: #1a1a1a;
         margin-bottom: 8px;
+      }
+      .badge {
+        display: inline-block;
+        background: #27ae60;
+        color: #fff;
+        padding: 4px 12px;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 600;
+        margin-bottom: 12px;
       }
       .items-table {
         width: 100%;
@@ -84,16 +94,17 @@
     <div class="card">
       <div class="hero">
         <div class="logo">Shop<span>Swift</span></div>
-        <div class="title">Order Confirmed</div>
+        <div class="title">Payment Confirmed</div>
       </div>
       <div class="body">
         <p>Hello {{.name}},</p>
+        <span class="badge">&#10003; Payment Successful</span>
         <p>
-          Your order <strong>#{{.order_id}}</strong> has been placed
-          successfully.
+          Your payment for order <strong>#{{.order_id}}</strong> has been
+          confirmed. We're now processing your order!
         </p>
         <div class="summary">
-          <div class="label">Order Summary</div>
+          <div class="label">Order Details</div>
           <div class="value">Order ID: {{.order_id}}</div>
           {{if .items}}
           <table class="items-table">
@@ -116,10 +127,10 @@
           </table>
           {{end}}
           <div class="value" style="margin-top: 12px; font-weight: bold">
-            Total: {{.total}}
+            Total Paid: {{.total}}
           </div>
         </div>
-        <p>Thank you for shopping with ShopSwift.</p>
+        <p>Thank you for shopping with ShopSwift!</p>
       </div>
     </div>
   </body>

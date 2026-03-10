@@ -23,9 +23,14 @@ func NewSNSPublisher(ctx context.Context) (*SNSPublisher, error) {
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
 
-	topicARN := os.Getenv("AUTH_SNS_TOPIC_ARN")
+	// Prefer the dedicated notification topic so notification-service receives
+	// auth events through the unified notification pipeline.
+	topicARN := os.Getenv("NOTIFICATION_SNS_TOPIC_ARN")
 	if topicARN == "" {
-		return nil, fmt.Errorf("AUTH_SNS_TOPIC_ARN not set")
+		topicARN = os.Getenv("AUTH_SNS_TOPIC_ARN")
+	}
+	if topicARN == "" {
+		return nil, fmt.Errorf("NOTIFICATION_SNS_TOPIC_ARN/AUTH_SNS_TOPIC_ARN not set")
 	}
 
 	return &SNSPublisher{

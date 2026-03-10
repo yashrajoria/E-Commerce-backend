@@ -8,7 +8,6 @@ import (
 	repositories "order-service/repository"
 
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
-	"github.com/yashrajoria/common/events"
 
 	"time"
 
@@ -84,6 +83,7 @@ func (s *OrderService) CreateOrder(ctx context.Context, userID, email string, re
 	// Create checkout event
 	checkoutEvent := models.CheckoutEvent{
 		UserID:    userID,
+		Email:     email,
 		OrderID:   orderID,
 		Items:     eventItems,
 		Timestamp: time.Now(),
@@ -108,18 +108,8 @@ func (s *OrderService) CreateOrder(ctx context.Context, userID, email string, re
 			}
 		}
 		log.Printf("[OrderService] SNS published to %s", s.snsTopicArn)
-
-		notificationEvent := events.NewOrderCreatedEvent(userID, email, "", "", orderID, 0)
-		notificationEventBytes, err := json.Marshal(notificationEvent)
-		if err != nil {
-			log.Printf("[OrderService] Failed to marshal order_created notification event: %v", err)
-		} else if s.notificationTopicArn != "" {
-			if err := s.snsClient.Publish(ctx, s.notificationTopicArn, notificationEventBytes); err != nil {
-				log.Printf("[OrderService] Failed to publish order_created notification event: %v", err)
-			} else {
-				log.Printf("[OrderService] order_created notification event published to %s", s.notificationTopicArn)
-			}
-		}
+		// NOTE: order_created notification is now published by the checkout consumer
+		// after the order is actually created in DB with correct total and items.
 	} else {
 		log.Printf("[OrderService] Warning: SNS client not configured, order event not published")
 	}

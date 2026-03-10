@@ -100,7 +100,10 @@ services:
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
-      - AUTH_SNS_TOPIC_ARN=${AUTH_SNS_TOPIC_ARN:-}
+      - AUTH_SNS_TOPIC_ARN=${AUTH_SNS_TOPIC_ARN:-arn:aws:sns:us-east-1:000000000000:auth-events}
+      - NOTIFICATION_SNS_TOPIC_ARN=${NOTIFICATION_SNS_TOPIC_ARN:-arn:aws:sns:us-east-1:000000000000:notification-events}
+      - USE_LOCALSTACK=true
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
       # - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
       # - OTEL_SERVICE_NAME=auth-service
     depends_on:
@@ -382,6 +385,8 @@ services:
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_REGION=${AWS_REGION}
       - AWS_EC2_METADATA_DISABLED=true
+      - USE_LOCALSTACK=true
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
       # SQS queue that receives all notification events from SNS
       - SQS_QUEUE_URL=${NOTIFICATION_SQS_QUEUE_URL:-}
       # SMTP config

@@ -122,17 +122,18 @@ func (s *AuthService) Register(ctx context.Context, name, email, password, role 
 			return fmt.Errorf("failed to create account: %w", err)
 		}
 
-		// ✅ Publish SNS event instead of sending email directly
-		// notification-service will consume this and send the verification email
-		if err := s.eventPublisher.Publish(ctx, "user_registered", map[string]interface{}{
-			"email":             newUser.Email,
-			"name":              newUser.Name,
-			"verification_code": newUser.VerificationCode,
-		}); err != nil {
-			// Non-fatal — user is created, email can be resent
-			// Do not roll back the transaction for this
-			// Log the error but don't return it
-			_ = err
+		// Publish verification event; notification-service handles the email send.
+		if s.eventPublisher != nil {
+			if err := s.eventPublisher.Publish(ctx, "user_registered", map[string]interface{}{
+				"email":             newUser.Email,
+				"name":              newUser.Name,
+				"verification_code": newUser.VerificationCode,
+			}); err != nil {
+				// Non-fatal — user is created, email can be resent.
+				fmt.Printf("failed to publish user_registered event: %v\n", err)
+			}
+		} else {
+			fmt.Printf("event publisher unavailable; skipping user_registered event for %s\n", newUser.Email)
 		}
 
 		return nil
@@ -262,14 +263,17 @@ func (s *AuthService) ResendVerificationEmail(ctx context.Context, email string)
 		return fmt.Errorf("failed to update verification code: %w", err)
 	}
 
-	// ✅ Publish SNS event instead of sending email directly
-	if err := s.eventPublisher.Publish(ctx, "user_registered", map[string]interface{}{
-		"email":             user.Email,
-		"name":              user.Name,
-		"verification_code": verificationCode,
-	}); err != nil {
-		// Non-fatal — code is updated, user can request again
-		_ = err
+	// Publish verification resend event; non-fatal on publish failure.
+	if s.eventPublisher != nil {
+		if err := s.eventPublisher.Publish(ctx, "user_registered", map[string]interface{}{
+			"email":             user.Email,
+			"name":              user.Name,
+			"verification_code": verificationCode,
+		}); err != nil {
+			fmt.Printf("failed to publish user_registered event for resend: %v\n", err)
+		}
+	} else {
+		fmt.Printf("event publisher unavailable; skipping resend event for %s\n", user.Email)
 	}
 
 	return nil

@@ -2,8 +2,7 @@
 # Dockerfile
 # Environment files
 .env
-.env.*
-!.env.example
+# .env.*
 
 # Local env for local development (do NOT commit real secrets)
 .env.local
@@ -74,7 +73,7 @@ node_modules/
 docker-compose.prod.yml
 .air.toml
 /tmp/
-.env.example
+# .env.example
 *.tmp
 *.temp
 tmp/

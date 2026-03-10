@@ -7,7 +7,14 @@ type NotificationEvent struct {
 	Data      map[string]interface{} `json:"data"`
 }
 
-func NewOrderCreatedEvent(userID, email, phone, name, orderID string, total float64) NotificationEvent {
+// NotificationItem represents a line item in order notification emails.
+type NotificationItem struct {
+	ProductName string  `json:"product_name"`
+	Quantity    int     `json:"quantity"`
+	Price       float64 `json:"price"`
+}
+
+func NewOrderCreatedEvent(userID, email, phone, name, orderID string, total float64, items []NotificationItem) NotificationEvent {
 	return NotificationEvent{
 		EventType: "order_created",
 		UserID:    userID,
@@ -18,6 +25,24 @@ func NewOrderCreatedEvent(userID, email, phone, name, orderID string, total floa
 			"phone":    phone,
 			"order_id": orderID,
 			"total":    total,
+			"items":    items,
+		},
+	}
+}
+
+// NewOrderConfirmedEvent creates a notification event after payment succeeds,
+// including the purchased items so the email contains product details.
+func NewOrderConfirmedEvent(userID, email, name, orderID string, total float64, items []NotificationItem) NotificationEvent {
+	return NotificationEvent{
+		EventType: "order_confirmed",
+		UserID:    userID,
+		Recipient: email,
+		Data: map[string]interface{}{
+			"name":     name,
+			"email":    email,
+			"order_id": orderID,
+			"total":    total,
+			"items":    items,
 		},
 	}
 }

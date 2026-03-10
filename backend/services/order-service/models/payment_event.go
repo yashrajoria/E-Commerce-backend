@@ -6,6 +6,7 @@ import "time"
 type CheckoutEvent struct {
 	Event          string         `json:"event"`   // expected: "checkout.requested"
 	UserID         string         `json:"user_id"` // must be UUID string
+	Email          string         `json:"email,omitempty"`
 	IdempotencyKey string         `json:"idempotency_key,omitempty"`
 	Items          []CheckoutItem `json:"items"`
 	Timestamp      time.Time      `json:"timestamp"`
