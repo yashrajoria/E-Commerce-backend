@@ -1,173 +1,3 @@
-# # LocalStack override for local development.
-# #
-# # Usage:
-# #   docker compose -f docker-compose.yml -f docker-compose.localstack.yml up
-# #
-# # This file:
-# #   1. Adds a LocalStack service that emulates AWS APIs on http://localhost:4566.
-# #   2. Injects USE_LOCALSTACK=true and LOCALSTACK_ENDPOINT into every service so
-# #      that pkg/aws.LoadConfig() automatically routes all SDK calls to LocalStack
-# #      instead of real AWS.
-# #
-# # No changes to source code or the main docker-compose.yml are required to switch
-# # between real AWS (default) and LocalStack (this override).
-
-# services:
-#   # ── LocalStack ────────────────────────────────────────────────────────────────
-#   localstack:
-#     build: ./localstack
-#     restart: unless-stopped
-#     ports:
-#       - "4566:4566" # unified gateway for all AWS service emulations
-#     environment:
-#       - SERVICES=s3,sns,sqs,secretsmanager,cloudwatch,logs,dynamodb,ec2
-#       - DEFAULT_REGION=${AWS_REGION:-us-east-1}
-#       - AWS_DEFAULT_REGION=${AWS_REGION:-us-east-1}
-#       - AWS_S3_BUCKET=${AWS_S3_BUCKET:-shopswift}
-#       - DDB_TABLE_PRODUCTS=${DDB_TABLE_PRODUCTS:-Products}
-#       - DDB_TABLE_CATEGORIES=${DDB_TABLE_CATEGORIES:-Categories}
-#       - DDB_TABLE_INVENTORY=${DDB_TABLE_INVENTORY:-Inventory}
-#       - ORDER_SNS_TOPIC_NAME=${ORDER_SNS_TOPIC_NAME:-order-events}
-#       - PAYMENT_SNS_TOPIC_NAME=${PAYMENT_SNS_TOPIC_NAME:-payment-events}
-#       - ORDER_PROCESSING_QUEUE_NAME=${ORDER_PROCESSING_QUEUE_NAME:-order-processing-queue}
-#       - PAYMENT_EVENTS_QUEUE_NAME=${PAYMENT_EVENTS_QUEUE_NAME:-payment-events-queue}
-#       - PAYMENT_REQUEST_QUEUE_NAME=${PAYMENT_REQUEST_QUEUE_NAME:-payment-request-queue}
-#       - PERSISTENCE=1 # survive container restarts
-#       - DEBUG=${LOCALSTACK_DEBUG:-0}
-
-#     volumes:
-#       - localstack_data:/var/lib/localstack
-#       - /var/run/docker.sock:/var/run/docker.sock
-#       # init scripts are baked into the custom image at /etc/localstack/init
-#     healthcheck:
-#       test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
-#       interval: 10s
-#       timeout: 5s
-#       retries: 10
-#       start_period: 15s
-#     networks:
-#       - ecommerce-network
-
-#   # ── Service overrides ─────────────────────────────────────────────────────────
-#   # Each block only adds the two LocalStack env vars; everything else is inherited
-#   # from docker-compose.yml.
-
-#   auth-service:
-#     environment:
-#       - USE_LOCALSTACK=true
-#       - LOCALSTACK_ENDPOINT=http://localstack:4566
-#       - SMTP_EMAIL=${SMTP_EMAIL:-test@example.com}
-#       - SMTP_PASSWORD=${SMTP_PASSWORD:-password}
-#       - SMTP_SERVER=${SMTP_SERVER:-smtp.gmail.com}
-#     depends_on:
-#       localstack:
-#         condition: service_healthy
-
-#   user-service:
-#     environment:
-#       - USE_LOCALSTACK=true
-#       - LOCALSTACK_ENDPOINT=http://localstack:4566
-#       - SMTP_EMAIL=${SMTP_EMAIL:-test@example.com}
-#       - SMTP_PASSWORD=${SMTP_PASSWORD:-password}
-#       - SMTP_SERVER=${SMTP_SERVER:-smtp.gmail.com}
-#     depends_on:
-#       localstack:
-#         condition: service_healthy
-
-#   product-service:
-#     environment:
-#       - USE_LOCALSTACK=true
-#       - LOCALSTACK_ENDPOINT=http://localstack:4566
-#       # Disable hardcoded CLOUDWATCH_ENABLED=true from the base file in local dev
-#       - CLOUDWATCH_ENABLED=false
-#     depends_on:
-#       localstack:
-#         condition: service_healthy
-
-#   cart-service:
-#     environment:
-#       - USE_LOCALSTACK=true
-#       - LOCALSTACK_ENDPOINT=http://localstack:4566
-#       - ORDER_SNS_TOPIC_ARN=arn:aws:sns:${AWS_REGION:-us-east-1}:000000000000:${ORDER_SNS_TOPIC_NAME:-order-events}
-#     depends_on:
-#       localstack:
-#         condition: service_healthy
-
-#   inventory-service:
-#     environment:
-#       - USE_LOCALSTACK=true
-#       - LOCALSTACK_ENDPOINT=http://localstack:4566
-#       - DDB_TABLE_INVENTORY=${DDB_TABLE_INVENTORY:-Inventory}
-#     depends_on:
-#       localstack:
-#         condition: service_healthy
-
-#   order-service:
-#     environment:
-#       - USE_LOCALSTACK=true
-#       - LOCALSTACK_ENDPOINT=http://localstack:4566
-#       - AWS_REGION=us-east-1
-#       - AWS_ACCESS_KEY_ID=test
-#       - AWS_SECRET_ACCESS_KEY=test
-#       - AWS_SESSION_TOKEN=
-#       - CHECKOUT_QUEUE_URL=http://localstack:4566/000000000000/${ORDER_PROCESSING_QUEUE_NAME:-order-processing-queue}
-#       - PAYMENT_REQUEST_QUEUE_URL=http://localstack:4566/000000000000/${PAYMENT_REQUEST_QUEUE_NAME:-payment-request-queue}
-#       - PAYMENT_EVENTS_QUEUE_URL=http://localstack:4566/000000000000/${PAYMENT_EVENTS_QUEUE_NAME:-payment-events-queue}
-#       - ORDER_SNS_TOPIC_ARN=arn:aws:sns:${AWS_REGION:-us-east-1}:000000000000:${ORDER_SNS_TOPIC_NAME:-order-events}
-#       - PAYMENT_SNS_TOPIC_ARN=arn:aws:sns:${AWS_REGION:-us-east-1}:000000000000:${PAYMENT_SNS_TOPIC_NAME:-payment-events}
-#     depends_on:
-#       localstack:
-#         condition: service_healthy
-
-#   payment-service:
-#     environment:
-#       - USE_LOCALSTACK=true
-#       - LOCALSTACK_ENDPOINT=http://localstack:4566
-#       - AWS_REGION=us-east-1
-#       - AWS_ACCESS_KEY_ID=test
-#       - AWS_SECRET_ACCESS_KEY=test
-#       - AWS_SESSION_TOKEN=
-#       - PAYMENT_REQUEST_QUEUE_URL=http://localstack:4566/000000000000/${PAYMENT_REQUEST_QUEUE_NAME:-payment-request-queue}
-#       - PAYMENT_EVENTS_QUEUE_URL=http://localstack:4566/000000000000/${PAYMENT_EVENTS_QUEUE_NAME:-payment-events-queue}
-#       - PAYMENT_SNS_TOPIC_ARN=arn:aws:sns:${AWS_REGION:-us-east-1}:000000000000:${PAYMENT_SNS_TOPIC_NAME:-payment-events}
-#     depends_on:
-#       localstack:
-#         condition: service_healthy
-#   notification-service:
-#     environment:
-#       - USE_LOCALSTACK=true
-#       - LOCALSTACK_ENDPOINT=http://localstack:4566
-#       - AWS_REGION=us-east-1
-#       - AWS_ACCESS_KEY_ID=test
-#       - AWS_SECRET_ACCESS_KEY=test
-#       - AWS_SESSION_TOKEN=
-#       # Keep both for compatibility; the service code expects SQS_QUEUE_URL
-#       - NOTIFICATION_SQS_QUEUE_URL=http://localstack:4566/000000000000/${NOTIFICATION_SQS_QUEUE_NAME:-notification-queue}
-#       - SQS_QUEUE_URL=http://localstack:4566/000000000000/${NOTIFICATION_SQS_QUEUE_NAME:-notification-queue}
-#     # Add any other notification-specific env vars as needed
-#     depends_on:
-#       localstack:
-#         condition: service_healthy
-#   api-gateway:
-#     environment:
-#       - USE_LOCALSTACK=true
-#       - LOCALSTACK_ENDPOINT=http://localstack:4566
-#     depends_on:
-#       localstack:
-#         condition: service_healthy
-
-#   bff-service:
-#     environment:
-#       - USE_LOCALSTACK=true
-#       - LOCALSTACK_ENDPOINT=http://localstack:4566
-#       - CLOUDWATCH_ENABLED=true
-#     depends_on:
-#       localstack:
-#         condition: service_healthy
-
-# volumes:
-#   localstack_data:
-
 # LocalStack override for local development.
 #
 # Usage:
@@ -193,14 +23,13 @@ services:
       - "4566:4566" # unified gateway for all AWS service emulations
     environment:
       - SERVICES=s3,sns,sqs,secretsmanager,cloudwatch,logs,dynamodb,ec2
-      - DEFAULT_REGION=${AWS_REGION:-us-east-1}
       - AWS_DEFAULT_REGION=${AWS_REGION:-us-east-1}
+      - SQS_ENDPOINT_STRATEGY=path
       - PERSISTENCE=1 # survive container restarts
       - DEBUG=${LOCALSTACK_DEBUG:-0}
     volumes:
       - localstack_data:/var/lib/localstack
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./localstack/init/ready.d/10-bootstrap-resources.sh:/etc/localstack/init/ready.d/10-bootstrap-resources.sh
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
       interval: 10s
@@ -211,21 +40,33 @@ services:
       - ecommerce-network
 
   # ── LocalStack Init ───────────────────────────────────────────────────────────
-  # Runs the init script once LocalStack is healthy. All application services
-  # depend on this completing successfully, eliminating the race condition where
-  # services start before queues/topics have been created.
+  # Waits until LocalStack bootstrap resources exist. All application services
+  # depend on this completing successfully, eliminating startup races.
   localstack-init:
     build: ./localstack
-    command:
-      ["/bin/bash", "/etc/localstack/init/ready.d/10-bootstrap-resources.sh"]
-    volumes:
-      - ./localstack/init/ready.d/10-bootstrap-resources.sh:/etc/localstack/init/ready.d/10-bootstrap-resources.sh
+    entrypoint: ["/bin/bash", "-c"]
+    command: >
+      "set -euo pipefail;
+      for i in $(seq 1 60); do
+        q_count=$(awslocal --endpoint-url=http://localstack:4566 sqs list-queues --query 'length(QueueUrls)' --output text 2>/dev/null || echo 0);
+        t_count=$(awslocal --endpoint-url=http://localstack:4566 sns list-topics --query 'length(Topics)' --output text 2>/dev/null || echo 0);
+        if ! [[ \"$${q_count}\" =~ ^[0-9]+$ ]]; then q_count=0; fi;
+        if ! [[ \"$${t_count}\" =~ ^[0-9]+$ ]]; then t_count=0; fi;
+        if [ \"$${q_count}\" -ge 4 ] && [ \"$${t_count}\" -ge 6 ]; then
+          echo \"LocalStack resources ready: queues=$${q_count}, topics=$${t_count}\";
+          exit 0;
+        fi;
+        echo \"Waiting for LocalStack resources... (queues=$${q_count}, topics=$${t_count})\";
+        sleep 2;
+      done;
+      echo \"Timed out waiting for LocalStack bootstrap resources\";
+      exit 1"
     environment:
       - AWS_DEFAULT_REGION=${AWS_REGION:-us-east-1}
       - AWS_REGION=${AWS_REGION:-us-east-1}
       - AWS_ACCESS_KEY_ID=test
       - AWS_SECRET_ACCESS_KEY=test
-      - AWS_SESSION_TOKEN="test"
+      - AWS_SESSION_TOKEN=
       - LOCALSTACK_ENDPOINT=http://localstack:4566
       - AWS_S3_BUCKET=${AWS_S3_BUCKET:-shopswift}
       - DDB_TABLE_PRODUCTS=${DDB_TABLE_PRODUCTS:-Products}
