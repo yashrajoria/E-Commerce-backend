@@ -929,16 +929,15 @@ paths:
         - Admin Only
       summary: 🔐 Create a new product
       description: |
-        **Admin only.** Creates a new product in the catalogue. Accepts `multipart/form-data`
-        to support simultaneous image upload. The `category` field must be a JSON-encoded
-        string array of category names. Images are uploaded directly to S3 — use the presign
-        endpoints to obtain pre-signed upload URLs for large files instead.
+        **Admin only.** Creates a new product in the catalogue using an `application/json`
+        payload. This endpoint creates product metadata only. Upload images separately via
+        presigned URL endpoints and attach resulting URLs in a follow-up update request.
       operationId: createProduct
       security:
         - cookieAuth:
             - admin
       requestBody:
-        $ref: "#/components/requestBodies/CreateProductRequest"
+        $ref: "#/components/requestBodies/CreateProductJSONRequest"
       responses:
         "201":
           description: Product created successfully
@@ -2443,12 +2442,12 @@ components:
           schema:
             $ref: "#/components/schemas/VerifyPaymentRequest"
 
-    CreateProductRequest:
+    CreateProductJSONRequest:
       required: true
       content:
-        multipart/form-data:
+        application/json:
           schema:
-            $ref: "#/components/schemas/CreateProductRequest"
+            $ref: "#/components/schemas/CreateProductJSONRequest"
 
     UpdateProductRequest:
       required: true
@@ -2930,11 +2929,11 @@ components:
               type: integer
               example: 25
 
-    CreateProductRequest:
+    CreateProductJSONRequest:
       type: object
       description: |
-        `multipart/form-data` payload for creating a new product. The `category` field must be
-        a JSON-encoded string array, e.g. `["Electronics","Peripherals"]`.
+        `application/json` payload for creating a new product without inline image upload.
+        Use presigned image upload endpoints to attach image URLs after creation.
       required:
         - name
         - description
@@ -2943,7 +2942,6 @@ components:
         - price
         - quantity
         - category
-        - images
       properties:
         name:
           type: string
@@ -2969,15 +2967,13 @@ components:
           default: false
           example: true
         category:
-          type: string
-          description: JSON-encoded array of category name strings.
-          example: '["Electronics","Peripherals","Mice"]'
-        images:
           type: array
-          description: Binary image files to upload with the product.
+          minItems: 1
+          description: Category name strings.
           items:
             type: string
-            format: binary
+          example:
+            - clothing
 
     # ── Category ───────────────────────────────────────────────────────────────
 
