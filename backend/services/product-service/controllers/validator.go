@@ -52,6 +52,18 @@ type CreateProductRequest struct {
 	Categories  string  `form:"category" validate:"required"` // JSON string array
 }
 
+// CreateProductJSONRequest defines the expected JSON structure for creating a product.
+type CreateProductJSONRequest struct {
+	Name        string   `json:"name" validate:"required"`
+	Description string   `json:"description" validate:"required"`
+	Brand       string   `json:"brand" validate:"required"`
+	SKU         string   `json:"sku" validate:"required"`
+	Price       float64  `json:"price" validate:"required,gt=0"`
+	Quantity    int      `json:"quantity" validate:"required,gte=0"`
+	IsFeatured  bool     `json:"is_featured"`
+	Categories  []string `json:"category" validate:"required,min=1,dive,required"`
+}
+
 // ProductFilters holds all filter parameters
 type ProductFilters struct {
 	IsFeatured       string
@@ -204,6 +216,31 @@ func (rv *RequestValidator) ParseCreateProductRequest(c *gin.Context) (services.
 	}
 
 	return serviceReq, images, nil
+}
+
+// ParseCreateProductJSONRequest validates and parses JSON product creation requests.
+func (rv *RequestValidator) ParseCreateProductJSONRequest(c *gin.Context) (services.ProductCreateRequest, error) {
+	var req CreateProductJSONRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return services.ProductCreateRequest{}, fmt.Errorf("invalid JSON body: %w", err)
+	}
+
+	if err := rv.validate.Struct(&req); err != nil {
+		return services.ProductCreateRequest{}, fmt.Errorf("validation failed: %w", err)
+	}
+
+	serviceReq := services.ProductCreateRequest{
+		Name:        req.Name,
+		Description: req.Description,
+		Brand:       req.Brand,
+		SKU:         req.SKU,
+		Price:       req.Price,
+		Quantity:    req.Quantity,
+		IsFeatured:  req.IsFeatured,
+		Categories:  req.Categories,
+	}
+
+	return serviceReq, nil
 }
 
 // IsValidImageType checks if the file is a valid image
