@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"shipping-service/models"
 	"shipping-service/providers"
@@ -135,8 +136,12 @@ func (s *shippingServiceImpl) CreateLabel(ctx context.Context, req *models.Creat
 func (s *shippingServiceImpl) TrackShipment(ctx context.Context, trackingCode string) (*models.TrackingStatus, *ServiceError) {
 	// Fetch current DB record to get carrier
 	dbRecord, err := s.repo.FindByTrackingCode(ctx, trackingCode)
-	if err != nil && err != gorm.ErrRecordNotFound {
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, &ServiceError{StatusCode: 404, Message: "Shipment not found for tracking code"}
+		}
 		s.logger.Warn("Shipment DB record not found for tracking code", zap.String("code", trackingCode))
+		return nil, &ServiceError{StatusCode: 500, Message: "Failed to load shipment record"}
 	}
 
 	carrier := ""
