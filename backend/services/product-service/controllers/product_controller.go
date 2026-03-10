@@ -154,10 +154,11 @@ func (ctrl *ProductController) GetProducts(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-// CreateProduct creates a new product
+// CreateProduct creates a new product from an application/json payload.
+// Image upload is handled separately via presigned upload endpoints.
 func (ctrl *ProductController) CreateProduct(c *gin.Context) {
 	// Parse and validate request
-	req, images, err := ctrl.validator.ParseCreateProductRequest(c)
+	req, err := ctrl.validator.ParseCreateProductJSONRequest(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -166,8 +167,8 @@ func (ctrl *ProductController) CreateProduct(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), ctrl.config.ContextTimeout)
 	defer cancel()
 
-	// Create product
-	product, err := ctrl.productService.CreateProduct(ctx, req, images)
+	// Create product without inline multipart images.
+	product, err := ctrl.productService.CreateProduct(ctx, req, nil)
 	if err != nil {
 		handleCreateError(c, err)
 		return
@@ -175,7 +176,7 @@ func (ctrl *ProductController) CreateProduct(c *gin.Context) {
 
 	// Invalidate cache
 	if err := ctrl.cache.Invalidate(ctx); err != nil {
-		zap.L().Error("CRITICAL: Failed to invalidate cache after product creation",
+		zap.L().Error("CRITICAL: Failed to invalidate cache after JSON product creation",
 			zap.Error(err),
 			zap.String("product_id", product.ID.String()))
 	}
