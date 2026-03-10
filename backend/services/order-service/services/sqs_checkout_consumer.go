@@ -9,31 +9,36 @@ import (
 
 	"github.com/google/uuid"
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"github.com/yashrajoria/common/events"
 	"gorm.io/gorm"
 )
 
 // SQSCheckoutConsumer consumes checkout events from SQS and creates orders
 type SQSCheckoutConsumer struct {
-	sqsConsumer       *aws_pkg.SQSConsumer
-	sqsPublisher      *aws_pkg.SQSConsumer // For sending payment requests
-	db                *gorm.DB
-	inventoryClient   *InventoryClient
-	metricsClient     *aws_pkg.MetricsClient
-	productServiceURL string // Base URL for the product service (internal endpoint)
+	sqsConsumer          *aws_pkg.SQSConsumer
+	sqsPublisher         *aws_pkg.SQSConsumer // For sending payment requests
+	db                   *gorm.DB
+	inventoryClient      *InventoryClient
+	metricsClient        *aws_pkg.MetricsClient
+	productServiceURL    string // Base URL for the product service (internal endpoint)
+	snsClient            aws_pkg.SNSPublisher
+	notificationTopicArn string
 }
 
 // NewSQSCheckoutConsumer creates a new SQS-based checkout consumer
-func NewSQSCheckoutConsumer(sqsConsumer *aws_pkg.SQSConsumer, sqsPublisher *aws_pkg.SQSConsumer, db *gorm.DB, inventoryClient *InventoryClient, metricsClient *aws_pkg.MetricsClient, productServiceURL string) *SQSCheckoutConsumer {
+func NewSQSCheckoutConsumer(sqsConsumer *aws_pkg.SQSConsumer, sqsPublisher *aws_pkg.SQSConsumer, db *gorm.DB, inventoryClient *InventoryClient, metricsClient *aws_pkg.MetricsClient, productServiceURL string, snsClient aws_pkg.SNSPublisher, notificationTopicArn string) *SQSCheckoutConsumer {
 	if productServiceURL == "" {
 		productServiceURL = "http://product-service:8082"
 	}
 	return &SQSCheckoutConsumer{
-		sqsConsumer:       sqsConsumer,
-		sqsPublisher:      sqsPublisher,
-		db:                db,
-		inventoryClient:   inventoryClient,
-		metricsClient:     metricsClient,
-		productServiceURL: productServiceURL,
+		sqsConsumer:          sqsConsumer,
+		sqsPublisher:         sqsPublisher,
+		db:                   db,
+		inventoryClient:      inventoryClient,
+		metricsClient:        metricsClient,
+		productServiceURL:    productServiceURL,
+		snsClient:            snsClient,
+		notificationTopicArn: notificationTopicArn,
 	}
 }
 
@@ -96,6 +101,7 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 	validItems := 0
 	productServiceURL := c.productServiceURL
 	inventoryItems := make([]ReserveItem, 0, len(evt.Items))
+	notificationItems := make([]events.NotificationItem, 0, len(evt.Items))
 
 	for _, it := range evt.Items {
 		pid, err := uuid.Parse(it.ProductID)
@@ -127,6 +133,11 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		inventoryItems = append(inventoryItems, ReserveItem{
 			ProductID: it.ProductID,
 			Quantity:  it.Quantity,
+		})
+		notificationItems = append(notificationItems, events.NotificationItem{
+			ProductName: product.Name,
+			Quantity:    it.Quantity,
+			Price:       product.Price,
 		})
 		validItems++
 	}
@@ -179,6 +190,22 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 
 	log.Printf("✅ order created id=%s user=%s items=%d total_amount=%d",
 		order.ID.String(), order.UserID.String(), validItems, order.Amount)
+
+	// Publish order_created notification with correct total and items
+	if c.snsClient != nil && c.notificationTopicArn != "" {
+		notifEvent := events.NewOrderCreatedEvent(
+			evt.UserID, evt.Email, "", "", order.ID.String(),
+			float64(order.Amount), notificationItems,
+		)
+		notifBytes, err := json.Marshal(notifEvent)
+		if err != nil {
+			log.Printf("⚠️ failed to marshal order_created notification: %v", err)
+		} else if err := c.snsClient.Publish(ctx, c.notificationTopicArn, notifBytes); err != nil {
+			log.Printf("⚠️ failed to publish order_created notification: %v", err)
+		} else {
+			log.Printf("✅ order_created notification published for order=%s", order.ID.String())
+		}
+	}
 
 	// Emit metrics
 	if c.metricsClient != nil && c.metricsClient.IsEnabled() {

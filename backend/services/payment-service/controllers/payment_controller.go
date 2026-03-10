@@ -28,11 +28,12 @@ var terminalStatuses = map[string]bool{
 
 // PaymentController handles all payment-related HTTP and webhook logic.
 type PaymentController struct {
-	Stripe   *services.StripeService
-	SNS      *aws_pkg.SNSClient
-	TopicArn string
-	Logger   *zap.Logger
-	Repo     repository.PaymentRepository
+	Stripe               *services.StripeService
+	SNS                  *aws_pkg.SNSClient
+	TopicArn             string
+	NotificationTopicArn string
+	Logger               *zap.Logger
+	Repo                 repository.PaymentRepository
 }
 
 // GetPaymentStatusByOrderID is a polling endpoint for the frontend.

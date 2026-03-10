@@ -21,30 +21,32 @@ type Config struct {
 	ProductServiceURL   string
 	InventoryServiceURL string
 	// SQS/SNS config (replaces Kafka)
-	CheckoutQueueURL       string
-	PaymentEventsQueueURL  string
-	PaymentRequestQueueURL string
-	OrderSNSTopicARN       string
-	PaymentSNSTopicARN     string
+	CheckoutQueueURL        string
+	PaymentEventsQueueURL   string
+	PaymentRequestQueueURL  string
+	OrderSNSTopicARN        string
+	PaymentSNSTopicARN      string
+	NotificationSNSTopicARN string
 }
 
 func LoadConfig() (*Config, error) {
 	cfg := &Config{
-		Port:                   getEnv("PORT", "8083"),
-		PostgresUser:           os.Getenv("POSTGRES_USER"),
-		PostgresPassword:       os.Getenv("POSTGRES_PASSWORD"),
-		PostgresDB:             os.Getenv("POSTGRES_DB"),
-		PostgresHost:           os.Getenv("POSTGRES_HOST"),
-		PostgresPort:           getEnv("POSTGRES_PORT", "5432"),
-		PostgresSSLMode:        getEnv("POSTGRES_SSLMODE", "disable"),
-		PostgresTimeZone:       getEnv("POSTGRES_TIMEZONE", "Asia/Kolkata"),
-		ProductServiceURL:      getEnv("PRODUCT_SERVICE_URL", "http://product-service:8082"),
-		InventoryServiceURL:    getEnv("INVENTORY_SERVICE_URL", "http://inventory-service:8084"),
-		CheckoutQueueURL:       os.Getenv("CHECKOUT_QUEUE_URL"),
-		PaymentEventsQueueURL:  os.Getenv("PAYMENT_EVENTS_QUEUE_URL"),
-		PaymentRequestQueueURL: os.Getenv("PAYMENT_REQUEST_QUEUE_URL"),
-		OrderSNSTopicARN:       os.Getenv("ORDER_SNS_TOPIC_ARN"),
-		PaymentSNSTopicARN:     os.Getenv("PAYMENT_SNS_TOPIC_ARN"),
+		Port:                    getEnv("PORT", "8083"),
+		PostgresUser:            os.Getenv("POSTGRES_USER"),
+		PostgresPassword:        os.Getenv("POSTGRES_PASSWORD"),
+		PostgresDB:              os.Getenv("POSTGRES_DB"),
+		PostgresHost:            os.Getenv("POSTGRES_HOST"),
+		PostgresPort:            getEnv("POSTGRES_PORT", "5432"),
+		PostgresSSLMode:         getEnv("POSTGRES_SSLMODE", "disable"),
+		PostgresTimeZone:        getEnv("POSTGRES_TIMEZONE", "Asia/Kolkata"),
+		ProductServiceURL:       getEnv("PRODUCT_SERVICE_URL", "http://product-service:8082"),
+		InventoryServiceURL:     getEnv("INVENTORY_SERVICE_URL", "http://inventory-service:8084"),
+		CheckoutQueueURL:        os.Getenv("CHECKOUT_QUEUE_URL"),
+		PaymentEventsQueueURL:   os.Getenv("PAYMENT_EVENTS_QUEUE_URL"),
+		PaymentRequestQueueURL:  os.Getenv("PAYMENT_REQUEST_QUEUE_URL"),
+		OrderSNSTopicARN:        os.Getenv("ORDER_SNS_TOPIC_ARN"),
+		PaymentSNSTopicARN:      os.Getenv("PAYMENT_SNS_TOPIC_ARN"),
+		NotificationSNSTopicARN: os.Getenv("NOTIFICATION_SNS_TOPIC_ARN"),
 	}
 
 	if os.Getenv("AWS_USE_SECRETS") == "true" {

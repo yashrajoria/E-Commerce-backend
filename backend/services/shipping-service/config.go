@@ -12,16 +12,17 @@ import (
 
 // Config holds all configuration for the shipping service.
 type Config struct {
-	Port                string
-	PostgresUser        string
-	PostgresPassword    string
-	PostgresDB          string
-	PostgresHost        string
-	PostgresPort        string
-	PostgresSSLMode     string
-	PostgresTimeZone    string
-	ShippoAPIKey        string
-	ShippingSNSTopicARN string
+	Port                    string
+	PostgresUser            string
+	PostgresPassword        string
+	PostgresDB              string
+	PostgresHost            string
+	PostgresPort            string
+	PostgresSSLMode         string
+	PostgresTimeZone        string
+	ShippoAPIKey            string
+	ShippingSNSTopicARN     string
+	NotificationSNSTopicARN string
 	// Warehouse / origin address defaults
 	OriginName       string
 	OriginStreet1    string
@@ -49,16 +50,17 @@ func (c *Config) OriginAddress() models.Address {
 // Secrets Manager override.
 func LoadConfig() (*Config, error) {
 	cfg := &Config{
-		Port:                getEnv("PORT", "8091"),
-		PostgresUser:        os.Getenv("POSTGRES_USER"),
-		PostgresPassword:    os.Getenv("POSTGRES_PASSWORD"),
-		PostgresDB:          os.Getenv("POSTGRES_DB"),
-		PostgresHost:        os.Getenv("POSTGRES_HOST"),
-		PostgresPort:        getEnv("POSTGRES_PORT", "5432"),
-		PostgresSSLMode:     getEnv("POSTGRES_SSLMODE", "disable"),
-		PostgresTimeZone:    getEnv("POSTGRES_TIMEZONE", "Asia/Kolkata"),
-		ShippoAPIKey:        os.Getenv("SHIPPO_API_KEY"),
-		ShippingSNSTopicARN: os.Getenv("SHIPPING_SNS_TOPIC_ARN"),
+		Port:                    getEnv("PORT", "8091"),
+		PostgresUser:            os.Getenv("POSTGRES_USER"),
+		PostgresPassword:        os.Getenv("POSTGRES_PASSWORD"),
+		PostgresDB:              os.Getenv("POSTGRES_DB"),
+		PostgresHost:            os.Getenv("POSTGRES_HOST"),
+		PostgresPort:            getEnv("POSTGRES_PORT", "5432"),
+		PostgresSSLMode:         getEnv("POSTGRES_SSLMODE", "disable"),
+		PostgresTimeZone:        getEnv("POSTGRES_TIMEZONE", "Asia/Kolkata"),
+		ShippoAPIKey:            os.Getenv("SHIPPO_API_KEY"),
+		ShippingSNSTopicARN:     os.Getenv("SHIPPING_SNS_TOPIC_ARN"),
+		NotificationSNSTopicARN: os.Getenv("NOTIFICATION_SNS_TOPIC_ARN"),
 		// Origin (warehouse) address
 		OriginName:       getEnv("ORIGIN_NAME", "ShopSwift Warehouse"),
 		OriginStreet1:    getEnv("ORIGIN_STREET1", "123 Warehouse Blvd"),

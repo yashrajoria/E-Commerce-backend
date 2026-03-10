@@ -32,6 +32,12 @@ var eventConfigs = map[string]eventConfig{
 		subject:  "Order Confirmed!",
 		toKeys:   map[string]string{models.ChannelEmail: "email", models.ChannelSMS: "phone"},
 	},
+	models.TypeOrderConfirmed: {
+		tmplFile: "templates/order_confirmed.html",
+		channels: []string{models.ChannelEmail},
+		subject:  "Payment Confirmed – Your Order is Being Processed!",
+		toKeys:   map[string]string{models.ChannelEmail: "email"},
+	},
 	models.TypeOrderShipped: {
 		tmplFile: "templates/order_shipped.html",
 		channels: []string{models.ChannelEmail},

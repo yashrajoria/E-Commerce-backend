@@ -32,12 +32,13 @@ type ShippingService interface {
 }
 
 type shippingServiceImpl struct {
-	repo        repository.ShipmentRepository
-	provider    providers.ShippingProvider
-	snsClient   aws_pkg.SNSPublisher
-	snsTopicArn string
-	originAddr  models.Address // default ship-from address (warehouse)
-	logger      *zap.Logger
+	repo                 repository.ShipmentRepository
+	provider             providers.ShippingProvider
+	snsClient            aws_pkg.SNSPublisher
+	snsTopicArn          string
+	notificationTopicArn string
+	originAddr           models.Address // default ship-from address (warehouse)
+	logger               *zap.Logger
 }
 
 // NewShippingService creates a new ShippingService.
@@ -46,16 +47,18 @@ func NewShippingService(
 	provider providers.ShippingProvider,
 	snsClient aws_pkg.SNSPublisher,
 	snsTopicArn string,
+	notificationTopicArn string,
 	originAddr models.Address,
 	logger *zap.Logger,
 ) ShippingService {
 	return &shippingServiceImpl{
-		repo:        repo,
-		provider:    provider,
-		snsClient:   snsClient,
-		snsTopicArn: snsTopicArn,
-		originAddr:  originAddr,
-		logger:      logger,
+		repo:                 repo,
+		provider:             provider,
+		snsClient:            snsClient,
+		snsTopicArn:          snsTopicArn,
+		notificationTopicArn: notificationTopicArn,
+		originAddr:           originAddr,
+		logger:               logger,
 	}
 }
 
@@ -175,7 +178,7 @@ func (s *shippingServiceImpl) TrackShipment(ctx context.Context, trackingCode st
 
 		switch strings.ToLower(status.Status) {
 		case "shipped", "in_transit":
-			s.publishEvent(ctx, events.NewOrderShippedEvent(
+			s.publishNotificationEvent(ctx, events.NewOrderShippedEvent(
 				dbRecord.UserID,
 				recipientEmail,
 				recipientName,
@@ -183,7 +186,7 @@ func (s *shippingServiceImpl) TrackShipment(ctx context.Context, trackingCode st
 				trackingCode,
 			))
 		case "delivered":
-			s.publishEvent(ctx, events.NewOrderDeliveredEvent(
+			s.publishNotificationEvent(ctx, events.NewOrderDeliveredEvent(
 				dbRecord.UserID,
 				recipientEmail,
 				recipientName,
@@ -211,6 +214,24 @@ func (s *shippingServiceImpl) publishEvent(ctx context.Context, event interface{
 		return
 	}
 	s.logger.Info("Published SNS event", zap.String("topic", s.snsTopicArn))
+}
+
+// publishNotificationEvent publishes a notification event to the dedicated notification topic.
+func (s *shippingServiceImpl) publishNotificationEvent(ctx context.Context, event interface{}) {
+	if s.snsClient == nil || s.notificationTopicArn == "" {
+		s.logger.Warn("Notification SNS topic not configured, skipping notification event")
+		return
+	}
+	b, err := json.Marshal(event)
+	if err != nil {
+		s.logger.Error("Failed to marshal notification event", zap.Error(err))
+		return
+	}
+	if err := s.snsClient.Publish(ctx, s.notificationTopicArn, b); err != nil {
+		s.logger.Error("Failed to publish notification event", zap.Error(err))
+		return
+	}
+	s.logger.Info("Published notification event", zap.String("topic", s.notificationTopicArn))
 }
 
 // FormatProviderError formats a provider error message.
