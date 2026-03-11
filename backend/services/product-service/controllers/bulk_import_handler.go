@@ -82,13 +82,14 @@ func (h *BulkImportHandler) CreateBulkProducts(c *gin.Context) {
 
 	// Check if async processing is requested
 	async := strings.ToLower(strings.TrimSpace(c.Query("async"))) == "true"
+	autoCreateCategories := strings.ToLower(strings.TrimSpace(c.DefaultQuery("auto_create_categories", c.PostForm("auto_create_categories")))) == "true"
 
 	if async {
-		h.handleAsyncImport(c, fileHandle)
+		h.handleAsyncImport(c, fileHandle, autoCreateCategories)
 		return
 	}
 
-	h.handleSyncImport(c, fileHandle)
+	h.handleSyncImport(c, fileHandle, autoCreateCategories)
 }
 
 // GetBulkImportJobStatus returns the job status/result stored in Redis
@@ -143,11 +144,11 @@ func (h *BulkImportHandler) getAndValidateFile(c *gin.Context) (*multipart.FileH
 	return file, nil
 }
 
-func (h *BulkImportHandler) handleAsyncImport(c *gin.Context, fileHandle multipart.File) {
+func (h *BulkImportHandler) handleAsyncImport(c *gin.Context, fileHandle multipart.File, autoCreateCategories bool) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), h.timeout)
 	defer cancel()
 
-	jobID, err := h.enqueueJob(ctx, fileHandle)
+	jobID, err := h.enqueueJob(ctx, fileHandle, autoCreateCategories)
 	if err != nil {
 		zap.L().Error("Failed to enqueue async bulk import", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to queue import job"})
@@ -160,11 +161,11 @@ func (h *BulkImportHandler) handleAsyncImport(c *gin.Context, fileHandle multipa
 	})
 }
 
-func (h *BulkImportHandler) handleSyncImport(c *gin.Context, fileHandle multipart.File) {
+func (h *BulkImportHandler) handleSyncImport(c *gin.Context, fileHandle multipart.File, autoCreateCategories bool) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), h.timeout)
 	defer cancel()
 
-	result, err := h.productService.ProcessBulkImport(ctx, fileHandle)
+	result, err := h.productService.ProcessBulkImport(ctx, fileHandle, autoCreateCategories)
 	if err != nil {
 		zap.L().Error("Bulk import processing failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -181,7 +182,7 @@ func (h *BulkImportHandler) handleSyncImport(c *gin.Context, fileHandle multipar
 	c.JSON(http.StatusOK, result)
 }
 
-func (h *BulkImportHandler) enqueueJob(ctx context.Context, fileHandle multipart.File) (string, error) {
+func (h *BulkImportHandler) enqueueJob(ctx context.Context, fileHandle multipart.File, autoCreateCategories bool) (string, error) {
 	// Read file data
 	data, err := io.ReadAll(fileHandle)
 	if err != nil {
@@ -208,7 +209,7 @@ func (h *BulkImportHandler) enqueueJob(ctx context.Context, fileHandle multipart
 	}
 
 	// Create and store job metadata
-	if err := h.storeJobMetadata(ctx, jobID, filePath); err != nil {
+	if err := h.storeJobMetadata(ctx, jobID, filePath, autoCreateCategories); err != nil {
 		os.Remove(filePath)
 		return "", err
 	}
@@ -224,11 +225,12 @@ func (h *BulkImportHandler) enqueueJob(ctx context.Context, fileHandle multipart
 	return jobID, nil
 }
 
-func (h *BulkImportHandler) storeJobMetadata(ctx context.Context, jobID, filePath string) error {
+func (h *BulkImportHandler) storeJobMetadata(ctx context.Context, jobID, filePath string, autoCreateCategories bool) error {
 	jobInfo := map[string]interface{}{
-		"status":     "pending",
-		"created_at": time.Now().UTC().Format(time.RFC3339),
-		"file_path":  filePath,
+		"status":                 "pending",
+		"created_at":             time.Now().UTC().Format(time.RFC3339),
+		"file_path":              filePath,
+		"auto_create_categories": autoCreateCategories,
 	}
 
 	jobData, err := json.Marshal(jobInfo)

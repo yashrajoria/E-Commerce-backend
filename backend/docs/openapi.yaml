@@ -929,16 +929,15 @@ paths:
         - Admin Only
       summary: 🔐 Create a new product
       description: |
-        **Admin only.** Creates a new product in the catalogue. Accepts `multipart/form-data`
-        to support simultaneous image upload. The `category` field must be a JSON-encoded
-        string array of category names. Images are uploaded directly to S3 — use the presign
-        endpoints to obtain pre-signed upload URLs for large files instead.
+        **Admin only.** Creates a new product in the catalogue using an `application/json`
+        payload. This endpoint creates product metadata only. Upload images separately via
+        presigned URL endpoints and attach resulting URLs in a follow-up update request.
       operationId: createProduct
       security:
         - cookieAuth:
             - admin
       requestBody:
-        $ref: "#/components/requestBodies/CreateProductRequest"
+        $ref: "#/components/requestBodies/CreateProductJSONRequest"
       responses:
         "201":
           description: Product created successfully
@@ -2443,12 +2442,12 @@ components:
           schema:
             $ref: "#/components/schemas/VerifyPaymentRequest"
 
-    CreateProductRequest:
+    CreateProductJSONRequest:
       required: true
       content:
-        multipart/form-data:
+        application/json:
           schema:
-            $ref: "#/components/schemas/CreateProductRequest"
+            $ref: "#/components/schemas/CreateProductJSONRequest"
 
     UpdateProductRequest:
       required: true
@@ -2930,11 +2929,11 @@ components:
               type: integer
               example: 25
 
-    CreateProductRequest:
+    CreateProductJSONRequest:
       type: object
       description: |
-        `multipart/form-data` payload for creating a new product. The `category` field must be
-        a JSON-encoded string array, e.g. `["Electronics","Peripherals"]`.
+        `application/json` payload for creating a new product without inline image upload.
+        Use presigned image upload endpoints to attach image URLs after creation.
       required:
         - name
         - description
@@ -2943,7 +2942,6 @@ components:
         - price
         - quantity
         - category
-        - images
       properties:
         name:
           type: string
@@ -2969,15 +2967,13 @@ components:
           default: false
           example: true
         category:
-          type: string
-          description: JSON-encoded array of category name strings.
-          example: '["Electronics","Peripherals","Mice"]'
-        images:
           type: array
-          description: Binary image files to upload with the product.
+          minItems: 1
+          description: Category name strings.
           items:
             type: string
-            format: binary
+          example:
+            - clothing
 
     # ── Category ───────────────────────────────────────────────────────────────
 
@@ -3353,6 +3349,10 @@ components:
           format: uri
           nullable: true
           description: Retry URL if payment failed and a new session was created.
+        session_id:
+          type: string
+          nullable: true
+          description: Stripe Checkout Session ID. Use this value to verify the payment. Retrieved from the payment status endpoint.
 
     VerifyPaymentRequest:
       type: object
@@ -3360,8 +3360,10 @@ components:
         - payment_id
         - session_id
       description: |
-        Payload for verifying a payment after Stripe redirects back. Extract `payment_id` and
-        `session_id` from the Stripe success URL query parameters.
+        Payload for verifying a payment after Stripe redirects back. Extract `session_id`
+        from the Stripe redirect URL parameter or from the payment status endpoint response.
+        The session_id must be a valid Stripe Checkout Session ID (starts with `cs_live_` or `cs_test_`
+        followed by actual characters, NOT the example value).
       properties:
         payment_id:
           type: string
@@ -3369,8 +3371,12 @@ components:
           example: pi_3OqAbCDefGhIjKlM0NoPqRsT
         session_id:
           type: string
-          description: "Stripe Checkout Session ID (e.g. `cs_test_...`)."
-          example: cs_test_a1B2c3D4e5F6g7H8i9J0kL
+          description: |
+            Stripe Checkout Session ID retrieved from either:
+            1. The payment status endpoint (GET /payment/status/by-order/{order_id})
+            2. The Stripe redirect URL parameter after checkout completion
+            Must be a real session ID, not the example value below.
+          example: cs_live_abcdefghijklmnopqrstuvwxyz1234567890abcdefghijk
 
     VerifyPaymentResponse:
       type: object

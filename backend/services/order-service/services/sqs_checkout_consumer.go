@@ -91,7 +91,7 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 	if evt.IdempotencyKey != "" {
 		var existing models.Order
 		if err := c.db.WithContext(ctx).Where("idempotency_key = ?", evt.IdempotencyKey).First(&existing).Error; err == nil {
-			log.Printf("⚠️ order already exists for idempotency_key=%s order_id=%s, skipping creation", evt.IdempotencyKey, existing.ID.String())
+			log.Printf("⚠️  [IDEMPOTENCY] Order already exists for key=%s order_id=%s user=%s (skipping creation)", evt.IdempotencyKey, existing.ID.String(), existing.UserID.String())
 			return nil
 		}
 	}
@@ -143,8 +143,8 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 	}
 
 	if validItems == 0 {
-		log.Printf("❌ no valid items for user=%s, skipping order", evt.UserID)
-		return nil
+		log.Printf("❌ [CHECKOUT] No valid items for user=%s order=%s, aborting order creation", evt.UserID, evt.OrderID)
+		return nil // Don't retry - this is a data issue, not a transient error
 	}
 
 	// Reserve inventory via inventory service (non-fatal: proceed even on failure)
@@ -153,12 +153,12 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 			// Log as a warning but do NOT abort order creation.
 			// Inventory can be reconciled later; blocking checkout on inventory failures
 			// causes silent order drops which break the entire checkout_url flow.
-			log.Printf("⚠️ inventory reservation failed for order=%s (proceeding anyway): %v", orderIDUUID.String(), err)
+			log.Printf("⚠️  [CHECKOUT] Inventory reservation failed for order=%s (proceeding anyway): %v", orderIDUUID.String(), err)
 		} else {
-			log.Printf("✅ inventory reserved for order=%s items=%d", orderIDUUID.String(), len(inventoryItems))
+			log.Printf("✅ [CHECKOUT] Inventory reserved for order=%s items=%d", orderIDUUID.String(), len(inventoryItems))
 		}
 	} else {
-		log.Printf("⚠️ inventory client not configured, skipping reservation")
+		log.Printf("⚠️  [CHECKOUT] Inventory client not configured, skipping reservation")
 	}
 
 	order := models.Order{
@@ -176,16 +176,21 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 
 	err = c.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&order).Error; err != nil {
+			log.Printf("❌ [CHECKOUT] Failed to create order record: %v", err)
 			return err
 		}
 		for i := range orderItems {
 			orderItems[i].OrderID = order.ID
 		}
-		return tx.Create(&orderItems).Error
+		if err := tx.Create(&orderItems).Error; err != nil {
+			log.Printf("❌ [CHECKOUT] Failed to create order items: %v", err)
+			return err
+		}
+		return nil
 	})
 	if err != nil {
-		log.Printf("❌ DB transaction failed for user=%s err=%v", evt.UserID, err)
-		return err // Retry
+		log.Printf("❌ [CHECKOUT] DB transaction failed for user=%s order=%s (will retry): %v", evt.UserID, evt.OrderID, err)
+		return err // Retry the message
 	}
 
 	log.Printf("✅ order created id=%s user=%s items=%d total_amount=%d",
