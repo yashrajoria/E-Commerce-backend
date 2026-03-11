@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"payment-service/models"
 	"payment-service/repository"
 	"time"
@@ -53,6 +54,18 @@ func (c *PaymentRequestConsumer) Start(ctx context.Context) {
 			return err
 		}
 
+		// Validate Idempotency Key
+		if req.IdempotencyKey == "" {
+			c.logger.Warn("Missing Idempotency-Key header")
+			return fmt.Errorf("missing Idempotency-Key header")
+		}
+
+		// Check if payment already exists for the idempotency key
+		if existing, err := c.repo.GetPaymentByIdempotencyKey(ctx, req.IdempotencyKey); err == nil && existing != nil {
+			c.logger.Info("Payment already exists for idempotency key, skipping", zap.String("idempotency_key", req.IdempotencyKey), zap.String("payment_id", existing.Payment_ID.String()))
+			return nil
+		}
+
 		orderID, err := uuid.Parse(req.OrderID)
 		if err != nil {
 			c.logger.Warn("Invalid order_id format", zap.String("order_id", req.OrderID), zap.Error(err))
@@ -63,14 +76,6 @@ func (c *PaymentRequestConsumer) Start(ctx context.Context) {
 		if err != nil {
 			c.logger.Warn("Invalid user_id format", zap.String("user_id", req.UserID), zap.Error(err))
 			return err
-		}
-
-		// Idempotency: if idempotency key present, check existing payment
-		if req.IdempotencyKey != "" {
-			if existing, err := c.repo.GetPaymentByIdempotencyKey(ctx, req.IdempotencyKey); err == nil && existing != nil {
-				c.logger.Info("Payment already exists for idempotency key, skipping", zap.String("idempotency_key", req.IdempotencyKey), zap.String("payment_id", existing.Payment_ID.String()))
-				return nil
-			}
 		}
 
 		// Create payment record
