@@ -75,7 +75,7 @@ func (oc *OrderController) GetOrders(ctx *gin.Context) {
 	}
 
 	if result == nil {
-		fmt.Printf("Error: result is nil\n")
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch orders"})
 		return
 	}
 
@@ -104,11 +104,22 @@ func (oc *OrderController) GetAllOrders(ctx *gin.Context) {
 
 	page, limit := parsePaginationParams(ctx)
 
-	result, err := oc.orderService.GetAllOrders(ctx.Request.Context(), userID, page, limit)
-	if err != nil {
-		// ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch orders"})
-		fmt.Printf("Error: %v\n", err)
+	result, serviceErr := oc.orderService.GetAllOrders(ctx.Request.Context(), userID, page, limit)
+	if serviceErr != nil {
+		status := serviceErr.StatusCode
+		if status == 0 {
+			status = http.StatusInternalServerError
+		}
+		msg := serviceErr.Message
+		if msg == "" {
+			msg = "Failed to fetch orders"
+		}
+		ctx.JSON(status, gin.H{"error": msg})
+		return
+	}
 
+	if result == nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch orders"})
 		return
 	}
 

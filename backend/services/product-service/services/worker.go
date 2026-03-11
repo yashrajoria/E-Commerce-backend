@@ -70,6 +70,7 @@ func StartBulkImportWorker(ctx context.Context, rdb *redis.Client, productSvc *P
 			}
 
 			filePath, _ := meta["file_path"].(string)
+			autoCreateCategories, _ := meta["auto_create_categories"].(bool)
 			// update status -> processing
 			meta["status"] = "processing"
 			metaB, _ := json.Marshal(meta)
@@ -87,7 +88,7 @@ func StartBulkImportWorker(ctx context.Context, rdb *redis.Client, productSvc *P
 				continue
 			}
 
-			result, err := productSvc.ProcessBulkImport(ctx, f)
+			result, err := productSvc.ProcessBulkImport(ctx, f, autoCreateCategories)
 			// close + remove file
 			io.ReadAll(f)
 			f.Close()

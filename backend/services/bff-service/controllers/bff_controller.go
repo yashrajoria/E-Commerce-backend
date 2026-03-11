@@ -46,7 +46,7 @@ func (b *BFFController) Home(c *gin.Context) {
 	}
 
 	type result struct {
-		data map[string]interface{}
+		data interface{}
 		err  error
 	}
 
@@ -59,7 +59,7 @@ func (b *BFFController) Home(c *gin.Context) {
 			productsCh <- result{err: err}
 			return
 		}
-		var data map[string]interface{}
+		var data interface{}
 		err = clients.DecodeJSON(resp, &data)
 		productsCh <- result{data: data, err: err}
 	}()
@@ -70,7 +70,7 @@ func (b *BFFController) Home(c *gin.Context) {
 			categoriesCh <- result{err: err}
 			return
 		}
-		var data map[string]interface{}
+		var data interface{}
 		err = clients.DecodeJSON(resp, &data)
 		categoriesCh <- result{data: data, err: err}
 	}()

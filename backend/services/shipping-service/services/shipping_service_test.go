@@ -96,7 +96,15 @@ func (m *mockSNS) Publish(_ context.Context, _ string, _ []byte) error { return 
 func newTestService(repo *mockShipmentRepo, provider *typedMockProvider, sns *mockSNS) services.ShippingService {
 	logger, _ := zap.NewDevelopment()
 	origin := models.Address{Name: "Warehouse", Street1: "1 W St", City: "SF", State: "CA", PostalCode: "94105", Country: "US"}
-	return services.NewShippingService(repo, provider, sns, "arn:aws:sns:us-east-1:000000000000:shipping", origin, logger)
+	return services.NewShippingService(
+		repo,
+		provider,
+		sns,
+		"arn:aws:sns:us-east-1:000000000000:shipping-events",
+		"arn:aws:sns:us-east-1:000000000000:notification-events",
+		origin,
+		logger,
+	)
 }
 
 // ---- tests ----

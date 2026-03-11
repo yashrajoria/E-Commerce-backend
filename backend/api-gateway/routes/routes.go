@@ -63,6 +63,16 @@ func RegisterAllRoutes(r *gin.Engine) {
 
 	// BFF (public GET only — e.g. product listing pages)
 	public.GET("/bff", bff)
+	public.GET("/bff/home", bff)
+	public.GET("/bff/products", bff)
+	public.GET("/bff/products/*any", bff)
+	public.GET("/bff/categories", bff)
+
+	// BFF auth (public)
+	public.POST("/bff/auth/register", bff)
+	public.POST("/bff/auth/login", bff)
+	public.POST("/bff/auth/verify-email", bff)
+	public.POST("/bff/auth/refresh", bff)
 
 	// Auth (public — login, register, verify)
 	auth := r.Group("/auth")
@@ -117,9 +127,18 @@ func RegisterAllRoutes(r *gin.Engine) {
 	protected.GET("/shipping/track/:tracking_code", shipping)
 
 	// BFF (protected POST + GET for authenticated pages)
-	protected.POST("/bff", bff)
-	protected.POST("/bff/*any", bff)
-	protected.GET("/bff/*any", bff)
+	protected.POST("/bff/auth/logout", bff)
+	protected.POST("/bff/cart/add", bff)
+	protected.POST("/bff/cart/checkout", bff)
+	protected.POST("/bff/checkout", bff)
+	protected.POST("/bff/users/change-password", bff)
+	protected.POST("/bff/payment/verify-payment", bff)
+	protected.GET("/bff/auth/status", bff)
+	protected.GET("/bff/cart", bff)
+	protected.GET("/bff/orders", bff)
+	protected.GET("/bff/orders/:id", bff)
+	protected.GET("/bff/profile", bff)
+	protected.GET("/bff/payment/status/by-order/:order_id", bff)
 
 	// =========================================================================
 	// ADMIN ROUTES (JWT + admin role required)

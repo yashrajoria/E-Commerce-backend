@@ -38,7 +38,10 @@ func (r *gormPaymentRepo) GetPaymentByOrderID(ctx context.Context, orderID uuid.
 func (r *gormPaymentRepo) GetPaymentByIdempotencyKey(ctx context.Context, key string) (*models.Payment, error) {
 	var payment models.Payment
 	if err := r.db.WithContext(ctx).Where("idempotency_key = ?", key).First(&payment).Error; err != nil {
-		return nil, err
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil // Return nil if no record is found
+		}
+		return nil, err // Return the error for other cases
 	}
 	return &payment, nil
 }

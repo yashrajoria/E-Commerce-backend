@@ -136,6 +136,16 @@ func (s *ProductServiceDDB) ListProducts(ctx context.Context, params ListProduct
 }
 
 func (s *ProductServiceDDB) CreateProduct(ctx context.Context, req ProductCreateRequest, images []*multipart.FileHeader) (*models.Product, error) {
+	if req.SKU != "" {
+		existing, err := s.productRepo.FindBySKUs(ctx, []string{req.SKU})
+		if err != nil {
+			return nil, fmt.Errorf("failed to check SKU uniqueness: %w", err)
+		}
+		if len(existing) > 0 {
+			return nil, fmt.Errorf("product with sku '%s' already exists", req.SKU)
+		}
+	}
+
 	// Step 1: Look up categories
 	categories, err := s.categoryRepo.FindByNames(ctx, req.Categories)
 	if err != nil {
@@ -536,7 +546,7 @@ func (s *ProductServiceDDB) ValidateBulkImport(ctx context.Context, file multipa
 	}, nil
 }
 
-func (s *ProductServiceDDB) ProcessBulkImport(ctx context.Context, file multipart.File) (*models.BulkImportResult, error) {
+func (s *ProductServiceDDB) ProcessBulkImport(ctx context.Context, file multipart.File, autoCreateCategories bool) (*models.BulkImportResult, error) {
 	r := csv.NewReader(file)
 	headers, err := r.Read()
 	if err != nil {
@@ -616,6 +626,32 @@ func (s *ProductServiceDDB) ProcessBulkImport(ctx context.Context, file multipar
 		ids := []uuid.UUID{cat.ID}
 		ids = append(ids, cat.Ancestors...)
 		catNameToIDs[cat.Name] = ids
+	}
+
+	if autoCreateCategories {
+		now := time.Now().UTC()
+		for _, catName := range allCatNames {
+			if _, exists := catNameToIDs[catName]; exists {
+				continue
+			}
+
+			newCategory := &models.Category{
+				ID:        uuid.New(),
+				Name:      catName,
+				ParentIDs: []uuid.UUID{},
+				Ancestors: []uuid.UUID{},
+				Slug:      strings.ToLower(strings.ReplaceAll(catName, " ", "-")),
+				IsActive:  true,
+				CreatedAt: now,
+				UpdatedAt: now,
+			}
+
+			if err := s.categoryRepo.Create(ctx, newCategory); err != nil {
+				return nil, fmt.Errorf("failed to auto-create category '%s': %w", catName, err)
+			}
+
+			catNameToIDs[catName] = []uuid.UUID{newCategory.ID}
+		}
 	}
 
 	var productsToInsert []models.Product

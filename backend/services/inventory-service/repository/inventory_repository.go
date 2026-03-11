@@ -40,7 +40,7 @@ func NewDynamoInventoryRepository(client *dynamodb.Client, table string) *Dynamo
 }
 
 type ddbInventory struct {
-	ProductID string `dynamodbav:"product_id"`
+	ProductID string `dynamodbav:"id"`
 	Available int    `dynamodbav:"available"`
 	Reserved  int    `dynamodbav:"reserved"`
 	Threshold int    `dynamodbav:"threshold"`
@@ -48,7 +48,7 @@ type ddbInventory struct {
 }
 
 func (r *DynamoInventoryRepository) Get(ctx context.Context, productID string) (*models.Inventory, error) {
-	key, err := attributevalue.MarshalMap(map[string]string{"product_id": productID})
+	key, err := attributevalue.MarshalMap(map[string]string{"id": productID})
 	if err != nil {
 		return nil, fmt.Errorf("marshal key: %w", err)
 	}
@@ -130,7 +130,7 @@ func (r *DynamoInventoryRepository) Update(ctx context.Context, productID string
 		i++
 	}
 
-	key, err := attributevalue.MarshalMap(map[string]string{"product_id": productID})
+	key, err := attributevalue.MarshalMap(map[string]string{"id": productID})
 	if err != nil {
 		return fmt.Errorf("marshal key: %w", err)
 	}
@@ -150,7 +150,7 @@ func (r *DynamoInventoryRepository) Update(ctx context.Context, productID string
 
 // Reserve atomically decrements available and increments reserved
 func (r *DynamoInventoryRepository) Reserve(ctx context.Context, productID string, quantity int) error {
-	key, err := attributevalue.MarshalMap(map[string]string{"product_id": productID})
+	key, err := attributevalue.MarshalMap(map[string]string{"id": productID})
 	if err != nil {
 		return fmt.Errorf("marshal key: %w", err)
 	}
@@ -187,7 +187,7 @@ func (r *DynamoInventoryRepository) Reserve(ctx context.Context, productID strin
 
 // Release atomically increments available and decrements reserved
 func (r *DynamoInventoryRepository) Release(ctx context.Context, productID string, quantity int) error {
-	key, err := attributevalue.MarshalMap(map[string]string{"product_id": productID})
+	key, err := attributevalue.MarshalMap(map[string]string{"id": productID})
 	if err != nil {
 		return fmt.Errorf("marshal key: %w", err)
 	}
@@ -224,7 +224,7 @@ func (r *DynamoInventoryRepository) Release(ctx context.Context, productID strin
 
 // Confirm permanently deducts reserved stock (payment succeeded)
 func (r *DynamoInventoryRepository) Confirm(ctx context.Context, productID string, quantity int) error {
-	key, err := attributevalue.MarshalMap(map[string]string{"product_id": productID})
+	key, err := attributevalue.MarshalMap(map[string]string{"id": productID})
 	if err != nil {
 		return fmt.Errorf("marshal key: %w", err)
 	}

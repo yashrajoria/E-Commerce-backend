@@ -10,9 +10,11 @@ require (
 )
 
 require github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws v0.0.0
+
 require github.com/yashrajoria/common v0.0.0
 
 replace github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws => ../../pkg/aws
+
 replace github.com/yashrajoria/common => ../common
 
 require (
@@ -52,11 +54,6 @@ require (
 )
 
 require (
-	github.com/rogpeppe/go-internal v1.14.1 // indirect
-	github.com/stretchr/testify v1.11.1 // indirect
-)
-
-require (
 	github.com/aws/aws-sdk-go-v2 v1.41.1 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.4 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.32.7 // indirect
@@ -83,5 +80,4 @@ require (
 	github.com/aws/smithy-go v1.24.0 // indirect
 	github.com/bytedance/sonic/loader v0.2.3 // indirect
 	github.com/cloudwego/base64x v0.1.5 // indirect
-	github.com/kr/pretty v0.3.1 // indirect
 )

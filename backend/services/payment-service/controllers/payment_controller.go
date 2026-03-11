@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -211,10 +212,32 @@ func (pc *PaymentController) VerifyPayment(c *gin.Context) {
 		return
 	}
 
+	// Validate that session_id is not empty
+	if req.SessionID == "" {
+		pc.Logger.Warn("Missing session ID in verify payment request", zap.String("payment_id", req.PaymentID))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "session_id is required"})
+		return
+	}
+
+	// Validate session_id format (should start with cs_test_ or cs_live_)
+	if !strings.HasPrefix(req.SessionID, "cs_test_") && !strings.HasPrefix(req.SessionID, "cs_live_") {
+		pc.Logger.Warn("Invalid session ID format", zap.String("payment_id", req.PaymentID), zap.String("session_id", req.SessionID))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session_id format: must be a valid Stripe Checkout Session ID (starts with cs_test_ or cs_live_)"})
+		return
+	}
+
 	sess, err := session.Get(req.SessionID, nil)
 	if err != nil {
+		var stripeErr *stripe.Error
+		if errors.As(err, &stripeErr) {
+			if stripeErr.HTTPStatusCode >= 400 && stripeErr.HTTPStatusCode < 500 {
+				pc.Logger.Warn("Invalid Stripe session", zap.String("session_id", req.SessionID), zap.Error(err))
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid Stripe session"})
+				return
+			}
+		}
 		pc.Logger.Error("Error fetching Stripe session", zap.String("session_id", req.SessionID), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch Stripe session"})
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch Stripe session"})
 		return
 	}
 
