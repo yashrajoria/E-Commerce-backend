@@ -3349,6 +3349,10 @@ components:
           format: uri
           nullable: true
           description: Retry URL if payment failed and a new session was created.
+        session_id:
+          type: string
+          nullable: true
+          description: Stripe Checkout Session ID. Use this value to verify the payment. Retrieved from the payment status endpoint.
 
     VerifyPaymentRequest:
       type: object
@@ -3356,8 +3360,10 @@ components:
         - payment_id
         - session_id
       description: |
-        Payload for verifying a payment after Stripe redirects back. Extract `payment_id` and
-        `session_id` from the Stripe success URL query parameters.
+        Payload for verifying a payment after Stripe redirects back. Extract `session_id`
+        from the Stripe redirect URL parameter or from the payment status endpoint response.
+        The session_id must be a valid Stripe Checkout Session ID (starts with `cs_live_` or `cs_test_`
+        followed by actual characters, NOT the example value).
       properties:
         payment_id:
           type: string
@@ -3365,8 +3371,12 @@ components:
           example: pi_3OqAbCDefGhIjKlM0NoPqRsT
         session_id:
           type: string
-          description: "Stripe Checkout Session ID (e.g. `cs_test_...`)."
-          example: cs_test_a1B2c3D4e5F6g7H8i9J0kL
+          description: |
+            Stripe Checkout Session ID retrieved from either:
+            1. The payment status endpoint (GET /payment/status/by-order/{order_id})
+            2. The Stripe redirect URL parameter after checkout completion
+            Must be a real session ID, not the example value below.
+          example: cs_live_abcdefghijklmnopqrstuvwxyz1234567890abcdefghijk
 
     VerifyPaymentResponse:
       type: object
