@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"cart-service/config"
@@ -220,10 +221,14 @@ func (cc *CartController) Checkout(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "cart not found"})
 		return
 	}
-	// support idempotency: if Idempotency-Key header present, check Redis for existing order
-	idemKey := c.GetHeader("Idempotency-Key")
-	if idemKey != "" {
-		if existing, err := cc.Repo.GetIdempotency(context.Background(), idemKey); err == nil && existing != "" {
+	// support idempotency: if Idempotency-Key header present, check Redis for existing order.
+	// Scope by user so two different users never collide on the same header value.
+	rawIdemKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	scopedIdemKey := ""
+	if rawIdemKey != "" {
+		scopedIdemKey = userID + ":" + rawIdemKey
+		if existing, err := cc.Repo.GetIdempotency(context.Background(), scopedIdemKey); err == nil && existing != "" {
+			log.Printf("[Checkout] Returning cached order_id=%s for scoped_idempotency_key=%s (same request retried)", existing, scopedIdemKey)
 			c.JSON(http.StatusOK, gin.H{"order_id": existing, "status": "PENDING"})
 			return
 		}
@@ -250,7 +255,7 @@ func (cc *CartController) Checkout(c *gin.Context) {
 	if len(invalid) > 0 {
 		// return a clear frontend-visible error listing invalid items
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error":            "some items in cart are invalid or missing",
+			"error":               "some items in cart are invalid or missing",
 			"invalid_product_ids": invalid,
 		})
 		return
@@ -262,7 +267,7 @@ func (cc *CartController) Checkout(c *gin.Context) {
 		Event:          "checkout.requested",
 		UserID:         userID,
 		Items:          cart.Items,
-		IdempotencyKey: idemKey,
+		IdempotencyKey: scopedIdemKey,
 		Timestamp:      time.Now(),
 		OrderID:        orderID,
 	}
@@ -283,9 +288,13 @@ func (cc *CartController) Checkout(c *gin.Context) {
 		return
 	}
 
-	// persist idempotency mapping if key provided
-	if idemKey != "" {
-		_ = cc.Repo.SetIdempotency(context.Background(), idemKey, orderID, cc.Config.CartTTL)
+	// Only persist idempotency mapping AFTER SNS publish succeeds
+	// This prevents caching failed orders
+	if scopedIdemKey != "" {
+		if err := cc.Repo.SetIdempotency(context.Background(), scopedIdemKey, orderID, cc.Config.CartTTL); err != nil {
+			log.Printf("⚠️  [Checkout] Failed to persist idempotency key for orderID=%s: %v", orderID, err)
+			// Non-fatal: order was created and published, so continue
+		}
 	}
 
 	// Clear cart after sending
