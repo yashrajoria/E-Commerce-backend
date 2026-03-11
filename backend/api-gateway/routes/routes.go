@@ -3,6 +3,7 @@ package routes
 import (
 	"api-gateway/middlewares"
 	"api-gateway/utils"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -67,6 +68,26 @@ func RegisterAllRoutes(r *gin.Engine) {
 	public.GET("/bff/products", bff)
 	public.GET("/bff/products/*any", bff)
 	public.GET("/bff/categories", bff)
+	public.GET("/bff/cart", func(c *gin.Context) {
+		log.Println("[API Gateway] Forwarding request to /bff/cart")
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[API Gateway] Error forwarding /bff/cart: %v", r)
+				c.JSON(500, gin.H{"error": "Internal Server Error"})
+			}
+		}()
+		bff(c)
+	})
+	public.POST("/bff/checkout", func(c *gin.Context) {
+		log.Println("[API Gateway] Forwarding request to /bff/checkout")
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[API Gateway] Error forwarding /bff/checkout: %v", r)
+				c.JSON(500, gin.H{"error": "Internal Server Error"})
+			}
+		}()
+		bff(c)
+	})
 
 	// BFF auth (public)
 	public.POST("/bff/auth/register", bff)

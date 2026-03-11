@@ -3,6 +3,7 @@ package routes
 import (
 	"bff-service/controllers"
 	"bff-service/middleware"
+	"log"
 
 	"github.com/gin-gonic/gin"
 )
@@ -37,11 +38,29 @@ func RegisterRoutes(r *gin.Engine, ctrl *controllers.BFFController) {
 		protected.GET("/auth/status", ctrl.Proxy("GET", "/auth/status"))
 
 		// Cart page
-		protected.GET("/cart", ctrl.Proxy("GET", "/cart"))
-		protected.POST("/cart/add", ctrl.Proxy("POST", "/cart/add"))
-		protected.DELETE("/cart/remove/:product_id", ctrl.CartRemoveItem)
-		protected.DELETE("/cart/clear", ctrl.Proxy("DELETE", "/cart/clear"))
-		protected.POST("/cart/checkout", ctrl.Proxy("POST", "/cart/checkout"))
+		protected.GET("/cart", func(c *gin.Context) {
+			log.Println("[BFF] Fetching cart for user")
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[BFF] Error fetching cart: %v", r)
+					c.JSON(500, gin.H{"error": "Internal Server Error"})
+				}
+			}()
+			ctrl.Proxy("GET", "/cart")(c)
+		})
+
+		// Checkout
+		protected.POST("/checkout", func(c *gin.Context) {
+			log.Println("[BFF] Initiating checkout for user")
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[BFF] Error during checkout: %v", r)
+					c.JSON(500, gin.H{"error": "Internal Server Error"})
+				}
+			}()
+			ctrl.Checkout(c)
+		})
+
 		// Orchestrated checkout: creates order and checkout session, returns URL
 		protected.POST("/checkout", ctrl.Checkout)
 
