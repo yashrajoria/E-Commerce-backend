@@ -12,6 +12,7 @@ import (
 	"bff-service/config"
 	"bff-service/controllers"
 	"bff-service/routes"
+	"bff-service/utils"
 
 	"github.com/redis/go-redis/v9"
 
@@ -65,6 +66,7 @@ func main() {
 	}
 
 	controller := controllers.NewBFFController(gateway, redisClient)
+	adminHTTPClient := utils.NewHTTPClient()
 
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -655,6 +657,18 @@ func main() {
 	})
 
 	routes.RegisterRoutes(r, controller)
+	routes.RegisterAdminRoutes(
+		r,
+		zapLogger,
+		controllers.NewAdminProductController(zapLogger, adminHTTPClient),
+		controllers.NewAdminCategoryController(zapLogger, adminHTTPClient),
+		controllers.NewAdminUserController(zapLogger, adminHTTPClient),
+		controllers.NewAdminOrderController(zapLogger, adminHTTPClient),
+		controllers.NewAdminInventoryController(zapLogger, adminHTTPClient),
+		controllers.NewAdminPromotionController(zapLogger, adminHTTPClient),
+		controllers.NewAdminNotificationController(zapLogger, adminHTTPClient),
+		controllers.NewAdminAnalyticsController(zapLogger, adminHTTPClient),
+	)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
