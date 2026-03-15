@@ -9,6 +9,9 @@ import (
 func RegisterRoutes(r *gin.Engine, ctrl *controllers.InventoryController) {
 	inventory := r.Group("/inventory")
 	{
+		// Admin list all inventory
+		inventory.GET("", ctrl.ListStock)
+
 		// Public/internal endpoints
 		inventory.GET("/:productId", ctrl.GetStock)
 		inventory.POST("/check", ctrl.CheckStock)

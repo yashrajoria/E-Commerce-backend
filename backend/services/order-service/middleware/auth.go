@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -12,6 +13,7 @@ const UserContextKey = "userID"
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.GetHeader("X-User-ID")
+		log.Println(userID)
 		role := c.GetHeader("X-User-Role")
 		email := c.GetHeader("X-User-Email")
 

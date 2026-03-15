@@ -3,6 +3,7 @@ package controllers
 import (
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/yashrajoria/inventory-service/models"
@@ -178,5 +179,36 @@ func (ic *InventoryController) CheckStock(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"all_sufficient": allSufficient,
 		"results":        results,
+	})
+}
+
+// ListStock returns all inventory items with pagination
+// GET /inventory
+func (ic *InventoryController) ListStock(c *gin.Context) {
+	pageStr := c.DefaultQuery("page", "1")
+	pageSizeStr := c.DefaultQuery("page_size", "20")
+
+	page := 1
+	pageSize := 20
+	if v, err := strconv.Atoi(pageStr); err == nil && v > 0 {
+		page = v
+	}
+	if v, err := strconv.Atoi(pageSizeStr); err == nil && v > 0 && v <= 100 {
+		pageSize = v
+	}
+
+	items, err := ic.service.ListAllStock(c.Request.Context(), page, pageSize)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list inventory"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"inventory": items,
+		"meta": gin.H{
+			"page":      page,
+			"page_size": pageSize,
+			"count":     len(items),
+		},
 	})
 }

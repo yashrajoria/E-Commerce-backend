@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -20,7 +21,7 @@ func AuthMiddleware() gin.HandlerFunc {
 		userID := c.GetHeader("X-User-ID")
 		role := c.GetHeader("X-User-Role")
 		email := c.GetHeader("X-User-Email")
-
+		log.Println("User ID:", userID, "Role:", role, "Email:", email)
 		// Cookie fallback (only if behind api-gateway, never publicly exposed)
 		if userID == "" {
 			if v, err := c.Cookie("user_id"); err == nil {

@@ -13,3 +13,10 @@ func RegisterUserRoutes(rg *gin.RouterGroup) {
     rg.PUT("/profile", controllers.UpdateProfile)
     rg.POST("/change-password", controllers.ChangePassword)
 }
+
+// RegisterAdminRoutes registers admin-only user routes (list all users).
+// The provided RouterGroup should already have AuthMiddleware + AdminOnly applied.
+func RegisterAdminRoutes(rg *gin.RouterGroup) {
+    log.Println("Registering admin user routes...")
+    rg.GET("", controllers.GetAllUsers)
+}

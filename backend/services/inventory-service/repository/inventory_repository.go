@@ -26,6 +26,7 @@ type InventoryRepository interface {
 	Release(ctx context.Context, productID string, quantity int) error
 	Confirm(ctx context.Context, productID string, quantity int) error
 	CheckStock(ctx context.Context, productID string, quantity int) (*models.StockCheckResult, error)
+	ListAll(ctx context.Context, limit int32, exclusiveStartKey map[string]types.AttributeValue) ([]models.Inventory, map[string]types.AttributeValue, error)
 }
 
 // DynamoInventoryRepository implements InventoryRepository using DynamoDB
@@ -281,4 +282,40 @@ func (r *DynamoInventoryRepository) CheckStock(ctx context.Context, productID st
 		Requested:    quantity,
 		IsSufficient: inv.Available >= quantity,
 	}, nil
+}
+
+// ListAll scans the DynamoDB table and returns all inventory items with pagination.
+func (r *DynamoInventoryRepository) ListAll(ctx context.Context, limit int32, exclusiveStartKey map[string]types.AttributeValue) ([]models.Inventory, map[string]types.AttributeValue, error) {
+	input := &dynamodb.ScanInput{
+		TableName: &r.table,
+		Limit:     &limit,
+	}
+	if len(exclusiveStartKey) > 0 {
+		input.ExclusiveStartKey = exclusiveStartKey
+	}
+
+	out, err := r.client.Scan(ctx, input)
+	if err != nil {
+		return nil, nil, fmt.Errorf("dynamodb Scan failed: %w", err)
+	}
+
+	items := make([]models.Inventory, 0, len(out.Items))
+	for _, item := range out.Items {
+		var di ddbInventory
+		if err := attributevalue.UnmarshalMap(item, &di); err != nil {
+			return nil, nil, fmt.Errorf("unmarshal scan item: %w", err)
+		}
+		inv := models.Inventory{
+			ProductID: di.ProductID,
+			Available: di.Available,
+			Reserved:  di.Reserved,
+			Threshold: di.Threshold,
+		}
+		if t, err := time.Parse(time.RFC3339, di.UpdatedAt); err == nil {
+			inv.UpdatedAt = t
+		}
+		items = append(items, inv)
+	}
+
+	return items, out.LastEvaluatedKey, nil
 }
