@@ -873,8 +873,12 @@ paths:
   /bff/admin/users:
     get:
       tags: [Admin]
-      summary: List users (admin)
-      description: Returns paginated users from user-service.
+      summary: List all users (admin)
+      operationId: adminListUsers
+      description: |
+        Returns a paginated list of all registered users (customers and admins).
+        Passwords are never included in the response. Results are sorted by
+        creation date descending (newest first). Requires admin role.
       parameters:
         - $ref: "#/components/parameters/AdminAuthorizationHeader"
         - $ref: "#/components/parameters/AdminUserIDHeader"
@@ -882,10 +886,71 @@ paths:
         - $ref: "#/components/parameters/AdminPageParam"
         - $ref: "#/components/parameters/AdminPageSizeParam"
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "200":
+          description: Paginated user list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      users:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                              format: uuid
+                            email:
+                              type: string
+                              format: email
+                            name:
+                              type: string
+                            role:
+                              type: string
+                              enum: [user, admin]
+                            phone_number:
+                              type: string
+                              nullable: true
+                            created_at:
+                              type: string
+                              format: date-time
+                      meta:
+                        type: object
+                        properties:
+                          page:
+                            type: integer
+                          page_size:
+                            type: integer
+                          total:
+                            type: integer
+                          total_pages:
+                            type: integer
+                  error:
+                    type: string
+              example:
+                success: true
+                data:
+                  users:
+                    - id: "e3bc8bbb-aee3-445c-b51a-0b3edee3b613"
+                      email: "admin@example.com"
+                      name: "Admin User"
+                      role: "admin"
+                      phone_number: null
+                      created_at: "2026-03-10T01:46:38Z"
+                  meta:
+                    page: 1
+                    page_size: 20
+                    total: 23
+                    total_pages: 2
+                error: ""
         "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
         "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
 
   /bff/admin/users/{id}/role:
@@ -998,8 +1063,12 @@ paths:
   /bff/admin/inventory:
     get:
       tags: [Admin]
-      summary: List inventory (admin)
-      description: Returns inventory data from inventory-service.
+      summary: List all inventory items (admin)
+      operationId: adminListInventory
+      description: |
+        Returns a paginated list of all product inventory records from DynamoDB.
+        Each record shows available stock, reserved count, and low-stock threshold.
+        Requires admin role.
       parameters:
         - $ref: "#/components/parameters/AdminAuthorizationHeader"
         - $ref: "#/components/parameters/AdminUserIDHeader"
@@ -1007,10 +1076,62 @@ paths:
         - $ref: "#/components/parameters/AdminPageParam"
         - $ref: "#/components/parameters/AdminPageSizeParam"
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "200":
+          description: Paginated inventory list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      inventory:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            product_id:
+                              type: string
+                              format: uuid
+                            available:
+                              type: integer
+                            reserved:
+                              type: integer
+                            threshold:
+                              type: integer
+                            updated_at:
+                              type: string
+                              format: date-time
+                      meta:
+                        type: object
+                        properties:
+                          page:
+                            type: integer
+                          page_size:
+                            type: integer
+                          count:
+                            type: integer
+                  error:
+                    type: string
+              example:
+                success: true
+                data:
+                  inventory:
+                    - product_id: "3979556c-2759-4aec-8bb0-5aa5ecde93dc"
+                      available: 150
+                      reserved: 0
+                      threshold: 0
+                      updated_at: "2026-03-11T00:12:29Z"
+                  meta:
+                    page: 1
+                    page_size: 20
+                    count: 5
+                error: ""
         "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
         "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
 
   /bff/admin/inventory/{product_id}:
