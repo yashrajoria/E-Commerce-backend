@@ -31,7 +31,7 @@ func RegisterAllRoutes(r *gin.Engine) {
 	coupons := forwardTo("http://promotion-service:8090/coupons")
 	shipping := forwardTo("http://shipping-service:8091/shipping")
 	authProxy := forwardTo("http://auth-service:8081/auth")
-	notifications := forwardTo("http://notification-service:8089/notifications")
+	notifications := forwardTo("http://notification-service:8092/notifications") // fixed: was 8089
 
 	// ── groups ────────────────────────────────────────────────────────────────
 	public := r.Group("/")
@@ -46,46 +46,45 @@ func RegisterAllRoutes(r *gin.Engine) {
 	})
 
 	// =========================================================================
-	// PUBLIC ROUTES
+	// PUBLIC ROUTES — no authentication required
 	// =========================================================================
 
 	// Docs
 	public.GET("/docs", forwardTo("http://bff-service:8088/docs"))
 	public.GET("/docs/*any", forwardTo("http://bff-service:8088/docs"))
 
-	// Products (read only — public)
+	// Stripe webhook — Stripe calls this directly, no auth
+	public.POST("/stripe/webhook", forwardTo("http://payment-service:8087/stripe/webhook"))
+
+	// Auth — public actions only
+	public.POST("/auth/login", authProxy)
+	public.POST("/auth/register", authProxy)
+	public.POST("/auth/verify-email", authProxy)
+	public.POST("/auth/resend-verification", authProxy)
+
+	// Products — read only, public browsing
 	public.GET("/products", products)
 	public.GET("/products/*any", products)
 
-	// Categories (read only — public)
+	// Categories — read only, public browsing
 	public.GET("/categories", categories)
 	public.GET("/categories/*any", categories)
 
-	// BFF (public GET only — e.g. product listing pages)
+	// BFF — all methods public, BFF handles its own internal auth
 	public.GET("/bff", bff)
-	public.GET("/bff/home", bff)
-	public.GET("/bff/products", bff)
-	public.GET("/bff/products/*any", bff)
-	public.GET("/bff/categories", bff)
-
-	// BFF auth (public)
-	public.POST("/bff/auth/register", bff)
-	public.POST("/bff/auth/login", bff)
-	public.POST("/bff/auth/verify-email", bff)
-	public.POST("/bff/auth/refresh", bff)
-
-	// Auth (public — login, register, verify)
-	auth := r.Group("/auth")
-	auth.POST("/*any", authProxy)
-
-	// Stripe webhook (public — Stripe calls this directly)
-	public.POST("/stripe/webhook", forwardTo("http://payment-service:8087/stripe/webhook"))
+	public.GET("/bff/*any", bff)
+	public.POST("/bff", bff)
+	public.POST("/bff/*any", bff)
+	public.PUT("/bff/*any", bff)
+	public.DELETE("/bff/*any", bff)
 
 	// =========================================================================
-	// PROTECTED ROUTES (JWT required)
+	// PROTECTED ROUTES — JWT required
 	// =========================================================================
 
-	// Auth (protected GET — e.g. /auth/me, refresh)
+	// Auth — protected actions
+	protected.POST("/auth/logout", authProxy)
+	protected.POST("/auth/refresh", authProxy)
 	protected.GET("/auth/*any", authProxy)
 
 	// Users
@@ -102,7 +101,7 @@ func RegisterAllRoutes(r *gin.Engine) {
 	protected.PUT("/cart/*any", cart)
 	protected.DELETE("/cart/*any", cart)
 
-	// Orders (protected read + create)
+	// Orders — create and read
 	protected.GET("/orders", orders)
 	protected.GET("/orders/*any", orders)
 	protected.POST("/orders", orders)
@@ -113,62 +112,48 @@ func RegisterAllRoutes(r *gin.Engine) {
 	protected.POST("/payment/*any", payment)
 	protected.GET("/payment/*any", payment)
 
-	// Inventory (protected read)
+	// Inventory — read
 	protected.GET("/inventory/:productId", inventory)
 	protected.POST("/inventory/check", inventory)
 
-	// Coupons (protected read + validate)
+	// Coupons — validate and read single
 	protected.POST("/coupons/validate", coupons)
 	protected.GET("/coupons/:code", coupons)
 
-	// Shipping (protected)
+	// Shipping
 	protected.POST("/shipping/rates", shipping)
 	protected.POST("/shipping/labels", shipping)
 	protected.GET("/shipping/track/:tracking_code", shipping)
 
-	// BFF (protected POST + GET for authenticated pages)
-	protected.POST("/bff/auth/logout", bff)
-	protected.POST("/bff/cart/add", bff)
-	protected.POST("/bff/cart/checkout", bff)
-	protected.POST("/bff/checkout", bff)
-	protected.POST("/bff/users/change-password", bff)
-	protected.POST("/bff/payment/verify-payment", bff)
-	protected.GET("/bff/auth/status", bff)
-	protected.GET("/bff/cart", bff)
-	protected.GET("/bff/orders", bff)
-	protected.GET("/bff/orders/:id", bff)
-	protected.GET("/bff/profile", bff)
-	protected.GET("/bff/payment/status/by-order/:order_id", bff)
-
 	// =========================================================================
-	// ADMIN ROUTES (JWT + admin role required)
+	// ADMIN ROUTES — JWT + admin role required
 	// =========================================================================
 
-	// Products (admin write)
+	// Products — write
 	admin.POST("/products", products)
 	admin.POST("/products/*any", products)
 	admin.PUT("/products/*any", products)
 	admin.DELETE("/products/*any", products)
 
-	// Categories (admin write)
+	// Categories — write
 	admin.POST("/categories", categories)
 	admin.POST("/categories/*any", categories)
 	admin.PUT("/categories/*any", categories)
 	admin.DELETE("/categories/*any", categories)
 
-	// Orders (admin write)
+	// Orders — write
 	admin.PUT("/orders/*any", orders)
 	admin.DELETE("/orders/*any", orders)
 
-	// Inventory (admin write)
+	// Inventory — write
 	admin.POST("/inventory", inventory)
 	admin.PUT("/inventory/:productId", inventory)
 
-	// Coupons (admin write)
+	// Coupons — write
 	admin.POST("/coupons", coupons)
 	admin.GET("/coupons", coupons)
 	admin.DELETE("/coupons/:code", coupons)
 
-	// Notifications (admin read — log viewer)
+	// Notifications — admin read
 	admin.GET("/notifications/log", notifications)
 }
