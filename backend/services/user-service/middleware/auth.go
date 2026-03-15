@@ -27,6 +27,23 @@ func AuthMiddleware() gin.HandlerFunc {
 	}
 }
 
+// AdminOnly rejects the request unless X-User-Role is "admin".
+func AdminOnly() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		role := c.GetHeader("X-User-Role")
+		if role == "" {
+			if v, err := c.Cookie("user_role"); err == nil && v != "" {
+				role = v
+			}
+		}
+		if role != "admin" {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Forbidden: admin access required"})
+			return
+		}
+		c.Next()
+	}
+}
+
 func GetUserID(c *gin.Context) (string, error) {
 	val, exists := c.Get(UserContextKey)
 	if !exists {

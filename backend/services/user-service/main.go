@@ -84,6 +84,11 @@ func main() {
 	userRoutes.Use(middleware.AuthMiddleware())
 	routes.RegisterUserRoutes(userRoutes)
 
+	// Admin user routes — requires auth + admin role
+	adminUserRoutes := r.Group("/users")
+	adminUserRoutes.Use(middleware.AuthMiddleware(), middleware.AdminOnly())
+	routes.RegisterAdminRoutes(adminUserRoutes)
+
 	port := cfg.Port
 	if port == "" {
 		port = "8085"
