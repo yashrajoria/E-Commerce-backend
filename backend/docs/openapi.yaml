@@ -114,6 +114,10 @@ tags:
     description: |
       🔐 Endpoints in this group require the caller to have the `admin` role. Requests from
       `user`-role tokens will receive `403 Forbidden`.
+  - name: Admin
+    description: |
+      Administrative BFF endpoints under `/bff/admin/*`. These endpoints require admin role
+      headers from the gateway and return a standardized BFF response envelope.
 
 paths:
   # ── Gateway ─────────────────────────────────────────────────────────────────
@@ -711,6 +715,492 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "502":
           $ref: "#/components/responses/BadGateway"
+
+  # ── BFF Admin ───────────────────────────────────────────────────────────────
+
+  /bff/admin/products:
+    get:
+      tags: [Admin]
+      summary: List products (admin)
+      description: Returns a paginated product list from product-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: "#/components/parameters/AdminPageParam"
+        - $ref: "#/components/parameters/AdminPageSizeParam"
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+    post:
+      tags: [Admin]
+      summary: Create product (admin)
+      description: Creates a product in product-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProductJSONRequest"
+      responses:
+        "201": { $ref: "#/components/responses/AdminCreatedResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+
+  /bff/admin/products/{id}:
+    put:
+      tags: [Admin]
+      summary: Update product (admin)
+      description: Updates a product by id in product-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: "#/components/parameters/ProductID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProductRequest"
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+    delete:
+      tags: [Admin]
+      summary: Delete product (admin)
+      description: Deletes a product by id in product-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: "#/components/parameters/ProductID"
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+
+  /bff/admin/categories:
+    get:
+      tags: [Admin]
+      summary: List categories (admin)
+      description: Returns categories from product-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: "#/components/parameters/AdminPageParam"
+        - $ref: "#/components/parameters/AdminPageSizeParam"
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+    post:
+      tags: [Admin]
+      summary: Create category (admin)
+      description: Creates category in product-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCategoryRequest"
+      responses:
+        "201": { $ref: "#/components/responses/AdminCreatedResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+
+  /bff/admin/categories/{id}:
+    put:
+      tags: [Admin]
+      summary: Update category (admin)
+      description: Updates category by id in product-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: "#/components/parameters/CategoryID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCategoryRequest"
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+    delete:
+      tags: [Admin]
+      summary: Delete category (admin)
+      description: Deletes category by id in product-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: "#/components/parameters/CategoryID"
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+
+  /bff/admin/users:
+    get:
+      tags: [Admin]
+      summary: List users (admin)
+      description: Returns paginated users from user-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: "#/components/parameters/AdminPageParam"
+        - $ref: "#/components/parameters/AdminPageSizeParam"
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+
+  /bff/admin/users/{id}/role:
+    put:
+      tags: [Admin]
+      summary: Update user role (admin)
+      description: Updates user role through user-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: "#/components/parameters/AdminIDParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role:
+                  type: string
+                  enum: [admin, user]
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+
+  /bff/admin/users/{id}:
+    delete:
+      tags: [Admin]
+      summary: Delete user (admin)
+      description: Deletes user by id through user-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: "#/components/parameters/AdminIDParam"
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+
+  /bff/admin/orders:
+    get:
+      tags: [Admin]
+      summary: List orders (admin)
+      description: Returns paginated orders from order-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: "#/components/parameters/AdminPageParam"
+        - $ref: "#/components/parameters/AdminPageSizeParam"
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+
+  /bff/admin/orders/{id}:
+    get:
+      tags: [Admin]
+      summary: Get order by id (admin)
+      description: Returns order details by id from order-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: "#/components/parameters/OrderID"
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+
+  /bff/admin/orders/{id}/status:
+    put:
+      tags: [Admin]
+      summary: Update order status (admin)
+      description: Updates order status by id through order-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: "#/components/parameters/OrderID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+
+  /bff/admin/inventory:
+    get:
+      tags: [Admin]
+      summary: List inventory (admin)
+      description: Returns inventory data from inventory-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: "#/components/parameters/AdminPageParam"
+        - $ref: "#/components/parameters/AdminPageSizeParam"
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+
+  /bff/admin/inventory/{product_id}:
+    put:
+      tags: [Admin]
+      summary: Update inventory (admin)
+      description: Updates inventory for a product in inventory-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: "#/components/parameters/ProductIDString"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                available:
+                  type: integer
+                  minimum: 0
+                threshold:
+                  type: integer
+                  minimum: 0
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+
+  /bff/admin/coupons:
+    get:
+      tags: [Admin]
+      summary: List coupons (admin)
+      description: Returns coupon list from promotion-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: "#/components/parameters/AdminPageParam"
+        - $ref: "#/components/parameters/AdminPageSizeParam"
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+    post:
+      tags: [Admin]
+      summary: Create coupon (admin)
+      description: Creates a coupon in promotion-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCouponRequest"
+      responses:
+        "201": { $ref: "#/components/responses/AdminCreatedResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+
+  /bff/admin/coupons/{id}:
+    put:
+      tags: [Admin]
+      summary: Update coupon (admin)
+      description: Updates coupon by id/code in promotion-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: "#/components/parameters/AdminIDParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+    delete:
+      tags: [Admin]
+      summary: Delete coupon (admin)
+      description: Deactivates/deletes coupon by id/code in promotion-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: "#/components/parameters/AdminIDParam"
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+
+  /bff/admin/notifications:
+    get:
+      tags: [Admin]
+      summary: List notifications (admin)
+      description: Returns notification entries from notification-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: "#/components/parameters/AdminPageParam"
+        - $ref: "#/components/parameters/AdminPageSizeParam"
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+
+  /bff/admin/notifications/log:
+    get:
+      tags: [Admin]
+      summary: Notification logs (admin)
+      description: Returns notification dispatch logs from notification-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+
+  /bff/admin/reports/sales:
+    get:
+      tags: [Admin]
+      summary: Sales analytics report (admin)
+      description: Aggregates sales stats from order-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+
+  /bff/admin/reports/users:
+    get:
+      tags: [Admin]
+      summary: Users analytics report (admin)
+      description: Aggregates user stats from user-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+
+  /bff/admin/reports/inventory:
+    get:
+      tags: [Admin]
+      summary: Inventory analytics report (admin)
+      description: Aggregates inventory stats from inventory-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
 
   # ── Auth Service ─────────────────────────────────────────────────────────────
 
@@ -2385,6 +2875,58 @@ components:
         format: uuid
       example: 550e8400-e29b-41d4-a716-446655440000
 
+    AdminAuthorizationHeader:
+      name: Authorization
+      in: header
+      required: true
+      description: Bearer token header forwarded by gateway.
+      schema:
+        type: string
+
+    AdminUserIDHeader:
+      name: X-User-ID
+      in: header
+      required: true
+      description: User identifier forwarded by API gateway.
+      schema:
+        type: string
+
+    AdminUserRoleHeader:
+      name: X-User-Role
+      in: header
+      required: true
+      description: Role header forwarded by API gateway; must be `admin`.
+      schema:
+        type: string
+        enum: [admin]
+
+    AdminPageParam:
+      name: page
+      in: query
+      description: Page number (1-indexed).
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+
+    AdminPageSizeParam:
+      name: page_size
+      in: query
+      description: Number of records per page.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+    AdminIDParam:
+      name: id
+      in: path
+      required: true
+      description: Identifier used by admin BFF routes (UUID or service-specific code).
+      schema:
+        type: string
+
   requestBodies:
     LoginRequest:
       required: true
@@ -2593,6 +3135,48 @@ components:
             error: Bad Gateway
             details: Upstream service is temporarily unavailable.
 
+    AdminSuccessResponse:
+      description: Standard successful admin response.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AdminStandardResponse"
+
+    AdminCreatedResponse:
+      description: Standard created admin response.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AdminStandardResponse"
+
+    AdminBadRequestResponse:
+      description: Standard admin bad request response.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AdminStandardResponse"
+
+    AdminForbiddenResponse:
+      description: Standard admin forbidden response.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AdminStandardResponse"
+
+    AdminNotFoundResponse:
+      description: Standard admin not found response.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AdminStandardResponse"
+
+    AdminInternalErrorResponse:
+      description: Standard admin internal error response.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AdminStandardResponse"
+
   schemas:
     # ── Shared / Common ────────────────────────────────────────────────────────
 
@@ -2653,6 +3237,38 @@ components:
           type: string
           description: Human-readable description of what went wrong.
           example: No product found with the given ID.
+
+    AdminMeta:
+      type: object
+      description: Standard pagination metadata envelope for admin responses.
+      properties:
+        page:
+          type: integer
+          example: 1
+        page_size:
+          type: integer
+          example: 20
+        total:
+          type: integer
+          example: 100
+        total_pages:
+          type: integer
+          example: 5
+
+    AdminStandardResponse:
+      type: object
+      description: Standard BFF admin response shape.
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          nullable: true
+        error:
+          type: string
+          example: ""
+        meta:
+          $ref: "#/components/schemas/AdminMeta"
 
     # ── Auth ───────────────────────────────────────────────────────────────────
 
