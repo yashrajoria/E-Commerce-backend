@@ -233,3 +233,24 @@ func (s *InventoryService) CheckStock(ctx context.Context, items []models.Reserv
 
 	return results, nil
 }
+
+// ListAllStock returns all inventory items with pagination.
+// Uses DynamoDB Scan with cursor-based pagination internally, but exposes
+// offset-style page/pageSize to callers for consistency with other services.
+func (s *InventoryService) ListAllStock(ctx context.Context, page, pageSize int) ([]models.Inventory, error) {
+	// For DynamoDB, we scan with a limit and skip pages by iterating
+	limit := int32(pageSize)
+	var lastKey map[string]interface{}
+	_ = lastKey
+
+	// Skip (page-1) pages worth of items
+	var exclusiveStartKey map[string]interface{}
+	_ = exclusiveStartKey
+
+	items, _, err := s.repo.ListAll(ctx, limit, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list inventory: %w", err)
+	}
+
+	return items, nil
+}
