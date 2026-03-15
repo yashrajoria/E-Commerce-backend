@@ -69,7 +69,11 @@ func (oc *OrderController) GetOrders(ctx *gin.Context) {
 	result, serviceErr := oc.orderService.GetUserOrders(ctx.Request.Context(), userID, page, limit)
 
 	if serviceErr != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch orders"})
+		status := serviceErr.StatusCode
+		if status == 0 {
+			status = http.StatusInternalServerError
+		}
+		ctx.JSON(status, gin.H{"error": serviceErr.Message})
 		fmt.Printf("Error: %v\n", serviceErr)
 		return
 	}
