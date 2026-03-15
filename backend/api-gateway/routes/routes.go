@@ -146,6 +146,7 @@ func RegisterAllRoutes(r *gin.Engine) {
 	admin.DELETE("/orders/*any", orders)
 
 	// Inventory — write
+	admin.GET("/inventory", inventory)
 	admin.POST("/inventory", inventory)
 	admin.PUT("/inventory/:productId", inventory)
 
