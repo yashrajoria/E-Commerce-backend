@@ -48,6 +48,7 @@ func (c *PaymentRequestConsumer) Start(ctx context.Context) {
 	c.logger.Info("Starting PaymentRequestConsumer (SQS)")
 
 	err := c.sqsConsumer.StartPolling(ctx, func(ctx context.Context, body string) error {
+		c.logger.Info("[PaymentService] Received SQS message body", zap.String("body", body))
 		var req models.PaymentRequest
 		if err := json.Unmarshal([]byte(body), &req); err != nil {
 			c.logger.Warn("Invalid payment request JSON", zap.Error(err))

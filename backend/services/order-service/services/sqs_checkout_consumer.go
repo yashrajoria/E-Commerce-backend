@@ -236,6 +236,7 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		IdempotencyKey: idemKey,
 	}
 	reqBytes, _ := json.Marshal(req)
+	log.Printf("[OrderService] Publishing payment-request JSON: %s", string(reqBytes))
 	if err := c.sqsPublisher.SendMessage(ctx, string(reqBytes)); err != nil {
 		log.Printf("❌ failed to publish payment-request for order=%s: %v", order.ID.String(), err)
 		// Don't return error - order is created, payment request can be retried
