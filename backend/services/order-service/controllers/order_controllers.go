@@ -130,6 +130,15 @@ func (oc *OrderController) GetAllOrders(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, result)
 }
 
+func (oc *OrderController) GetRevenueStats(ctx *gin.Context) {
+	stats, serviceErr := oc.orderService.GetRevenueStats(ctx.Request.Context())
+	if serviceErr != nil {
+		ctx.JSON(serviceErr.StatusCode, gin.H{"error": serviceErr.Message})
+		return
+	}
+	ctx.JSON(http.StatusOK, stats)
+}
+
 // GetOrderByID returns a specific order for the authenticated user
 func (oc *OrderController) GetOrderByID(ctx *gin.Context) {
 	userID, err := middleware.GetUserID(ctx)
