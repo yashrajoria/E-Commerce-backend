@@ -19,10 +19,15 @@ func RegisterAdminRoutes(
 	promotionCtrl *controllers.AdminPromotionController,
 	notificationCtrl *controllers.AdminNotificationController,
 	analyticsCtrl *controllers.AdminAnalyticsController,
+	dashboardCtrl *controllers.AdminDashboardController,
 ) {
 	admin := r.Group("/bff/admin")
 	admin.Use(middleware.RequestLoggerMiddleware(logger))
 	admin.Use(middleware.AdminAuthMiddleware())
+
+	if dashboardCtrl != nil {
+		admin.GET("/dashboard", dashboardCtrl.GetDashboardSummary)
+	}
 
 	if productCtrl != nil {
 		admin.GET("/products", productCtrl.ListProducts)
