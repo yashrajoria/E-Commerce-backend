@@ -98,4 +98,7 @@ func copyForwardHeaders(dst, src http.Header) {
 	if v := src.Get("Content-Type"); v != "" {
 		dst.Set("Content-Type", v)
 	}
+	if v := src.Get("Cookie"); v != "" {
+		dst.Set("Cookie", v)
+	}
 }
