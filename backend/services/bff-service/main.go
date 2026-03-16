@@ -668,6 +668,7 @@ func main() {
 		controllers.NewAdminPromotionController(zapLogger, adminHTTPClient),
 		controllers.NewAdminNotificationController(zapLogger, adminHTTPClient),
 		controllers.NewAdminAnalyticsController(zapLogger, adminHTTPClient),
+		controllers.NewAdminDashboardController(zapLogger, adminHTTPClient),
 	)
 
 	srv := &http.Server{
