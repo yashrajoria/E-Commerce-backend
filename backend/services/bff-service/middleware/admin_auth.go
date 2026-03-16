@@ -11,10 +11,16 @@ const (
 	AdminUserRoleContextKey = "user_role"
 )
 
-// AdminAuthMiddleware allows requests only when X-User-Role is admin.
+// AdminAuthMiddleware allows requests only when user role is admin.
 func AdminAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userRole := c.GetHeader("X-User-Role")
+		if userRole == "" {
+			if v, err := c.Cookie("user_role"); err == nil && v != "" {
+				userRole = v
+			}
+		}
+
 		if userRole != "admin" {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 				"success": false,
@@ -24,6 +30,11 @@ func AdminAuthMiddleware() gin.HandlerFunc {
 		}
 
 		userID := c.GetHeader("X-User-ID")
+		if userID == "" {
+			if v, err := c.Cookie("user_id"); err == nil && v != "" {
+				userID = v
+			}
+		}
 		c.Set(AdminUserIDContextKey, userID)
 		c.Set(AdminUserRoleContextKey, userRole)
 		c.Next()
