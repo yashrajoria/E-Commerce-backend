@@ -64,6 +64,10 @@ func (ctrl *AuthController) Login(c *gin.Context) {
 	c.SetSameSite(sameSite)
 	c.SetCookie("__session", tokenPair.AccessToken, 900, "/", domain, secure, true)
 	c.SetCookie("refresh_token", tokenPair.RefreshToken, 604800, "/", domain, secure, true)
+	
+	// Set identifiers for Next.js frontend and BFF downstream services
+	c.SetCookie("user_id", tokenPair.UserID, 604800, "/", domain, secure, false)
+	c.SetCookie("user_role", tokenPair.Role, 604800, "/", domain, secure, false)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Logged in successfully"})
 }
@@ -142,6 +146,8 @@ func (ctrl *AuthController) Logout(c *gin.Context) {
 	c.SetSameSite(sameSite)
 	c.SetCookie("__session", "", -1, "/", domain, secure, true)
 	c.SetCookie("refresh_token", "", -1, "/", domain, secure, true)
+	c.SetCookie("user_id", "", -1, "/", domain, secure, false)
+	c.SetCookie("user_role", "", -1, "/", domain, secure, false)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
 }
@@ -165,6 +171,8 @@ func (ctrl *AuthController) Refresh(c *gin.Context) {
 	c.SetSameSite(sameSite)
 	c.SetCookie("__session", newTokenPair.AccessToken, 900, "/", domain, secure, true)
 	c.SetCookie("refresh_token", newTokenPair.RefreshToken, 604800, "/", domain, secure, true)
+	c.SetCookie("user_id", newTokenPair.UserID, 604800, "/", domain, secure, false)
+	c.SetCookie("user_role", newTokenPair.Role, 604800, "/", domain, secure, false)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Token refreshed successfully"})
 }
