@@ -224,11 +224,16 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 	}
 
 	// Send payment request to SQS
+	idemKey := evt.IdempotencyKey
+	if idemKey == "" {
+		idemKey = order.ID.String()
+	}
+
 	req := models.PaymentRequest{
 		OrderID:        order.ID.String(),
 		UserID:         order.UserID.String(),
 		Amount:         order.Amount,
-		IdempotencyKey: evt.IdempotencyKey,
+		IdempotencyKey: idemKey,
 	}
 	reqBytes, _ := json.Marshal(req)
 	if err := c.sqsPublisher.SendMessage(ctx, string(reqBytes)); err != nil {
