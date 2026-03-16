@@ -260,7 +260,7 @@ func (c *AdminDashboardController) GetDashboardSummary(ctx *gin.Context) {
 		}
 	}
 
-	wg.Add(5)
+	wg.Add(6)
 	go fetchUserProductCount(c.userServiceURL+"/users", &totalUsersCount)
 	go fetchUserProductCount(c.productServiceURL+"/products", &totalProductsCount)
 	go fetchOrderCount(c.orderServiceURL+"/orders/admin", &totalOrdersCount)
