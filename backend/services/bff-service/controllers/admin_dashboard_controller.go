@@ -58,6 +58,14 @@ type userProductMetaResponse struct {
 	} `json:"meta"`
 }
 
+type orderStats struct {
+	TotalRevenue         float64 `json:"total_revenue"`
+	RevenueToday         float64 `json:"revenue_today"`
+	RevenueYesterday     float64 `json:"revenue_yesterday"`
+	TotalOrdersToday    int     `json:"total_orders_today"`
+	TotalOrdersYesterday int     `json:"total_orders_yesterday"`
+}
+
 type Order struct {
 	ID        string  `json:"id"`
 	UserID    string  `json:"user_id"`
@@ -158,6 +166,25 @@ func (c *AdminDashboardController) GetDashboardSummary(ctx *gin.Context) {
 
 	headers := ctx.Request.Header
 
+	var orderAnalytics orderStats
+
+	fetchOrderAnalytics := func() {
+		defer wg.Done()
+		body, status, err := utils.ForwardGet(ctx.Request.Context(), c.httpClient, c.orderServiceURL+"/orders/admin/stats", headers)
+		if err != nil || status >= 400 {
+			mu.Lock()
+			errs = append(errs, fmt.Errorf("failed to fetch order analytics: %v", err))
+			mu.Unlock()
+			return
+		}
+		var resp orderStats
+		if err := json.Unmarshal(body, &resp); err == nil {
+			mu.Lock()
+			orderAnalytics = resp
+			mu.Unlock()
+		}
+	}
+
 	fetchOrderCount := func(url string, target *int) {
 		defer wg.Done()
 		body, status, err := utils.ForwardGet(ctx.Request.Context(), c.httpClient, url+"?page=1&limit=1", headers)
@@ -237,6 +264,7 @@ func (c *AdminDashboardController) GetDashboardSummary(ctx *gin.Context) {
 	go fetchUserProductCount(c.userServiceURL+"/users", &totalUsersCount)
 	go fetchUserProductCount(c.productServiceURL+"/products", &totalProductsCount)
 	go fetchOrderCount(c.orderServiceURL+"/orders/admin", &totalOrdersCount)
+	go fetchOrderAnalytics()
 	go fetchOrders()
 	go fetchProducts()
 
@@ -353,15 +381,15 @@ func (c *AdminDashboardController) GetDashboardSummary(ctx *gin.Context) {
 		return ((today - yesterday) / yesterday) * 100.0
 	}
 
-	// KPIs
-	resp.KPIs.TotalRevenue.Value = totalRevenue
-	resp.KPIs.TotalRevenue.Trend = calcTrend(revenueToday, revenueYesterday)
+	// NPCs
+	resp.KPIs.TotalRevenue.Value = orderAnalytics.TotalRevenue
+	resp.KPIs.TotalRevenue.Trend = calcTrend(orderAnalytics.RevenueToday, orderAnalytics.RevenueYesterday)
 	resp.KPIs.TotalOrders.Value = totalOrdersCount
-	resp.KPIs.TotalOrders.Trend = calcTrend(totalOrdersToday, totalOrdersYesterday)
+	resp.KPIs.TotalOrders.Trend = calcTrend(float64(orderAnalytics.TotalOrdersToday), float64(orderAnalytics.TotalOrdersYesterday))
 	resp.KPIs.TotalProducts.Value = totalProductsCount
-	resp.KPIs.TotalProducts.Trend = 0 // Needs historical product data for true trend
+	resp.KPIs.TotalProducts.Trend = 0
 	resp.KPIs.ActiveUsers.Value = totalUsersCount
-	resp.KPIs.ActiveUsers.Trend = 0 // Needs historical user data for true trend
+	resp.KPIs.ActiveUsers.Trend = 0
 
 	// Generate some simulated chart data extending up to the total revenue loosely
 	resp.RevenueCharts.Monthly = []struct {
