@@ -174,6 +174,18 @@ func (s *OrderService) GetAllOrders(ctx context.Context, adminID string, page, l
 	}, nil
 }
 
+func (s *OrderService) GetRevenueStats(ctx context.Context) (map[string]interface{}, *ServiceError) {
+	stats, err := s.orderRepo.GetRevenueAnalytics(ctx)
+	if err != nil {
+		log.Printf("[OrderService] Failed to fetch revenue stats: %v", err)
+		return nil, &ServiceError{
+			StatusCode: 500,
+			Message:    "Failed to fetch analytics",
+		}
+	}
+	return stats, nil
+}
+
 // GetOrderByID retrieves a specific order for a user
 func (s *OrderService) GetOrderByID(ctx context.Context, userID string, order_id uuid.UUID) (*models.Order, *ServiceError) {
 	userUUID, err := uuid.Parse(userID)
