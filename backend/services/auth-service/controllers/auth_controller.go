@@ -77,12 +77,15 @@ func (ctrl *AuthController) Register(c *gin.Context) {
 		Name     string `json:"name" binding:"required"`
 		Email    string `json:"email" binding:"required,email"`
 		Password string `json:"password" binding:"required,min=8"`
+		// Role is always set to 'user' server-side — client value ignored
 		Role     string `json:"role" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body", "details": err.Error()})
 		return
 	}
+
+	req.Role = "user"
 
 	// Validate password strength before proceeding
 	pwValidator := services.NewPasswordValidator()
