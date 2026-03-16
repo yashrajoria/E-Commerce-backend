@@ -3,6 +3,7 @@ package repositories
 import (
 	"context"
 	"order-service/models"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -15,6 +16,7 @@ type OrderRepository interface {
 	FindByIDAndUserID(ctx context.Context, order_id, userID uuid.UUID) (*models.Order, error)
 	Create(ctx context.Context, order *models.Order) error
 	Update(ctx context.Context, order *models.Order) error
+	GetRevenueAnalytics(ctx context.Context) (map[string]interface{}, error)
 }
 
 // GormOrderRepository implements OrderRepository using GORM
@@ -99,4 +101,37 @@ func (r *GormOrderRepository) Create(ctx context.Context, order *models.Order) e
 // Update updates an existing order
 func (r *GormOrderRepository) Update(ctx context.Context, order *models.Order) error {
 	return r.db.WithContext(ctx).Save(order).Error
+}
+
+func (r *GormOrderRepository) GetRevenueAnalytics(ctx context.Context) (map[string]interface{}, error) {
+	var totalRevenue int64
+	var revenueToday, revenueYesterday int64
+	var countToday, countYesterday int64
+
+	now := time.Now()
+	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	startOfYesterday := startOfToday.AddDate(0, 0, -1)
+
+	// Lifetime Total
+	r.db.WithContext(ctx).Model(&models.Order{}).
+		Where("status NOT IN ('CANCELLED', 'REFUNDED', 'canceled', 'refunded')").
+		Select("SUM(amount)").Row().Scan(&totalRevenue)
+
+	// Today
+	r.db.WithContext(ctx).Model(&models.Order{}).
+		Where("status NOT IN ('CANCELLED', 'REFUNDED', 'canceled', 'refunded') AND created_at >= ?", startOfToday).
+		Select("SUM(amount), COUNT(*)").Row().Scan(&revenueToday, &countToday)
+
+	// Yesterday
+	r.db.WithContext(ctx).Model(&models.Order{}).
+		Where("status NOT IN ('CANCELLED', 'REFUNDED', 'canceled', 'refunded') AND created_at >= ? AND created_at < ?", startOfYesterday, startOfToday).
+		Select("SUM(amount), COUNT(*)").Row().Scan(&revenueYesterday, &countYesterday)
+
+	return map[string]interface{}{
+		"total_revenue":            totalRevenue,
+		"revenue_today":            revenueToday,
+		"revenue_yesterday":        revenueYesterday,
+		"total_orders_today":       countToday,
+		"total_orders_yesterday":   countYesterday,
+	}, nil
 }
