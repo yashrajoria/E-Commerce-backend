@@ -105,10 +105,15 @@ func main() {
 		})
 	}
 
-	// Health check / Test route for CORS
-	// r.GET("/health", func(c *gin.Context) {
-	// 	c.JSON(http.StatusOK, gin.H{"status": "ok", "message": "API Gateway is running"})
-	// })
+	// Health check / Readiness probe
+	r.GET("/health", func(c *gin.Context) {
+		// TODO: add DB/Redis ping if gateway gains direct dependencies
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "ok",
+			"service": "api-gateway",
+			"version": "v1",
+		})
+	})
 
 	r.GET("/test-cors", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "CORS is working!"})
