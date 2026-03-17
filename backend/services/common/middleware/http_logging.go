@@ -42,9 +42,30 @@ func RequestLogger(logger *zap.Logger) gin.HandlerFunc {
 			zap.Int("body_size", bodySize),
 		}
 
-		// Include request_id if set by upstream middleware
-		if rid := c.GetString("request_id"); rid != "" {
-			fields = append(fields, zap.String("request_id", rid))
+		// Extract Correlation ID and Request ID for distributed tracing
+		correlationID := c.GetHeader("X-Correlation-ID")
+		requestID := c.GetHeader("X-Request-Id")
+		if requestID == "" {
+			requestID = c.GetHeader("X-Request-ID")
+		}
+
+		// Also check Gin context if set by local middleware
+		if rid, ok := c.Get("request_id"); ok && rid != "" {
+			if s, ok := rid.(string); ok {
+				requestID = s
+			}
+		}
+		if cid, ok := c.Get("CorrelationID"); ok && cid != "" {
+			if s, ok := cid.(string); ok {
+				correlationID = s
+			}
+		}
+
+		if correlationID != "" {
+			fields = append(fields, zap.String("correlation_id", correlationID))
+		}
+		if requestID != "" {
+			fields = append(fields, zap.String("request_id", requestID))
 		}
 
 		switch {
