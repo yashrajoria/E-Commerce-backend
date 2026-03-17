@@ -31,6 +31,7 @@ type CouponService interface {
 	GetCoupon(ctx context.Context, code string) (*models.Coupon, *ServiceError)
 	DeactivateCoupon(ctx context.Context, code string) *ServiceError
 	ListCoupons(ctx context.Context, page, limit int) ([]models.Coupon, int64, *ServiceError)
+	IncrementCouponUsage(ctx context.Context, code string) error
 }
 
 // couponServiceImpl implements CouponService.
@@ -145,15 +146,6 @@ func (s *couponServiceImpl) ValidateCoupon(ctx context.Context, req *models.Vali
 		return nil, &ServiceError{StatusCode: 500, Message: "Unknown coupon type"}
 	}
 
-	// Increment usage
-	if err := s.repo.IncrementUsedCount(ctx, req.Code); err != nil {
-		s.logger.Error("Failed to increment coupon usage", zap.String("code", req.Code), zap.Error(err))
-		return nil, &ServiceError{StatusCode: 500, Message: "Failed to apply coupon"}
-	}
-
-	// Publish coupon_applied event
-	s.publishCouponAppliedEvent(ctx, coupon, discount, req.CartTotal)
-
 	return &models.ValidateCouponResponse{
 		Valid:          true,
 		Code:           coupon.Code,
@@ -161,6 +153,22 @@ func (s *couponServiceImpl) ValidateCoupon(ctx context.Context, req *models.Vali
 		DiscountAmount: discount,
 		Message:        "Coupon applied successfully",
 	}, nil
+}
+
+func (s *couponServiceImpl) IncrementCouponUsage(ctx context.Context, code string) error {
+	coupon, err := s.repo.FindByCode(ctx, code)
+	if err != nil {
+		return err
+	}
+
+	if err := s.repo.IncrementUsedCount(ctx, code); err != nil {
+		return err
+	}
+
+	// Calculate a dummy discount for the event (or we could pass it in)
+	// For now, we'll just publish the event with 0 or skip it if we don't have the amount.
+	s.publishCouponAppliedEvent(ctx, coupon, 0, 0)
+	return nil
 }
 
 // GetCoupon retrieves a coupon by code.

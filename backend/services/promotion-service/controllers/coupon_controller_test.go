@@ -29,6 +29,7 @@ type mockCouponService struct {
 	getFn      func(ctx context.Context, code string) (*models.Coupon, *services.ServiceError)
 	deactFn    func(ctx context.Context, code string) *services.ServiceError
 	listFn     func(ctx context.Context, page, limit int) ([]models.Coupon, int64, *services.ServiceError)
+	incFn      func(ctx context.Context, code string) error
 }
 
 func (m *mockCouponService) CreateCoupon(ctx context.Context, req *models.CreateCouponRequest) (*models.Coupon, *services.ServiceError) {
@@ -45,6 +46,9 @@ func (m *mockCouponService) DeactivateCoupon(ctx context.Context, code string) *
 }
 func (m *mockCouponService) ListCoupons(ctx context.Context, page, limit int) ([]models.Coupon, int64, *services.ServiceError) {
 	return m.listFn(ctx, page, limit)
+}
+func (m *mockCouponService) IncrementCouponUsage(ctx context.Context, code string) error {
+	return m.incFn(ctx, code)
 }
 
 // --- Helpers ---

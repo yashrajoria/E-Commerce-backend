@@ -22,6 +22,7 @@ type Config struct {
 	// SNS topic for promotion events
 	PromotionSNSTopicARN    string
 	NotificationSNSTopicARN string
+	OrderCreatedQueueURL    string
 }
 
 // LoadConfig reads configuration from environment variables with optional
@@ -38,6 +39,7 @@ func LoadConfig() (*Config, error) {
 		PostgresTimeZone:        getEnv("POSTGRES_TIMEZONE", "Asia/Kolkata"),
 		PromotionSNSTopicARN:    os.Getenv("PROMOTION_SNS_TOPIC_ARN"),
 		NotificationSNSTopicARN: os.Getenv("NOTIFICATION_SNS_TOPIC_ARN"),
+		OrderCreatedQueueURL:    os.Getenv("ORDER_CREATED_QUEUE_URL"),
 	}
 
 	// Override DB credentials from Secrets Manager when running on AWS
