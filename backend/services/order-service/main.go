@@ -172,17 +172,21 @@ func main() {
 		logger.Warn("CloudWatch metrics client init failed (non-fatal)", zap.Error(err))
 	}
 
+	// Promotion client for coupon validation
+	promotionClient := services.NewPromotionClient(cfg.PromotionServiceURL)
+
 	// Start SQS consumers
 	if checkoutQueueURL != "" && paymentRequestQueueURL != "" {
 		checkoutConsumer := services.NewSQSCheckoutConsumer(
 			aws_pkg.NewSQSConsumer(awsCfg, checkoutQueueURL),
 			aws_pkg.NewSQSConsumer(awsCfg, paymentRequestQueueURL), // For sending payment requests
-			database.DB,
+			orderRepository,
 			inventoryClient,
 			metricsClient,
 			cfg.ProductServiceURL,
 			snsClient,
 			cfg.NotificationSNSTopicARN,
+			promotionClient,
 		)
 		go checkoutConsumer.Start(shutdownCtx)
 		logger.Info("Started SQS checkout consumer", zap.String("queue", checkoutQueueURL))
@@ -193,7 +197,7 @@ func main() {
 	if paymentEventsQueueURL != "" {
 		paymentConsumer := services.NewSQSPaymentConsumer(
 			aws_pkg.NewSQSConsumer(awsCfg, paymentEventsQueueURL),
-			database.DB,
+			orderRepository,
 			inventoryClient,
 			metricsClient,
 			snsClient,
