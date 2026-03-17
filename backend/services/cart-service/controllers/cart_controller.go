@@ -3,7 +3,6 @@ package controllers
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"go.uber.org/zap"
 )
 
 type CartController struct {
@@ -49,7 +49,7 @@ func (cc *CartController) GetCart(c *gin.Context) {
 
 	cart, err := cc.Repo.GetCart(ctx, userID)
 	if err != nil {
-		log.Printf("{GET CART FAILED} for user %s: %v", userID, err)
+		zap.L().Error("{GET CART FAILED} for user", zap.String("userID", userID), zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get cart"})
 		return
 	}
@@ -147,9 +147,14 @@ func (cc *CartController) RemoveItem(c *gin.Context) {
 
 	ctx := context.Background()
 
-	cart, _ := cc.Repo.GetCart(ctx, userID)
+	cart, err := cc.Repo.GetCart(ctx, userID)
+	if err != nil {
+		zap.L().Error("[RemoveItem] Failed to get cart", zap.String("userID", userID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get cart"})
+		return
+	}
 	if cart == nil {
-		log.Printf("⚠️ [RemoveItem] Cart not found for userID=%s", userID)
+		zap.L().Warn("[RemoveItem] Cart not found", zap.String("userID", userID))
 
 		c.JSON(http.StatusNotFound, gin.H{"error": "cart not found"})
 		return
@@ -164,7 +169,7 @@ func (cc *CartController) RemoveItem(c *gin.Context) {
 	cart.Items = newItems
 
 	if err := cc.Repo.SaveCart(ctx, cart); err != nil {
-		log.Printf("❌ [RemoveItem] Failed to update cart for userID=%s: %v", userID, err)
+		zap.L().Error("[RemoveItem] Failed to update cart", zap.String("userID", userID), zap.Error(err))
 
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update cart"})
 		return
@@ -190,7 +195,7 @@ func (cc *CartController) ClearCart(c *gin.Context) {
 
 	err := cc.Repo.DeleteCart(ctx, userID)
 	if err != nil {
-		log.Printf("❌ [ClearCart] Failed to clear cart for userID=%s: %v", userID, err)
+		zap.L().Error("[ClearCart] Failed to clear cart", zap.String("userID", userID), zap.Error(err))
 
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to clear cart"})
 		return
@@ -208,15 +213,15 @@ func (cc *CartController) Checkout(c *gin.Context) {
 		}
 	}
 	if userID == "" {
-		log.Println("❌ [Checkout] Unauthorized: missing or empty user ID header/cookie")
+		zap.L().Warn("[Checkout] Unauthorized: missing or empty user ID header/cookie")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	ctx := context.Background()
+	ctx := c.Request.Context()
 
 	cart, err := cc.Repo.GetCart(ctx, userID)
 	if err != nil || cart == nil {
-		log.Printf("❌ [Checkout] Cart not found or error for userID=%s: %v", userID, err)
+		zap.L().Error("[Checkout] Cart not found or error", zap.String("userID", userID), zap.Error(err))
 
 		c.JSON(http.StatusNotFound, gin.H{"error": "cart not found"})
 		return
@@ -227,8 +232,8 @@ func (cc *CartController) Checkout(c *gin.Context) {
 	scopedIdemKey := ""
 	if rawIdemKey != "" {
 		scopedIdemKey = userID + ":" + rawIdemKey
-		if existing, err := cc.Repo.GetIdempotency(context.Background(), scopedIdemKey); err == nil && existing != "" {
-			log.Printf("[Checkout] Returning cached order_id=%s for scoped_idempotency_key=%s (same request retried)", existing, scopedIdemKey)
+		if existing, err := cc.Repo.GetIdempotency(ctx, scopedIdemKey); err == nil && existing != "" {
+			zap.L().Info("[Checkout] Returning cached order_id (same request retried)", zap.String("order_id", existing), zap.String("scoped_idempotency_key", scopedIdemKey))
 			c.JSON(http.StatusOK, gin.H{"order_id": existing, "status": "PENDING"})
 			return
 		}
@@ -241,9 +246,10 @@ func (cc *CartController) Checkout(c *gin.Context) {
 		productServiceURL = "http://product-service:8082"
 	}
 	// simple per-item check
+	httpClient := &http.Client{Timeout: 5 * time.Second}
 	for _, it := range cart.Items {
 		// GET /products/internal/:id
-		resp, err := http.Get(productServiceURL + "/products/internal/" + it.ProductID)
+		resp, err := httpClient.Get(productServiceURL + "/products/internal/" + it.ProductID)
 		if err != nil || resp.StatusCode != http.StatusOK {
 			invalid = append(invalid, it.ProductID)
 			continue
@@ -272,17 +278,21 @@ func (cc *CartController) Checkout(c *gin.Context) {
 		OrderID:        orderID,
 	}
 
-	eventBytes, _ := json.Marshal(event)
+	eventBytes, err := json.Marshal(event)
+	if err != nil {
+		zap.L().Error("failed to marshal event", zap.Error(err))
+		return
+	}
 	topicArn := os.Getenv("ORDER_SNS_TOPIC_ARN")
 	if topicArn == "" {
 		topicArn = "arn:aws:sns:eu-west-2:000000000000:order-events"
 	}
 
 	// Log topic and payload size for debugging
-	// log.Printf("[CHECKOUT] publishing SNS topicArn=%q payload_len=%d userID=%s", topicArn, len(eventBytes), userID)
+	// zap.L().Debug("[CHECKOUT] publishing SNS", zap.String("topicArn", topicArn), zap.Int("payload_len", len(eventBytes)), zap.String("userID", userID))
 
 	if err := cc.SNSClient.Publish(ctx, topicArn, eventBytes); err != nil {
-		log.Printf("❌ [Checkout] Failed to send SNS event for userID=%s topic=%s: %v", userID, topicArn, err)
+		zap.L().Error("[Checkout] Failed to send SNS event", zap.String("userID", userID), zap.String("topic", topicArn), zap.Error(err))
 
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to publish checkout event"})
 		return
@@ -291,8 +301,8 @@ func (cc *CartController) Checkout(c *gin.Context) {
 	// Only persist idempotency mapping AFTER SNS publish succeeds
 	// This prevents caching failed orders
 	if scopedIdemKey != "" {
-		if err := cc.Repo.SetIdempotency(context.Background(), scopedIdemKey, orderID, cc.Config.CartTTL); err != nil {
-			log.Printf("⚠️  [Checkout] Failed to persist idempotency key for orderID=%s: %v", orderID, err)
+		if err := cc.Repo.SetIdempotency(ctx, scopedIdemKey, orderID, cc.Config.CartTTL); err != nil {
+			zap.L().Warn("[Checkout] Failed to persist idempotency key", zap.String("orderID", orderID), zap.Error(err))
 			// Non-fatal: order was created and published, so continue
 		}
 	}
