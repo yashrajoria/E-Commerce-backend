@@ -27,6 +27,20 @@ type ProductCreateRequest struct {
 	Categories  []string
 }
 
+// ProductUpdateRequest is the strictly typed payload for updating products
+type ProductUpdateRequest struct {
+	Name         *string     `json:"name"`
+	Description  *string     `json:"description"`
+	Brand        *string     `json:"brand"`
+	SKU          *string     `json:"sku"`
+	Price        *float64    `json:"price"`
+	Quantity     *int        `json:"quantity"`
+	IsFeatured   *bool       `json:"is_featured"`
+	CategoryIDs  []uuid.UUID `json:"category_ids"`
+	CategoryPath []string    `json:"category_path"`
+	Images       []string    `json:"images"`
+}
+
 // ProductInternalDTO is a lightweight product representation for internal service calls
 type ProductInternalDTO struct {
 	ID    uuid.UUID
