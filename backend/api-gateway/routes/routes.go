@@ -6,9 +6,10 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis/v8"
 )
 
-func RegisterAllRoutes(r *gin.Engine) {
+func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 
 	// ── helper defined FIRST before any use ──────────────────────────────────
 	forwardTo := func(targetBase string) gin.HandlerFunc {
@@ -45,6 +46,11 @@ func RegisterAllRoutes(r *gin.Engine) {
 		c.JSON(http.StatusOK, gin.H{"status": "OK", "service": "api-gateway"})
 	})
 
+	// ── Global Rate Limiter ───────────────────────────────────────────────────
+	if redisClient != nil {
+		r.Use(middlewares.GlobalRateLimiter(redisClient))
+	}
+
 	// =========================================================================
 	// PUBLIC ROUTES — no authentication required
 	// =========================================================================
@@ -56,11 +62,17 @@ func RegisterAllRoutes(r *gin.Engine) {
 	// Stripe webhook — Stripe calls this directly, no auth
 	public.POST("/stripe/webhook", forwardTo("http://payment-service:8087/stripe/webhook"))
 
-	// Auth — public actions only
-	public.POST("/auth/login", authProxy)
-	public.POST("/auth/register", authProxy)
+	// Auth — sensitive public actions (strict rate limiting)
+	authStrict := public.Group("/auth")
+	if redisClient != nil {
+		authStrict.Use(middlewares.StrictRateLimiter(redisClient))
+	}
+	authStrict.POST("/login", authProxy)
+	authStrict.POST("/register", authProxy)
+	authStrict.POST("/resend-verification", authProxy)
+
+	// Auth — other public actions (normal global limits)
 	public.POST("/auth/verify-email", authProxy)
-	public.POST("/auth/resend-verification", authProxy)
 
 	// Products — read only, public browsing
 	public.GET("/products", products)
