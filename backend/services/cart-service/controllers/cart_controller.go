@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -45,7 +44,7 @@ func (cc *CartController) GetCart(c *gin.Context) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx := c.Request.Context()
 
 	cart, err := cc.Repo.GetCart(ctx, userID)
 	if err != nil {
@@ -90,7 +89,7 @@ func (cc *CartController) AddItems(c *gin.Context) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx := c.Request.Context()
 
 	cart, err := cc.Repo.GetCart(ctx, userID)
 	if err != nil {
@@ -145,7 +144,7 @@ func (cc *CartController) RemoveItem(c *gin.Context) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx := c.Request.Context()
 
 	cart, err := cc.Repo.GetCart(ctx, userID)
 	if err != nil {
@@ -191,7 +190,7 @@ func (cc *CartController) ClearCart(c *gin.Context) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx := c.Request.Context()
 
 	err := cc.Repo.DeleteCart(ctx, userID)
 	if err != nil {
@@ -204,7 +203,57 @@ func (cc *CartController) ClearCart(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "cart cleared"})
 }
 
-// Checkout publishes the cart to SNS and clears it
+// ApplyCoupon and adds a coupon code to the user's cart
+func (cc *CartController) ApplyCoupon(c *gin.Context) {
+	userID := c.GetHeader("X-User-ID")
+	if userID == "" {
+		if v, err := c.Cookie("user_id"); err == nil && v != "" {
+			userID = v
+		}
+	}
+
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var req struct {
+		CouponCode string `json:"coupon_code" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request", "details": err.Error()})
+		return
+	}
+
+	ctx := c.Request.Context()
+	cart, err := cc.Repo.GetCart(ctx, userID)
+	if err != nil {
+		zap.L().Error("failed to fetch cart", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
+		return
+	}
+
+	if cart == nil {
+		cart = &models.Cart{
+			UserID: userID,
+			Items:  []models.CartItem{},
+		}
+	}
+
+	cart.CouponCode = req.CouponCode
+	if err := cc.Repo.SaveCart(ctx, cart); err != nil {
+		zap.L().Error("failed to update cart with coupon", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to apply coupon"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":     "coupon applied successfully",
+		"coupon_code": req.CouponCode,
+	})
+}
+
+// Checkout initiates the order process via SNS and clears it
 func (cc *CartController) Checkout(c *gin.Context) {
 	userID := c.GetHeader("X-User-ID")
 	if userID == "" {
@@ -249,9 +298,24 @@ func (cc *CartController) Checkout(c *gin.Context) {
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 	for _, it := range cart.Items {
 		// GET /products/internal/:id
-		resp, err := httpClient.Get(productServiceURL + "/products/internal/" + it.ProductID)
+		reqUrl := productServiceURL + "/products/internal/" + it.ProductID
+		req, err := http.NewRequestWithContext(ctx, "GET", reqUrl, nil)
+		if err != nil {
+			zap.L().Error("failed to create internal request", zap.Error(err))
+			continue
+		}
+
+		// Propagate Correlation ID
+		if corID := c.GetHeader("X-Correlation-ID"); corID != "" {
+			req.Header.Set("X-Correlation-ID", corID)
+		}
+
+		resp, err := httpClient.Do(req)
 		if err != nil || resp.StatusCode != http.StatusOK {
 			invalid = append(invalid, it.ProductID)
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
 			continue
 		}
 		// drain body
@@ -276,6 +340,7 @@ func (cc *CartController) Checkout(c *gin.Context) {
 		IdempotencyKey: scopedIdemKey,
 		Timestamp:      time.Now(),
 		OrderID:        orderID,
+		CouponCode:     cart.CouponCode,
 	}
 
 	eventBytes, err := json.Marshal(event)
@@ -308,7 +373,7 @@ func (cc *CartController) Checkout(c *gin.Context) {
 	}
 
 	// Clear cart after sending
-	// _ = cc.Repo.DeleteCart(ctx, userID)
+	_ = cc.Repo.DeleteCart(ctx, userID)
 
 	c.JSON(http.StatusOK, gin.H{"order_id": orderID, "status": "PENDING"})
 }
