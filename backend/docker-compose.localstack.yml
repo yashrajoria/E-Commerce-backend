@@ -52,7 +52,7 @@ services:
         t_count=$(awslocal --endpoint-url=http://localstack:4566 sns list-topics --query 'length(Topics)' --output text 2>/dev/null || echo 0);
         if ! [[ \"$${q_count}\" =~ ^[0-9]+$ ]]; then q_count=0; fi;
         if ! [[ \"$${t_count}\" =~ ^[0-9]+$ ]]; then t_count=0; fi;
-        if [ \"$${q_count}\" -ge 4 ] && [ \"$${t_count}\" -ge 6 ]; then
+        if [ \"$${q_count}\" -ge 8 ] && [ \"$${t_count}\" -ge 6 ]; then
           echo \"LocalStack resources ready: queues=$${q_count}, topics=$${t_count}\";
           exit 0;
         fi;
@@ -192,6 +192,16 @@ services:
       # Keep both for compatibility; the service code expects SQS_QUEUE_URL
       - NOTIFICATION_SQS_QUEUE_URL=http://localstack:4566/000000000000/${NOTIFICATION_SQS_QUEUE_NAME:-notification-queue}
       - SQS_QUEUE_URL=http://localstack:4566/000000000000/${NOTIFICATION_SQS_QUEUE_NAME:-notification-queue}
+    depends_on:
+      localstack-init:
+        condition: service_completed_successfully
+
+  promotion-service:
+    environment:
+      - USE_LOCALSTACK=true
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
+      - AWS_REGION=us-east-1
+      - ORDER_CREATED_QUEUE_URL=http://localstack:4566/000000000000/promotion-order-queue
     depends_on:
       localstack-init:
         condition: service_completed_successfully

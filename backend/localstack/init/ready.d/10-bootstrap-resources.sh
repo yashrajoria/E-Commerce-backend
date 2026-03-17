@@ -18,6 +18,7 @@ ORDER_QUEUE_NAME="${ORDER_PROCESSING_QUEUE_NAME:-order-processing-queue}"
 PAYMENT_EVENTS_QUEUE_NAME="${PAYMENT_EVENTS_QUEUE_NAME:-payment-events-queue}"
 PAYMENT_REQUEST_QUEUE_NAME="${PAYMENT_REQUEST_QUEUE_NAME:-payment-request-queue}"
 NOTIFICATION_QUEUE_NAME="${NOTIFICATION_SQS_QUEUE_NAME:-notification-queue}"
+PROMOTION_ORDER_QUEUE_NAME="${PROMOTION_ORDER_QUEUE_NAME:-promotion-order-queue}"
 
 # --------------------------------------------------
 # Retry helper (ONLY for transient failures)
@@ -104,21 +105,43 @@ NOTIFICATION_TOPIC_ARN=$(retry create_topic_if_missing "notification-events")
 
 
 # --------------------------------------------------
-# SQS (idempotent)
+# SQS (idempotent with DLQs)
 # --------------------------------------------------
-create_queue_if_missing() {
+create_queue_with_dlq() {
     local queue_name="$1"
+    local dlq_name="${queue_name}-dlq"
+    local max_receive_count="${2:-3}"
+
+    # 1. Create DLQ
+    echo "Creating DLQ: $dlq_name"
+    awslocal sqs create-queue --queue-name "$dlq_name" >/dev/null
+
+    # 2. Get DLQ ARN
+    local dlq_arn
+    dlq_arn=$(awslocal sqs get-queue-attributes \
+        --queue-url "http://localstack:4566/000000000000/$dlq_name" \
+        --attribute-names QueueArn \
+        --query "Attributes.QueueArn" \
+        --output text)
+
+    # 3. Create Main Queue with Redrive Policy
+    echo "Creating Main Queue: $queue_name with DLQ: $dlq_name"
+    local redrive_policy
+    redrive_policy="{\"deadLetterTargetArn\":\"$dlq_arn\",\"maxReceiveCount\":$max_receive_count}"
 
     awslocal sqs create-queue \
         --queue-name "$queue_name" \
-        --query "QueueUrl" \
-        --output text
+        --attributes "{\"RedrivePolicy\":$(echo $redrive_policy | jq -R .)}" >/dev/null
+
+    # Return Queue URL
+    awslocal sqs get-queue-url --queue-name "$queue_name" --query "QueueUrl" --output text
 }
 
-ORDER_QUEUE_URL=$(retry create_queue_if_missing "$ORDER_QUEUE_NAME")
-PAYMENT_EVENTS_QUEUE_URL=$(retry create_queue_if_missing "$PAYMENT_EVENTS_QUEUE_NAME")
-PAYMENT_REQUEST_QUEUE_URL=$(retry create_queue_if_missing "$PAYMENT_REQUEST_QUEUE_NAME")
-NOTIFICATION_QUEUE_URL=$(retry create_queue_if_missing "$NOTIFICATION_QUEUE_NAME")
+ORDER_QUEUE_URL=$(retry create_queue_with_dlq "$ORDER_QUEUE_NAME")
+PAYMENT_EVENTS_QUEUE_URL=$(retry create_queue_with_dlq "$PAYMENT_EVENTS_QUEUE_NAME")
+PAYMENT_REQUEST_QUEUE_URL=$(retry create_queue_with_dlq "$PAYMENT_REQUEST_QUEUE_NAME")
+NOTIFICATION_QUEUE_URL=$(retry create_queue_with_dlq "$NOTIFICATION_QUEUE_NAME")
+PROMOTION_ORDER_QUEUE_URL=$(retry create_queue_with_dlq "$PROMOTION_ORDER_QUEUE_NAME")
 
 
 # --------------------------------------------------
@@ -204,6 +227,10 @@ subscribe_if_missing "$PAYMENT_TOPIC_ARN" "$PAYMENT_EVENTS_QUEUE_URL"
 # business events stay on their own topics and never reach the notification queue.
 ensure_sqs_policy_allows_sns "$NOTIFICATION_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
 subscribe_if_missing "$NOTIFICATION_TOPIC_ARN" "$NOTIFICATION_QUEUE_URL"
+
+# Promotion order queue for coupon usage increments
+ensure_sqs_policy_allows_sns "$NOTIFICATION_TOPIC_ARN" "$PROMOTION_ORDER_QUEUE_URL"
+subscribe_if_missing "$NOTIFICATION_TOPIC_ARN" "$PROMOTION_ORDER_QUEUE_URL"
 
 
 # --------------------------------------------------
