@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"product-service/models"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
@@ -41,99 +42,6 @@ type ddbProduct struct {
 	DeletedAt    *string  `dynamodbav:"deleted_at,omitempty"`
 }
 
-// matchesFilter checks whether a DynamoDB product record matches the provided filter map.
-func matchesFilter(dp ddbProduct, filter map[string]interface{}) bool {
-	if filter == nil || len(filter) == 0 {
-		return true
-	}
-
-	if v, ok := filter["is_featured"].(bool); ok {
-		if dp.IsFeatured != v {
-			return false
-		}
-	}
-
-	if v, ok := filter["brand"].(string); ok {
-		if dp.Brand == nil || *dp.Brand != v {
-			return false
-		}
-	}
-
-	if v, ok := filter["min_price"]; ok {
-		switch t := v.(type) {
-		case float64:
-			if dp.Price < t {
-				return false
-			}
-		case float32:
-			if dp.Price < float64(t) {
-				return false
-			}
-		case int:
-			if dp.Price < float64(t) {
-				return false
-			}
-		case int64:
-			if dp.Price < float64(t) {
-				return false
-			}
-		}
-	}
-
-	if v, ok := filter["max_price"]; ok {
-		switch t := v.(type) {
-		case float64:
-			if dp.Price > t {
-				return false
-			}
-		case float32:
-			if dp.Price > float64(t) {
-				return false
-			}
-		case int:
-			if dp.Price > float64(t) {
-				return false
-			}
-		case int64:
-			if dp.Price > float64(t) {
-				return false
-			}
-		}
-	}
-
-	if v, ok := filter["category_ids"].([]string); ok && len(v) > 0 {
-		// require at least one matching category id
-		found := false
-		for _, cat := range dp.CategoryIDs {
-			for _, target := range v {
-				if cat == target {
-					found = true
-					break
-				}
-			}
-			if found {
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-
-	if v, ok := filter["in_stock"].(bool); ok {
-		if v { // want in-stock
-			if dp.Quantity <= 0 {
-				return false
-			}
-		} else { // want out-of-stock
-			if dp.Quantity > 0 {
-				return false
-			}
-		}
-	}
-
-	return true
-}
 
 func (d *DynamoAdapter) FindByID(ctx context.Context, id uuid.UUID) (*models.Product, error) {
 	key, err := attributevalue.MarshalMap(map[string]string{"id": id.String()})
@@ -225,31 +133,123 @@ func (d *DynamoAdapter) Create(ctx context.Context, product *models.Product) err
 	return nil
 }
 
-// Find performs a Scan with basic pagination. Filter support is limited to nil (no filter).
+// buildFilterExpression constructs DynamoDB filter expressions from the map
+func (d *DynamoAdapter) buildFilterExpression(filter map[string]interface{}) (filterExpr *string, attrValues map[string]types.AttributeValue, attrNames map[string]string) {
+	if filter == nil || len(filter) == 0 {
+		return nil, nil, nil
+	}
+
+	var expressions []string
+	attrValues = make(map[string]types.AttributeValue)
+	attrNames = make(map[string]string)
+	i := 0
+
+	if v, ok := filter["is_featured"].(bool); ok {
+		ph := fmt.Sprintf(":v%d", i)
+		nm := fmt.Sprintf("#f%d", i)
+		expressions = append(expressions, fmt.Sprintf("%s = %s", nm, ph))
+		av, _ := attributevalue.Marshal(v)
+		attrValues[ph] = av
+		attrNames[nm] = "is_featured"
+		i++
+	}
+
+	if v, ok := filter["brand"].(string); ok {
+		ph := fmt.Sprintf(":v%d", i)
+		nm := fmt.Sprintf("#f%d", i)
+		expressions = append(expressions, fmt.Sprintf("%s = %s", nm, ph))
+		av, _ := attributevalue.Marshal(v)
+		attrValues[ph] = av
+		attrNames[nm] = "brand"
+		i++
+	}
+
+	if v, ok := filter["min_price"]; ok {
+		ph := fmt.Sprintf(":v%d", i)
+		nm := fmt.Sprintf("#f%d", i)
+		expressions = append(expressions, fmt.Sprintf("%s >= %s", nm, ph))
+		av, _ := attributevalue.Marshal(v)
+		attrValues[ph] = av
+		attrNames[nm] = "price"
+		i++
+	}
+
+	if v, ok := filter["max_price"]; ok {
+		ph := fmt.Sprintf(":v%d", i)
+		nm := fmt.Sprintf("#f%d", i)
+		expressions = append(expressions, fmt.Sprintf("%s <= %s", nm, ph))
+		av, _ := attributevalue.Marshal(v)
+		attrValues[ph] = av
+		attrNames[nm] = "price"
+		i++
+	}
+
+	if v, ok := filter["category_ids"].([]string); ok && len(v) > 0 {
+		var catExprs []string
+		nm := fmt.Sprintf("#f%d", i)
+		attrNames[nm] = "category_ids"
+		for j, catID := range v {
+			ph := fmt.Sprintf(":cat%d", j)
+			catExprs = append(catExprs, fmt.Sprintf("contains(%s, %s)", nm, ph))
+			av, _ := attributevalue.Marshal(catID)
+			attrValues[ph] = av
+		}
+		expressions = append(expressions, "("+strings.Join(catExprs, " OR ")+")")
+		i++
+	}
+
+	if v, ok := filter["in_stock"].(bool); ok {
+		nm := fmt.Sprintf("#f%d", i)
+		attrNames[nm] = "quantity"
+		if v {
+			expressions = append(expressions, fmt.Sprintf("%s > :zero", nm))
+		} else {
+			expressions = append(expressions, fmt.Sprintf("%s <= :zero", nm))
+		}
+		if _, exists := attrValues[":zero"]; !exists {
+			av, _ := attributevalue.Marshal(0)
+			attrValues[":zero"] = av
+		}
+		i++
+	}
+
+	if len(expressions) == 0 {
+		return nil, nil, nil
+	}
+
+	joined := strings.Join(expressions, " AND ")
+	return &joined, attrValues, attrNames
+}
+
+// Find performs a Scan with pagination and optional FilterExpression.
 func (d *DynamoAdapter) Find(ctx context.Context, filter map[string]interface{}, limit, skip int) ([]*models.Product, error) {
-	// Simple implementation: Scan table and apply skip/limit
-	input := &dynamodb.ScanInput{TableName: &d.table}
+	filterExpr, attrValues, attrNames := d.buildFilterExpression(filter)
+
+	input := &dynamodb.ScanInput{
+		TableName:                 &d.table,
+		FilterExpression:          filterExpr,
+		ExpressionAttributeValues: attrValues,
+		ExpressionAttributeNames:  attrNames,
+	}
+
 	var results []*models.Product
 	paginator := dynamodb.NewScanPaginator(d.client, input)
-	seen := 0
+	seenMatches := 0
+
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("scan page failed: %w", err)
 		}
 		for _, it := range page.Items {
-			if skip > 0 && seen < skip {
-				seen++
+			if skip > 0 && seenMatches < skip {
+				seenMatches++
 				continue
 			}
+
 			var dp ddbProduct
 			if err := attributevalue.UnmarshalMap(it, &dp); err != nil {
 				return nil, fmt.Errorf("unmarshal item: %w", err)
-			}
-
-			// apply filters from service layer
-			if !matchesFilter(dp, filter) {
-				continue
 			}
 
 			p := &models.Product{}
@@ -292,25 +292,26 @@ func (d *DynamoAdapter) Find(ctx context.Context, filter map[string]interface{},
 	return results, nil
 }
 
-// Count returns the item count (full table scan Count)
+// Count returns the item count using FilterExpression if provided
 func (d *DynamoAdapter) Count(ctx context.Context, filter map[string]interface{}) (int64, error) {
-	input := &dynamodb.ScanInput{TableName: &d.table}
-	paginator := dynamodb.NewScanPaginator(d.client, input)
+	filterExpr, attrValues, attrNames := d.buildFilterExpression(filter)
+
+	input := &dynamodb.ScanInput{
+		TableName:                 &d.table,
+		FilterExpression:          filterExpr,
+		ExpressionAttributeValues: attrValues,
+		ExpressionAttributeNames:  attrNames,
+		Select:                    types.SelectCount,
+	}
+
 	var total int64
+	paginator := dynamodb.NewScanPaginator(d.client, input)
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
 			return 0, fmt.Errorf("scan count failed: %w", err)
 		}
-		for _, it := range page.Items {
-			var dp ddbProduct
-			if err := attributevalue.UnmarshalMap(it, &dp); err != nil {
-				return 0, fmt.Errorf("unmarshal item: %w", err)
-			}
-			if matchesFilter(dp, filter) {
-				total++
-			}
-		}
+		total += int64(page.Count)
 	}
 	return total, nil
 }
