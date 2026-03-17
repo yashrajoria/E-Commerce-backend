@@ -1,9 +1,11 @@
 package routes
 
 import (
+	"strings"
+	"net/http"
+
 	"api-gateway/middlewares"
 	"api-gateway/utils"
-	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
@@ -14,11 +16,20 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	// ── helper defined FIRST before any use ──────────────────────────────────
 	forwardTo := func(targetBase string) gin.HandlerFunc {
 		return func(c *gin.Context) {
+			// SECURITY: Block public access to internal-only service endpoints
+			if strings.Contains(c.Request.URL.Path, "/internal/") {
+				c.JSON(http.StatusForbidden, gin.H{"error": "access to internal endpoints is restricted"})
+				c.Abort()
+				return
+			}
 			utils.ForwardRequest(c, utils.ForwardOptions{
 				TargetBase: targetBase,
 			})
 		}
 	}
+
+	// ── Global Middlewares ────────────────────────────────────────────────────
+	r.Use(middlewares.CorrelationIDMiddleware())
 
 	// ── service targets ───────────────────────────────────────────────────────
 	bff := forwardTo("http://bff-service:8088/bff")
@@ -41,10 +52,6 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	admin := protected.Group("/")
 	admin.Use(middlewares.AdminRoleMiddleware())
 
-	// ── health ────────────────────────────────────────────────────────────────
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "OK", "service": "api-gateway"})
-	})
 
 	// ── Global Rate Limiter ───────────────────────────────────────────────────
 	if redisClient != nil {
