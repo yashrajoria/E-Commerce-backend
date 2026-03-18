@@ -238,43 +238,56 @@ func (s *ProductServiceDDB) CreateProduct(ctx context.Context, req ProductCreate
 	return product, nil
 }
 
-func (s *ProductServiceDDB) UpdateProduct(ctx context.Context, id uuid.UUID, updates map[string]interface{}) (int64, error) {
+func (s *ProductServiceDDB) UpdateProduct(ctx context.Context, id uuid.UUID, req ProductUpdateRequest) (int64, error) {
+	// Build map for DynamoDB update
+	updates := make(map[string]interface{})
+
+	if req.Name != nil {
+		updates["name"] = *req.Name
+	}
+	if req.Description != nil {
+		updates["description"] = *req.Description
+	}
+	if req.Brand != nil {
+		updates["brand"] = *req.Brand
+	}
+	if req.SKU != nil {
+		updates["sku"] = *req.SKU
+	}
+	if req.Price != nil {
+		updates["price"] = *req.Price
+	}
+	if req.Quantity != nil {
+		updates["quantity"] = *req.Quantity
+	}
+	if req.IsFeatured != nil {
+		updates["is_featured"] = *req.IsFeatured
+	}
+	if req.CategoryIDs != nil {
+		updates["category_ids"] = req.CategoryIDs
+	}
+	if req.CategoryPath != nil {
+		updates["category_path"] = req.CategoryPath
+	}
+	if req.Images != nil {
+		updates["images"] = req.Images
+	}
+
 	if len(updates) == 0 {
 		return 0, fmt.Errorf("no update fields provided")
 	}
 
-	// Map frontend camelCase keys to backend snake_case for DynamoDB
-	sanitized := make(map[string]interface{})
-	for k, v := range updates {
-		switch k {
-		case "id", "_id", "product_id", "created_at", "updated_at":
-			continue // Skip system fields
-		case "isFeatured":
-			sanitized["is_featured"] = v
-		case "categoryIds":
-			sanitized["category_ids"] = v
-		default:
-			sanitized[k] = v
-		}
-	}
-	sanitized["updated_at"] = time.Now().UTC().Format(time.RFC3339)
+	updates["updated_at"] = time.Now().UTC().Format(time.RFC3339)
 
-	err := s.productRepo.Update(ctx, id, sanitized)
+	err := s.productRepo.Update(ctx, id, updates)
 	if err != nil {
 		return 0, err
 	}
 
 	// Sync inventory if quantity is updated
-	if val, ok := sanitized["quantity"]; ok && s.inventoryClient != nil {
-		var newQty int
-		switch v := val.(type) {
-		case int:
-			newQty = v
-		case float64:
-			newQty = int(v)
-		}
+	if req.Quantity != nil && s.inventoryClient != nil {
 		// Fire-and-forget sync to ensure Inventory Service has the latest count
-		if err := s.inventoryClient.SetStock(ctx, id.String(), newQty); err != nil {
+		if err := s.inventoryClient.SetStock(ctx, id.String(), *req.Quantity); err != nil {
 			zap.L().Warn("Failed to sync inventory on product update",
 				zap.String("product_id", id.String()), zap.Error(err))
 		}

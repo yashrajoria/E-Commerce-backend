@@ -2,7 +2,6 @@ package utils
 
 import (
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -64,6 +63,7 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 		zap.String("method", c.Request.Method),
 		zap.String("url", targetURL),
 		zap.String("path", targetPath),
+		zap.String("correlation_id", c.GetString("CorrelationID")),
 	)
 
 	req, err := http.NewRequest(c.Request.Method, targetURL, c.Request.Body)
@@ -133,10 +133,7 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 		}
 
 		for _, val := range v {
-			if strings.ToLower(k) == "set-cookie" {
-				// Log Set-Cookie values coming from downstream for visibility
-				log.Printf("[GATEWAY][FORWARD] downstream Set-Cookie: %s", val)
-			}
+
 			c.Writer.Header().Add(k, val)
 		}
 	}

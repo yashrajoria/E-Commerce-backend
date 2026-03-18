@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis/v8"
 	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"go.uber.org/zap"
 )
@@ -104,11 +105,6 @@ func main() {
 		})
 	}
 
-	// Health check / Test route for CORS
-	// r.GET("/health", func(c *gin.Context) {
-	// 	c.JSON(http.StatusOK, gin.H{"status": "ok", "message": "API Gateway is running"})
-	// })
-
 	r.GET("/test-cors", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "CORS is working!"})
 	})
@@ -138,7 +134,15 @@ func main() {
 		}
 	})
 
-	routes.RegisterAllRoutes(r)
+	// Initialize Redis
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		redisURL = "redis:6379"
+	}
+	redisClient := redis.NewClient(&redis.Options{Addr: redisURL})
+	defer redisClient.Close()
+
+	routes.RegisterAllRoutes(r, redisClient)
 
 	// Server setup
 	port := os.Getenv("PORT")

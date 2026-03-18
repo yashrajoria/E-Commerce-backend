@@ -11,6 +11,7 @@ type CheckoutEvent struct {
 	Items          []CheckoutItem `json:"items"`
 	Timestamp      time.Time      `json:"timestamp"`
 	OrderID        string         `json:"order_id"`
+	CouponCode     string         `json:"coupon_code,omitempty"`
 }
 
 type CheckoutItem struct {

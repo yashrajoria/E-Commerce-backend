@@ -5,40 +5,41 @@ import (
 	"encoding/json"
 	"log"
 	"order-service/models"
+	repositories "order-service/repository"
 	"time"
 
 	"github.com/google/uuid"
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"github.com/yashrajoria/common/events"
-	"gorm.io/gorm"
 )
 
-// SQSCheckoutConsumer consumes checkout events from SQS and creates orders
 type SQSCheckoutConsumer struct {
 	sqsConsumer          *aws_pkg.SQSConsumer
 	sqsPublisher         *aws_pkg.SQSConsumer // For sending payment requests
-	db                   *gorm.DB
+	orderRepo            repositories.OrderRepository
 	inventoryClient      *InventoryClient
 	metricsClient        *aws_pkg.MetricsClient
 	productServiceURL    string // Base URL for the product service (internal endpoint)
 	snsClient            aws_pkg.SNSPublisher
 	notificationTopicArn string
+	promotionClient      *PromotionClient
 }
 
 // NewSQSCheckoutConsumer creates a new SQS-based checkout consumer
-func NewSQSCheckoutConsumer(sqsConsumer *aws_pkg.SQSConsumer, sqsPublisher *aws_pkg.SQSConsumer, db *gorm.DB, inventoryClient *InventoryClient, metricsClient *aws_pkg.MetricsClient, productServiceURL string, snsClient aws_pkg.SNSPublisher, notificationTopicArn string) *SQSCheckoutConsumer {
+func NewSQSCheckoutConsumer(sqsConsumer *aws_pkg.SQSConsumer, sqsPublisher *aws_pkg.SQSConsumer, orderRepo repositories.OrderRepository, inventoryClient *InventoryClient, metricsClient *aws_pkg.MetricsClient, productServiceURL string, snsClient aws_pkg.SNSPublisher, notificationTopicArn string, promotionClient *PromotionClient) *SQSCheckoutConsumer {
 	if productServiceURL == "" {
 		productServiceURL = "http://product-service:8082"
 	}
 	return &SQSCheckoutConsumer{
 		sqsConsumer:          sqsConsumer,
 		sqsPublisher:         sqsPublisher,
-		db:                   db,
+		orderRepo:            orderRepo,
 		inventoryClient:      inventoryClient,
 		metricsClient:        metricsClient,
 		productServiceURL:    productServiceURL,
 		snsClient:            snsClient,
 		notificationTopicArn: notificationTopicArn,
+		promotionClient:      promotionClient,
 	}
 }
 
@@ -89,8 +90,7 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 
 	// Idempotency: if CheckoutEvent contains an idempotency key, check DB for existing order
 	if evt.IdempotencyKey != "" {
-		var existing models.Order
-		if err := c.db.WithContext(ctx).Where("idempotency_key = ?", evt.IdempotencyKey).First(&existing).Error; err == nil {
+		if existing, err := c.orderRepo.FindByIdempotencyKey(ctx, evt.IdempotencyKey); err == nil {
 			log.Printf("⚠️  [IDEMPOTENCY] Order already exists for key=%s order_id=%s user=%s (skipping creation)", evt.IdempotencyKey, existing.ID.String(), existing.UserID.String())
 			return nil
 		}
@@ -147,6 +147,25 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		return nil // Don't retry - this is a data issue, not a transient error
 	}
 
+	// Process Coupon if present
+	discountAmount := 0
+	if evt.CouponCode != "" && c.promotionClient != nil {
+		resp, err := c.promotionClient.ValidateCoupon(ctx, evt.CouponCode, evt.UserID, float64(totalAmount))
+		if err != nil {
+			log.Printf("⚠️  [CHECKOUT] Coupon validation failed for code=%s: %v", evt.CouponCode, err)
+		} else if resp != nil && resp.Valid {
+			discountAmount = int(resp.DiscountAmount)
+			log.Printf("✅ [CHECKOUT] Coupon applied: code=%s discount=%d", evt.CouponCode, discountAmount)
+		} else {
+			log.Printf("⚠️  [CHECKOUT] Coupon invalid: code=%s", evt.CouponCode)
+		}
+	}
+
+	finalTotal := totalAmount - discountAmount
+	if finalTotal < 0 {
+		finalTotal = 0
+	}
+
 	// Reserve inventory via inventory service (non-fatal: proceed even on failure)
 	if c.inventoryClient != nil {
 		if err := c.inventoryClient.ReserveStock(ctx, orderIDUUID.String(), inventoryItems); err != nil {
@@ -162,35 +181,24 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 	}
 
 	order := models.Order{
-		UserID:      userUUID,
-		ID:          orderIDUUID,
-		Amount:      totalAmount,
-		Status:      "pending_payment",
-		OrderNumber: "ORD-" + time.Now().Format("20060102-150405") + "-" + uuid.New().String()[:8],
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		UserID:         userUUID,
+		ID:             orderIDUUID,
+		Amount:         finalTotal,
+		CouponCode:     evt.CouponCode,
+		DiscountAmount: discountAmount,
+		Status:         "pending_payment",
+		OrderNumber:    "ORD-" + time.Now().Format("20060102-150405") + "-" + uuid.New().String()[:8],
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		OrderItems:     orderItems,
 	}
 	if evt.IdempotencyKey != "" {
 		order.IdempotencyKey = &evt.IdempotencyKey
 	}
 
-	err = c.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&order).Error; err != nil {
-			log.Printf("❌ [CHECKOUT] Failed to create order record: %v", err)
-			return err
-		}
-		for i := range orderItems {
-			orderItems[i].OrderID = order.ID
-		}
-		if err := tx.Create(&orderItems).Error; err != nil {
-			log.Printf("❌ [CHECKOUT] Failed to create order items: %v", err)
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		log.Printf("❌ [CHECKOUT] DB transaction failed for user=%s order=%s (will retry): %v", evt.UserID, evt.OrderID, err)
-		return err // Retry the message
+	if err := c.orderRepo.Create(ctx, &order); err != nil {
+		log.Printf("❌ [CHECKOUT] Failed to create order record (will retry): %v", err)
+		return err
 	}
 
 	log.Printf("✅ order created id=%s user=%s items=%d total_amount=%d",
@@ -199,7 +207,7 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 	// Publish order_created notification with correct total and items
 	if c.snsClient != nil && c.notificationTopicArn != "" {
 		notifEvent := events.NewOrderCreatedEvent(
-			evt.UserID, evt.Email, "", "", order.ID.String(),
+			evt.UserID, evt.Email, "", "", order.ID.String(), order.CouponCode,
 			float64(order.Amount), notificationItems,
 		)
 		notifBytes, err := json.Marshal(notifEvent)

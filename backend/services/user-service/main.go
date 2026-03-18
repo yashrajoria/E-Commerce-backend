@@ -9,10 +9,13 @@ import (
 	"syscall"
 	"time"
 
+	"user-service/controllers"
 	"user-service/database"
 	"user-service/middleware"
 	"user-service/models"
+	"user-service/repository"
 	"user-service/routes"
+	"user-service/services"
 
 	"github.com/gin-gonic/gin"
 	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
@@ -79,15 +82,20 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "OK"})
 	})
 
+	// Initialize Repository, Service and Controller
+	userRepo := repository.NewGormUserRepository(database.DB)
+	userService := services.NewUserService(userRepo)
+	userController := controllers.NewUserController(userService)
+
 	// User routes with authentication middleware
 	userRoutes := r.Group("/users")
 	userRoutes.Use(middleware.AuthMiddleware())
-	routes.RegisterUserRoutes(userRoutes)
+	routes.RegisterUserRoutes(userRoutes, userController)
 
 	// Admin user routes — requires auth + admin role
 	adminUserRoutes := r.Group("/users")
 	adminUserRoutes.Use(middleware.AuthMiddleware(), middleware.AdminOnly())
-	routes.RegisterAdminRoutes(adminUserRoutes)
+	routes.RegisterAdminRoutes(adminUserRoutes, userController)
 
 	port := cfg.Port
 	if port == "" {
