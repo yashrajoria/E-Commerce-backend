@@ -503,8 +503,8 @@ services:
 
   agent-service:
     build:
-      context: .
-      dockerfile: services/agent-service/Dockerfile
+      context: ./services/agent-service
+      dockerfile: Dockerfile
     restart: unless-stopped
     volumes:
       - ./services/agent-service:/app
