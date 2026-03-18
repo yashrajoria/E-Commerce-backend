@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"payment-service/database"
 	"payment-service/middleware"
 	"payment-service/models"
 	"payment-service/repository"
@@ -192,7 +191,7 @@ func (pc *PaymentController) InitiatePayment(c *gin.Context) {
 		UpdatedAt:       time.Now(),
 	}
 
-	if err := database.DB.Create(&payment).Error; err != nil {
+	if err := pc.Repo.CreatePayment(c.Request.Context(), &payment); err != nil {
 		pc.Logger.Error("Failed to save payment", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save payment"})
 		return
