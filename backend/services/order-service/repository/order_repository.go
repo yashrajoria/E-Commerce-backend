@@ -13,9 +13,11 @@ import (
 type OrderRepository interface {
 	FindByUserID(ctx context.Context, userID uuid.UUID, page, limit int) ([]models.Order, int64, error)
 	FindAll(ctx context.Context, page, limit int) ([]models.Order, int64, error)
+	FindByID(ctx context.Context, orderID uuid.UUID) (*models.Order, error)
 	FindByIDAndUserID(ctx context.Context, order_id, userID uuid.UUID) (*models.Order, error)
 	Create(ctx context.Context, order *models.Order) error
 	Update(ctx context.Context, order *models.Order) error
+	FindByIdempotencyKey(ctx context.Context, key string) (*models.Order, error)
 	GetRevenueAnalytics(ctx context.Context) (map[string]interface{}, error)
 }
 
@@ -79,6 +81,14 @@ func (r *GormOrderRepository) FindAll(ctx context.Context, page, limit int) ([]m
 	return orders, total, nil
 }
 
+func (r *GormOrderRepository) FindByID(ctx context.Context, orderID uuid.UUID) (*models.Order, error) {
+	var order models.Order
+	if err := r.db.WithContext(ctx).Preload("OrderItems").Where("id = ?", orderID).First(&order).Error; err != nil {
+		return nil, err
+	}
+	return &order, nil
+}
+
 // FindByIDAndUserID retrieves a specific order for a user
 func (r *GormOrderRepository) FindByIDAndUserID(ctx context.Context, order_id, userID uuid.UUID) (*models.Order, error) {
 	var order models.Order
@@ -101,6 +111,15 @@ func (r *GormOrderRepository) Create(ctx context.Context, order *models.Order) e
 // Update updates an existing order
 func (r *GormOrderRepository) Update(ctx context.Context, order *models.Order) error {
 	return r.db.WithContext(ctx).Save(order).Error
+}
+
+func (r *GormOrderRepository) FindByIdempotencyKey(ctx context.Context, key string) (*models.Order, error) {
+	var order models.Order
+	err := r.db.WithContext(ctx).Where("idempotency_key = ?", key).First(&order).Error
+	if err != nil {
+		return nil, err
+	}
+	return &order, nil
 }
 
 func (r *GormOrderRepository) GetRevenueAnalytics(ctx context.Context) (map[string]interface{}, error) {
