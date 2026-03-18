@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"time"
 
-	"payment-service/database"
 	"payment-service/models"
 
 	"github.com/gin-gonic/gin"
@@ -73,8 +72,8 @@ func (pc *PaymentController) handleCheckoutCompleted(event stripe.Event, rawPayl
 		return
 	}
 
-	var payment models.Payment
-	if err := database.DB.Where("order_id = ?", orderUUID).First(&payment).Error; err != nil {
+	payment, err := pc.Repo.GetPaymentByOrderID(context.Background(), orderUUID)
+	if err != nil {
 		pc.Logger.Error("Payment not found for order_id",
 			zap.String("order_id", orderID),
 			zap.String("session_id", sess.ID),
@@ -105,7 +104,6 @@ func (pc *PaymentController) handleCheckoutCompleted(event stripe.Event, rawPayl
 		)
 		return
 	}
-
 	pc.publishPaymentEvent(models.PaymentEvent{
 		Type:      "payment_succeeded",
 		OrderID:   orderID,
@@ -116,7 +114,6 @@ func (pc *PaymentController) handleCheckoutCompleted(event stripe.Event, rawPayl
 		Timestamp: now.UTC(),
 	})
 }
-
 func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, status string, rawPayload []byte) {
 	var pi stripe.PaymentIntent
 	if err := json.Unmarshal(event.Data.Raw, &pi); err != nil {
@@ -125,8 +122,7 @@ func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, statu
 	}
 
 	// Primary lookup: direct PaymentIntent flow stores the PI ID as stripe_payment_id.
-	var payment models.Payment
-	err := database.DB.Where("stripe_payment_id = ?", pi.ID).First(&payment).Error
+	payment, err := pc.Repo.GetPaymentByStripeID(context.Background(), pi.ID)
 	if err != nil {
 		// Fallback: Checkout Session flow stores the Session ID, not the PI ID.
 		// Try resolving via order_id from the PaymentIntent metadata.
@@ -144,11 +140,12 @@ func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, statu
 				zap.String("order_id", orderIDStr), zap.Error(parseErr))
 			return
 		}
-		if err2 := database.DB.Where("order_id = ?", orderUUID).First(&payment).Error; err2 != nil {
+		payment, err = pc.Repo.GetPaymentByOrderID(context.Background(), orderUUID)
+		if err != nil {
 			pc.Logger.Error("Payment not found for PaymentIntent",
 				zap.String("payment_intent_id", pi.ID),
 				zap.String("order_id", orderIDStr),
-				zap.Error(err2),
+				zap.Error(err),
 			)
 			return
 		}

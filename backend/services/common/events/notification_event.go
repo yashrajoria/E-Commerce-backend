@@ -14,18 +14,19 @@ type NotificationItem struct {
 	Price       float64 `json:"price"`
 }
 
-func NewOrderCreatedEvent(userID, email, phone, name, orderID string, total float64, items []NotificationItem) NotificationEvent {
+func NewOrderCreatedEvent(userID, email, phone, name, orderID, couponCode string, total float64, items []NotificationItem) NotificationEvent {
 	return NotificationEvent{
 		EventType: "order_created",
 		UserID:    userID,
 		Recipient: email,
 		Data: map[string]interface{}{
-			"name":     name,
-			"email":    email,
-			"phone":    phone,
-			"order_id": orderID,
-			"total":    total,
-			"items":    items,
+			"name":        name,
+			"email":       email,
+			"phone":       phone,
+			"order_id":    orderID,
+			"total":       total,
+			"items":       items,
+			"coupon_code": couponCode,
 		},
 	}
 }

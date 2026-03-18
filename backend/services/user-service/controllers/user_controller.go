@@ -5,9 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"user-service/database"
 	"user-service/middleware"
-	"user-service/models"
 	"user-service/services"
 
 	"github.com/gin-gonic/gin"
@@ -15,21 +13,29 @@ import (
 	"gorm.io/gorm"
 )
 
+type UserController struct {
+	userService *services.UserService
+}
+
+func NewUserController(us *services.UserService) *UserController {
+	return &UserController{userService: us}
+}
+
 // GetProfile returns the logged-in user's profile
-func GetProfile(c *gin.Context) {
+func (ctrl *UserController) GetProfile(c *gin.Context) {
 	userID, err := middleware.GetUserID(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
-	var user models.User
-	err = database.DB.WithContext(c.Request.Context()).
-		Where("id = ? AND deleted_at IS NULL", userID).
-		First(&user).Error
-
+	user, err := ctrl.userService.GetUserProfile(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		}
 		return
 	}
 
@@ -43,7 +49,7 @@ func GetProfile(c *gin.Context) {
 	})
 }
 
-func UpdateProfile(c *gin.Context) {
+func (ctrl *UserController) UpdateProfile(c *gin.Context) {
 	userID, err := middleware.GetUserID(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
@@ -60,29 +66,13 @@ func UpdateProfile(c *gin.Context) {
 		return
 	}
 
-	var user models.User
-	err = database.DB.WithContext(c.Request.Context()).
-		Where("id = ? AND deleted_at IS NULL", userID).
-		First(&user).Error
-
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
-		return
-	} else if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
-		return
-	}
-
-	if req.Name != nil {
-		user.Name = *req.Name
-	}
-	if req.PhoneNumber != nil {
-		user.PhoneNumber = req.PhoneNumber
-	}
-
-	err = database.DB.WithContext(c.Request.Context()).Save(&user).Error
+	user, err := ctrl.userService.UpdateUserProfile(c.Request.Context(), userID, req.Name, req.PhoneNumber)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user"})
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user"})
+		}
 		return
 	}
 
@@ -96,7 +86,7 @@ func UpdateProfile(c *gin.Context) {
 	})
 }
 
-func ChangePassword(c *gin.Context) {
+func (ctrl *UserController) ChangePassword(c *gin.Context) {
 	userID, err := middleware.GetUserID(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
@@ -112,11 +102,7 @@ func ChangePassword(c *gin.Context) {
 		return
 	}
 
-	var user models.User
-	err = database.DB.WithContext(c.Request.Context()).
-		Where("id = ? AND deleted_at IS NULL", userID).
-		First(&user).Error
-
+	user, err := ctrl.userService.GetUserProfile(c.Request.Context(), userID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
@@ -139,9 +125,7 @@ func ChangePassword(c *gin.Context) {
 		return
 	}
 
-	user.Password = string(hashedPassword)
-	err = database.DB.WithContext(c.Request.Context()).Save(&user).Error
-	if err != nil {
+	if err := ctrl.userService.ChangeUserPassword(c.Request.Context(), userID, string(hashedPassword)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update password"})
 		return
 	}
@@ -151,7 +135,7 @@ func ChangePassword(c *gin.Context) {
 
 // GetAllUsers returns a paginated list of all users (admin only).
 // Passwords are excluded from the response.
-func GetAllUsers(c *gin.Context) {
+func (ctrl *UserController) GetAllUsers(c *gin.Context) {
 	pageStr := c.DefaultQuery("page", "1")
 	pageSizeStr := c.DefaultQuery("page_size", "20")
 
@@ -164,21 +148,8 @@ func GetAllUsers(c *gin.Context) {
 		pageSize = v
 	}
 
-	var total int64
-	if err := database.DB.WithContext(c.Request.Context()).
-		Model(&models.User{}).
-		Count(&total).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count users"})
-		return
-	}
-
-	var users []models.User
-	offset := (page - 1) * pageSize
-	if err := database.DB.WithContext(c.Request.Context()).
-		Order("created_at DESC").
-		Offset(offset).
-		Limit(pageSize).
-		Find(&users).Error; err != nil {
+	users, total, err := ctrl.userService.ListUsers(c.Request.Context(), page, pageSize)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch users"})
 		return
 	}

@@ -8,7 +8,8 @@ type CartItem struct {
 }
 
 type Cart struct {
-	UserID    string     `json:"user_id"`
-	Items     []CartItem `json:"items"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	UserID     string     `json:"user_id"`
+	Items      []CartItem `json:"items"`
+	CouponCode string     `json:"coupon_code,omitempty"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }

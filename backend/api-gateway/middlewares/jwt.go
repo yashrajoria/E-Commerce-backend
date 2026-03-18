@@ -2,7 +2,6 @@ package middlewares
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -10,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/joho/godotenv"
+	"go.uber.org/zap"
 )
 
 var (
@@ -36,19 +36,6 @@ func init() {
 // JWTMiddleware validates JWT access token and refreshes when needed
 func JWTMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Log incoming cookies and headers for debugging
-		if v, err := c.Cookie("__session"); err == nil {
-			log.Printf("[GATEWAY][JWT] cookie __session=%s", v)
-		} else {
-			log.Printf("[GATEWAY][JWT] cookie __session not present: %v", err)
-		}
-		if v, err := c.Cookie("token"); err == nil {
-			log.Printf("[GATEWAY][JWT] cookie token=%s", v)
-		}
-		if auth := c.GetHeader("Authorization"); auth != "" {
-			log.Printf("[GATEWAY][JWT] Authorization header=%s", auth)
-		}
-
 		// Accept either __session (set by auth service) or token cookie
 		tokenString, err := c.Cookie("__session")
 		if err != nil || tokenString == "" {
@@ -63,7 +50,7 @@ func JWTMiddleware() gin.HandlerFunc {
 		// validate final access token
 		claims, err := parseToken(tokenString, "access")
 		if err != nil {
-			log.Printf("[GATEWAY][JWT] token parse error: %v", err)
+			logger.Log.Warn("token parse error", zap.Error(err))
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
 			c.Abort()
 			return
@@ -74,7 +61,10 @@ func JWTMiddleware() gin.HandlerFunc {
 		role, _ := claims["role"].(string)
 
 		// log claims for debugging
-		log.Printf("[GATEWAY][JWT] token claims: %+v", claims)
+		logger.Log.Debug("jwt claims parsed",
+			zap.String("user_id", userID),
+			zap.String("role", role),
+		)
 
 		c.Set("user_id", userID)
 		c.Set("email", email)

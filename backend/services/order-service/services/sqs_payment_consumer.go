@@ -6,17 +6,18 @@ import (
 	"fmt"
 	"log"
 	"order-service/models"
+	repositories "order-service/repository"
 	"time"
+	"github.com/google/uuid"
 
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"github.com/yashrajoria/common/events"
-	"gorm.io/gorm"
 )
 
 // SQSPaymentConsumer consumes payment events from SQS and updates order status
 type SQSPaymentConsumer struct {
 	sqsConsumer          *aws_pkg.SQSConsumer
-	db                   *gorm.DB
+	orderRepo            repositories.OrderRepository
 	inventoryClient      *InventoryClient
 	metricsClient        *aws_pkg.MetricsClient
 	snsClient            aws_pkg.SNSPublisher
@@ -25,10 +26,10 @@ type SQSPaymentConsumer struct {
 }
 
 // NewSQSPaymentConsumer creates a new SQS-based payment event consumer
-func NewSQSPaymentConsumer(sqsConsumer *aws_pkg.SQSConsumer, db *gorm.DB, inventoryClient *InventoryClient, metricsClient *aws_pkg.MetricsClient, snsClient aws_pkg.SNSPublisher, notificationTopicArn string, productServiceURL string) *SQSPaymentConsumer {
+func NewSQSPaymentConsumer(sqsConsumer *aws_pkg.SQSConsumer, orderRepo repositories.OrderRepository, inventoryClient *InventoryClient, metricsClient *aws_pkg.MetricsClient, snsClient aws_pkg.SNSPublisher, notificationTopicArn string, productServiceURL string) *SQSPaymentConsumer {
 	return &SQSPaymentConsumer{
 		sqsConsumer:          sqsConsumer,
-		db:                   db,
+		orderRepo:            orderRepo,
 		inventoryClient:      inventoryClient,
 		metricsClient:        metricsClient,
 		snsClient:            snsClient,
@@ -76,7 +77,7 @@ func (c *SQSPaymentConsumer) handleMessage(ctx context.Context, body string) err
 	now := time.Now()
 	switch evt.Type {
 	case "payment_succeeded":
-		c.updateOrderStatusWithTime(evt.OrderID, "paid", &now, nil)
+		c.updateOrderStatusWithTime(ctx, evt.OrderID, "paid", &now, nil)
 		c.confirmInventory(ctx, evt.OrderID)
 		// Send order_confirmed notification with product details
 		c.publishOrderConfirmedNotification(ctx, evt)
@@ -91,7 +92,7 @@ func (c *SQSPaymentConsumer) handleMessage(ctx context.Context, body string) err
 			}()
 		}
 	case "payment_failed":
-		c.updateOrderStatusWithTime(evt.OrderID, "payment_failed", nil, &now)
+		c.updateOrderStatusWithTime(ctx, evt.OrderID, "payment_failed", nil, &now)
 		c.releaseInventory(ctx, evt.OrderID)
 		// Emit metrics
 		if c.metricsClient != nil && c.metricsClient.IsEnabled() {
@@ -106,7 +107,7 @@ func (c *SQSPaymentConsumer) handleMessage(ctx context.Context, body string) err
 	case "checkout_session_created":
 		log.Printf("ℹ️  [OrderService][SQSPaymentConsumer] checkout session created for order=%s", evt.OrderID)
 	case "checkout_session_failed":
-		c.updateOrderStatusWithTime(evt.OrderID, "payment_failed", nil, &now)
+		c.updateOrderStatusWithTime(ctx, evt.OrderID, "payment_failed", nil, &now)
 		c.releaseInventory(ctx, evt.OrderID)
 	default:
 		log.Printf("⚠️  [OrderService][SQSPaymentConsumer] unknown event type: %s", evt.Type)
@@ -115,40 +116,44 @@ func (c *SQSPaymentConsumer) handleMessage(ctx context.Context, body string) err
 	return nil
 }
 
-func (c *SQSPaymentConsumer) updateOrderStatusWithTime(orderID, status string, completedAt, canceledAt *time.Time) {
-	updateFields := map[string]interface{}{
-		"status": status,
-	}
-	if completedAt != nil {
-		updateFields["completed_at"] = *completedAt
-	}
-	if canceledAt != nil {
-		updateFields["canceled_at"] = *canceledAt
+func (c *SQSPaymentConsumer) updateOrderStatusWithTime(ctx context.Context, orderID string, status string, completedAt, canceledAt *time.Time) {
+	orderUUID, err := uuid.Parse(orderID)
+	if err != nil {
+		log.Printf("❌ [OrderService][SQSPaymentConsumer] invalid order ID: %s", orderID)
+		return
 	}
 
-	err := c.db.Transaction(func(tx *gorm.DB) error {
-		var order models.Order
-		if err := tx.First(&order, "id = ?", orderID).Error; err != nil {
-			return err
-		}
-		if order.Status == status {
-			needsUpdate := false
-			if completedAt != nil && order.CompletedAt == nil {
-				updateFields["completed_at"] = *completedAt
-				needsUpdate = true
-			}
-			if canceledAt != nil && order.CanceledAt == nil {
-				updateFields["canceled_at"] = *canceledAt
-				needsUpdate = true
-			}
-			if !needsUpdate {
-				log.Printf("ℹ️  [OrderService][SQSPaymentConsumer] order=%s already %s; skipping", orderID, status)
-				return nil
-			}
-		}
-		return tx.Model(&order).Updates(updateFields).Error
-	})
+	order, err := c.orderRepo.FindByID(ctx, orderUUID)
 	if err != nil {
+		log.Printf("❌ [OrderService][SQSPaymentConsumer] failed to find order=%s: %v", orderID, err)
+		return
+	}
+
+	if order.Status == status {
+		needsUpdate := false
+		if completedAt != nil && order.CompletedAt == nil {
+			order.CompletedAt = completedAt
+			needsUpdate = true
+		}
+		if canceledAt != nil && order.CanceledAt == nil {
+			order.CanceledAt = canceledAt
+			needsUpdate = true
+		}
+		if !needsUpdate {
+			log.Printf("ℹ️  [OrderService][SQSPaymentConsumer] order=%s already %s; skipping", orderID, status)
+			return
+		}
+	}
+
+	order.Status = status
+	if completedAt != nil {
+		order.CompletedAt = completedAt
+	}
+	if canceledAt != nil {
+		order.CanceledAt = canceledAt
+	}
+
+	if err := c.orderRepo.Update(ctx, order); err != nil {
 		log.Printf("❌ [OrderService][SQSPaymentConsumer] failed to update order=%s: %v", orderID, err)
 	} else {
 		log.Printf("✅ [OrderService][SQSPaymentConsumer] order=%s updated to %s", orderID, status)
@@ -156,13 +161,17 @@ func (c *SQSPaymentConsumer) updateOrderStatusWithTime(orderID, status string, c
 }
 
 // loadOrderItems fetches order items from the DB for inventory operations
-func (c *SQSPaymentConsumer) loadOrderItems(orderID string) ([]ReserveItem, error) {
-	var items []models.OrderItem
-	if err := c.db.Where("order_id = ?", orderID).Find(&items).Error; err != nil {
+func (c *SQSPaymentConsumer) loadOrderItems(ctx context.Context, orderID string) ([]ReserveItem, error) {
+	orderUUID, err := uuid.Parse(orderID)
+	if err != nil {
 		return nil, err
 	}
-	result := make([]ReserveItem, len(items))
-	for i, it := range items {
+	order, err := c.orderRepo.FindByID(ctx, orderUUID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]ReserveItem, len(order.OrderItems))
+	for i, it := range order.OrderItems {
 		result[i] = ReserveItem{
 			ProductID: it.ProductID.String(),
 			Quantity:  it.Quantity,
@@ -173,7 +182,7 @@ func (c *SQSPaymentConsumer) loadOrderItems(orderID string) ([]ReserveItem, erro
 
 // confirmInventory confirms reserved stock after successful payment
 func (c *SQSPaymentConsumer) confirmInventory(ctx context.Context, orderID string) {
-	items, err := c.loadOrderItems(orderID)
+	items, err := c.loadOrderItems(ctx, orderID)
 	if err != nil {
 		log.Printf("❌ [OrderService][SQSPaymentConsumer] failed to load order items for confirm: order=%s err=%v", orderID, err)
 		return
@@ -190,7 +199,7 @@ func (c *SQSPaymentConsumer) confirmInventory(ctx context.Context, orderID strin
 
 // releaseInventory releases reserved stock after payment failure
 func (c *SQSPaymentConsumer) releaseInventory(ctx context.Context, orderID string) {
-	items, err := c.loadOrderItems(orderID)
+	items, err := c.loadOrderItems(ctx, orderID)
 	if err != nil {
 		log.Printf("❌ [OrderService][SQSPaymentConsumer] failed to load order items for release: order=%s err=%v", orderID, err)
 		return
@@ -214,8 +223,13 @@ func (c *SQSPaymentConsumer) publishOrderConfirmedNotification(ctx context.Conte
 	}
 
 	// Load the order to get total amount and user info
-	var order models.Order
-	if err := c.db.Preload("OrderItems").First(&order, "id = ?", evt.OrderID).Error; err != nil {
+	orderUUID, err := uuid.Parse(evt.OrderID)
+	if err != nil {
+		log.Printf("⚠️ [OrderService][SQSPaymentConsumer] invalid order ID in notification: %s", evt.OrderID)
+		return
+	}
+	order, err := c.orderRepo.FindByID(ctx, orderUUID)
+	if err != nil {
 		log.Printf("⚠️ [OrderService][SQSPaymentConsumer] failed to load order for notification: order=%s err=%v", evt.OrderID, err)
 		return
 	}

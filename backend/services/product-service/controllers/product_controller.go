@@ -193,21 +193,16 @@ func (ctrl *ProductController) UpdateProduct(c *gin.Context) {
 		return
 	}
 
-	var updates map[string]interface{}
-	if err := c.ShouldBindJSON(&updates); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON body"})
-		return
-	}
-
-	if len(updates) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No fields to update"})
+	var req services.ProductUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON body", "details": err.Error()})
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), ctrl.config.ContextTimeout)
 	defer cancel()
 
-	modifiedCount, err := ctrl.productService.UpdateProduct(ctx, productID, updates)
+	modifiedCount, err := ctrl.productService.UpdateProduct(ctx, productID, req)
 	if err != nil {
 		zap.L().Error("Service failed to update product", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update product"})

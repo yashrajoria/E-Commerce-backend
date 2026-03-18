@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"promotion-service/consumer"
 	"promotion-service/controllers"
 	"promotion-service/database"
 	"promotion-service/models"
@@ -122,6 +123,18 @@ func main() {
 	metricsClient, err = aws_pkg.NewMetricsClient(context.Background())
 	if err != nil {
 		logger.Warn("CloudWatch metrics client init failed (non-fatal)", zap.Error(err))
+	}
+
+	// --- SQS Consumer ---
+	if cfg.OrderCreatedQueueURL != "" {
+		orderConsumer := consumer.NewOrderCreatedConsumer(
+			aws_pkg.NewSQSConsumer(awsCfg, cfg.OrderCreatedQueueURL),
+			couponService,
+		)
+		go orderConsumer.Start(context.Background())
+		logger.Info("Started SQS order_created consumer", zap.String("queue", cfg.OrderCreatedQueueURL))
+	} else {
+		logger.Warn("OrderCreated consumer not started - missing queue URL")
 	}
 
 	// --- HTTP server ---

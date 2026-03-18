@@ -6,7 +6,6 @@ import (
 	"os"
 	"time"
 
-	"payment-service/database"
 	"payment-service/models"
 
 	"github.com/gin-gonic/gin"
@@ -36,24 +35,24 @@ func (pc *PaymentController) respondError(c *gin.Context, status int, msg string
 // updated_at is always set automatically.
 func (pc *PaymentController) updatePaymentStatus(orderID uuid.UUID, updates map[string]interface{}) error {
 	updates["updated_at"] = time.Now()
-	return database.DB.Model(&models.Payment{}).Where("order_id = ?", orderID).Updates(updates).Error
+	return pc.Repo.Update(context.Background(), orderID, updates)
 }
 
 // setStripePaymentID safely assigns a Stripe session or intent ID to a payment record,
 // guarding against conflicts where the same Stripe ID is already assigned to another order.
 func (pc *PaymentController) setStripePaymentID(orderID uuid.UUID, stripeID string) error {
-	var existing models.Payment
-	err := database.DB.Where("stripe_payment_id = ?", stripeID).First(&existing).Error
+	ctx := context.Background()
+	existing, err := pc.Repo.GetPaymentByStripeID(ctx, stripeID)
+
+	if err != nil && err != gorm.ErrRecordNotFound {
+		return err
+	}
 
 	if err == gorm.ErrRecordNotFound {
 		// No conflict — safe to assign.
-		return database.DB.Model(&models.Payment{}).
-			Where("order_id = ?", orderID).
-			Update("stripe_payment_id", stripeID).Error
-	}
-
-	if err != nil {
-		return err
+		return pc.Repo.Update(ctx, orderID, map[string]interface{}{
+			"stripe_payment_id": stripeID,
+		})
 	}
 
 	// A record with this stripe_payment_id already exists.
@@ -66,9 +65,9 @@ func (pc *PaymentController) setStripePaymentID(orderID uuid.UUID, stripeID stri
 	}
 
 	// Same record — idempotent re-assignment.
-	return database.DB.Model(&models.Payment{}).
-		Where("order_id = ?", orderID).
-		Update("stripe_payment_id", stripeID).Error
+	return pc.Repo.Update(ctx, orderID, map[string]interface{}{
+		"stripe_payment_id": stripeID,
+	})
 }
 
 // publishPaymentEvent marshals a PaymentEvent and publishes it to SNS.

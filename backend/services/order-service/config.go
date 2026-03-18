@@ -27,6 +27,7 @@ type Config struct {
 	OrderSNSTopicARN        string
 	PaymentSNSTopicARN      string
 	NotificationSNSTopicARN string
+	PromotionServiceURL     string
 }
 
 func LoadConfig() (*Config, error) {
@@ -41,6 +42,7 @@ func LoadConfig() (*Config, error) {
 		PostgresTimeZone:        getEnv("POSTGRES_TIMEZONE", "Asia/Kolkata"),
 		ProductServiceURL:       getEnv("PRODUCT_SERVICE_URL", "http://product-service:8082"),
 		InventoryServiceURL:     getEnv("INVENTORY_SERVICE_URL", "http://inventory-service:8084"),
+		PromotionServiceURL:     getEnv("PROMOTION_SERVICE_URL", "http://promotion-service:8090"),
 		CheckoutQueueURL:        os.Getenv("CHECKOUT_QUEUE_URL"),
 		PaymentEventsQueueURL:   os.Getenv("PAYMENT_EVENTS_QUEUE_URL"),
 		PaymentRequestQueueURL:  os.Getenv("PAYMENT_REQUEST_QUEUE_URL"),

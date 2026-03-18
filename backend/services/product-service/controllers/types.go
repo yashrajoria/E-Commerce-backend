@@ -28,7 +28,7 @@ type ProductServiceAPI interface {
 	GetProduct(ctx context.Context, id uuid.UUID) (*models.Product, error)
 	ListProducts(ctx context.Context, params services.ListProductsParams) ([]*models.Product, int64, error)
 	CreateProduct(ctx context.Context, req services.ProductCreateRequest, images []*multipart.FileHeader) (*models.Product, error)
-	UpdateProduct(ctx context.Context, id uuid.UUID, updates map[string]interface{}) (int64, error)
+	UpdateProduct(ctx context.Context, id uuid.UUID, updates services.ProductUpdateRequest) (int64, error)
 	DeleteProduct(ctx context.Context, id uuid.UUID) (int64, error)
 	// BulkDeleteProducts supports deleting multiple products by IDs, by category IDs, or all products
 	BulkDeleteProducts(ctx context.Context, req services.BulkDeleteRequest) (int64, error)

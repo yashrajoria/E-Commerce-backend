@@ -1,26 +1,38 @@
 package routes
 
 import (
+	"net/http"
+	"strings"
+
 	"api-gateway/middlewares"
 	"api-gateway/utils"
-	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis/v8"
 )
 
-func RegisterAllRoutes(r *gin.Engine) {
+func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 
 	// ── helper defined FIRST before any use ──────────────────────────────────
 	forwardTo := func(targetBase string) gin.HandlerFunc {
 		return func(c *gin.Context) {
+			// SECURITY: Block public access to internal-only service endpoints
+			if strings.Contains(c.Request.URL.Path, "/internal/") {
+				c.JSON(http.StatusForbidden, gin.H{"error": "access to internal endpoints is restricted"})
+				c.Abort()
+				return
+			}
 			utils.ForwardRequest(c, utils.ForwardOptions{
 				TargetBase: targetBase,
 			})
 		}
 	}
 
+	// ── Global Middlewares ────────────────────────────────────────────────────
+	r.Use(middlewares.CorrelationIDMiddleware())
+
 	// ── service targets ───────────────────────────────────────────────────────
-	bff := forwardTo("http://bff-service:8088/bff")
+	bff := forwardTo("http://bff-service:8088/bff/admin")
 	products := forwardTo("http://product-service:8082/products")
 	categories := forwardTo("http://product-service:8082/categories")
 	users := forwardTo("http://user-service:8085/users")
@@ -40,10 +52,10 @@ func RegisterAllRoutes(r *gin.Engine) {
 	admin := protected.Group("/")
 	admin.Use(middlewares.AdminRoleMiddleware())
 
-	// ── health ────────────────────────────────────────────────────────────────
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "OK", "service": "api-gateway"})
-	})
+	// ── Global Rate Limiter ───────────────────────────────────────────────────
+	if redisClient != nil {
+		r.Use(middlewares.GlobalRateLimiter(redisClient))
+	}
 
 	// =========================================================================
 	// PUBLIC ROUTES — no authentication required
@@ -56,11 +68,17 @@ func RegisterAllRoutes(r *gin.Engine) {
 	// Stripe webhook — Stripe calls this directly, no auth
 	public.POST("/stripe/webhook", forwardTo("http://payment-service:8087/stripe/webhook"))
 
-	// Auth — public actions only
-	public.POST("/auth/login", authProxy)
-	public.POST("/auth/register", authProxy)
+	// Auth — sensitive public actions (strict rate limiting)
+	authStrict := public.Group("/auth")
+	if redisClient != nil {
+		authStrict.Use(middlewares.StrictRateLimiter(redisClient))
+	}
+	authStrict.POST("/login", authProxy)
+	authStrict.POST("/register", authProxy)
+	authStrict.POST("/resend-verification", authProxy)
+
+	// Auth — other public actions (normal global limits)
 	public.POST("/auth/verify-email", authProxy)
-	public.POST("/auth/resend-verification", authProxy)
 
 	// Products — read only, public browsing
 	public.GET("/products", products)
@@ -70,13 +88,41 @@ func RegisterAllRoutes(r *gin.Engine) {
 	public.GET("/categories", categories)
 	public.GET("/categories/*any", categories)
 
-	// BFF — all methods public, BFF handles its own internal auth
-	public.GET("/bff", bff)
-	public.GET("/bff/*any", bff)
-	public.POST("/bff", bff)
-	public.POST("/bff/*any", bff)
-	public.PUT("/bff/*any", bff)
-	public.DELETE("/bff/*any", bff)
+	// BFF — PUBLIC (no auth required)
+	bffPublic := public.Group("/bff")
+	bffPublic.POST("/auth/register", bff)
+	bffPublic.POST("/auth/login", bff)
+	bffPublic.POST("/auth/verify-email", bff)
+	bffPublic.POST("/auth/refresh", bff)
+	bffPublic.GET("/products", bff)
+	bffPublic.GET("/products/*any", bff)
+	bffPublic.GET("/categories", bff)
+	bffPublic.GET("/categories/*any", bff)
+	bffPublic.GET("/home", bff)
+
+	// BFF — PROTECTED (JWT required)
+	bffProtected := protected.Group("/bff")
+	bffProtected.Use(middlewares.JWTMiddleware())
+	bffProtected.POST("/auth/logout", bff)
+	bffProtected.GET("/auth/status", bff)
+	bffProtected.GET("/cart", bff)
+	bffProtected.POST("/cart/*any", bff)
+	bffProtected.DELETE("/cart/*any", bff)
+	bffProtected.POST("/checkout", bff)
+	bffProtected.GET("/orders", bff)
+	bffProtected.GET("/orders/*any", bff)
+	bffProtected.GET("/profile", bff)
+	bffProtected.PUT("/users/profile", bff)
+	bffProtected.POST("/users/change-password", bff)
+	bffProtected.GET("/payment/*any", bff)
+	bffProtected.POST("/payment/*any", bff)
+
+	// BFF — ADMIN (JWT + Admin Role required)
+	bffAdmin := protected.Group("/bff/admin")
+	bffAdmin.Use(middlewares.JWTMiddleware())
+	bffAdmin.Use(middlewares.AdminRoleMiddleware())
+	bffAdmin.Any("", bff)
+	bffAdmin.Any("/*any", bff)
 
 	// =========================================================================
 	// PROTECTED ROUTES — JWT required

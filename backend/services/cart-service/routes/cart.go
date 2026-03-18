@@ -27,6 +27,7 @@ func RegisterCartRoutes(
 		api.POST("/add", controller.AddItems)
 		api.DELETE("/remove/:product_id", controller.RemoveItem)
 		api.DELETE("/clear", controller.ClearCart)
+		api.POST("/coupon", controller.ApplyCoupon)
 		api.POST("/checkout", controller.Checkout)
 	}
 }
