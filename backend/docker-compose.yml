@@ -517,12 +517,12 @@ services:
       - LOG_LEVEL=info
       - HOST=0.0.0.0
       - PORT=8000
-      - BFF_BASE_URL=http://bff-service:8088
+      - BFF_BASE_URL=http://api-gateway:8080
       - BFF_TIMEOUT=15
       - LLM_TIMEOUT=30
       - CONCURRENT_TOOL_LIMIT=10
     depends_on:
-      - bff-service
+      - api-gateway
     networks:
       - ecommerce-network
 
