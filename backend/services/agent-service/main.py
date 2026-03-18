@@ -74,6 +74,8 @@ async def agent_query(request: AgentQueryRequest, req: Request) -> AgentResponse
     """
     correlation_id = req.state.correlation_id
     auth_header = req.headers.get("authorization")
+    user_id = req.headers.get("x-user-id")
+    user_role = req.headers.get("x-user-role")
     
     logger.info(
         f"Received agent query | correlation_id={correlation_id} | "
@@ -109,6 +111,8 @@ async def agent_query(request: AgentQueryRequest, req: Request) -> AgentResponse
                 params=call.params,
                 auth_header=auth_header,
                 correlation_id=correlation_id,
+                user_id=user_id,
+                user_role=user_role,
             )
             for call in parsed_calls
         ]

@@ -20,8 +20,8 @@ class Settings:
     PORT: int = int(os.getenv("PORT", "8000"))
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "info")
     
-    # BFF service configuration
-    BFF_BASE_URL: str = os.getenv("BFF_BASE_URL", "http://bff-service:8080")
+    # Upstream gateway/BFF configuration
+    BFF_BASE_URL: str = os.getenv("BFF_BASE_URL", "http://api-gateway:8080")
     BFF_TIMEOUT: float = float(os.getenv("BFF_TIMEOUT", "15.0"))
     
     # LLM service configuration (for future use)

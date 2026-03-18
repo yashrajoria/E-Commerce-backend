@@ -6,13 +6,14 @@ Uses httpx.AsyncClient to make concurrent requests with auth and tracing headers
 import httpx
 import logging
 from typing import Dict, Any, Optional
-from datetime import datetime
+
+from config import settings
 
 logger = logging.getLogger(__name__)
 
 # BFF service configuration
-BFF_BASE_URL = "http://bff-service:8080"
-REQUEST_TIMEOUT = 15.0
+BFF_BASE_URL = settings.BFF_BASE_URL
+REQUEST_TIMEOUT = settings.BFF_TIMEOUT
 
 # Singleton HTTP client for connection pooling
 _http_client: Optional[httpx.AsyncClient] = None
@@ -48,6 +49,8 @@ async def execute_tool(
     params: Dict[str, Any],
     auth_header: Optional[str] = None,
     correlation_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    user_role: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Route tool calls to the appropriate handler.
@@ -79,7 +82,7 @@ async def execute_tool(
         }
     
     try:
-        result = await handler(params, auth_header, correlation_id)
+        result = await handler(params, auth_header, correlation_id, user_id, user_role)
         return {
             "tool": tool_name,
             "success": True,
@@ -100,6 +103,8 @@ async def get_sales(
     params: Dict[str, Any],
     auth_header: Optional[str] = None,
     correlation_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    user_role: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Fetch sales data from the BFF.
@@ -107,14 +112,11 @@ async def get_sales(
     Params expected:
         - range: String like "7d", "30d", "1y"
     """
-    range_val = params.get("range", "7d")
-    
-    headers = _build_headers(auth_header, correlation_id)
+    headers = _build_headers(auth_header, correlation_id, user_id, user_role)
     client = await get_http_client()
     
     response = await client.get(
-        f"{BFF_BASE_URL}/admin/sales",
-        params={"range": range_val},
+        f"{BFF_BASE_URL}/bff/admin/reports/sales",
         headers=headers,
     )
     response.raise_for_status()
@@ -125,6 +127,8 @@ async def get_top_products(
     params: Dict[str, Any],
     auth_header: Optional[str] = None,
     correlation_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    user_role: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Fetch top-selling products from the BFF.
@@ -133,25 +137,32 @@ async def get_top_products(
         - range: String like "7d", "30d", "1y"
         - limit: Number of products to return (default: 5)
     """
-    range_val = params.get("range", "7d")
     limit = params.get("limit", 5)
     
-    headers = _build_headers(auth_header, correlation_id)
+    headers = _build_headers(auth_header, correlation_id, user_id, user_role)
     client = await get_http_client()
     
+    # Current BFF exposes top products via aggregated admin dashboard payload.
     response = await client.get(
-        f"{BFF_BASE_URL}/admin/top-products",
-        params={"range": range_val, "limit": limit},
+        f"{BFF_BASE_URL}/bff/admin/dashboard",
         headers=headers,
     )
     response.raise_for_status()
-    return response.json()
+    payload = response.json()
+    data = payload.get("data", payload)
+    top_products = data.get("topProducts", []) if isinstance(data, dict) else []
+    return {
+        "limit": limit,
+        "products": top_products[:limit],
+    }
 
 
 async def get_low_stock(
     params: Dict[str, Any],
     auth_header: Optional[str] = None,
     correlation_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    user_role: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Fetch low-stock inventory items from the BFF.
@@ -159,44 +170,82 @@ async def get_low_stock(
     Params expected:
         - threshold: Integer threshold for low stock
     """
-    threshold = params.get("threshold", 10)
-    
-    headers = _build_headers(auth_header, correlation_id)
+    threshold = int(params.get("threshold", 10))
+
+    headers = _build_headers(auth_header, correlation_id, user_id, user_role)
     client = await get_http_client()
     
     response = await client.get(
-        f"{BFF_BASE_URL}/admin/low-stock",
-        params={"threshold": threshold},
+        f"{BFF_BASE_URL}/bff/admin/reports/inventory",
         headers=headers,
     )
     response.raise_for_status()
-    return response.json()
+    payload = response.json()
+    data = payload.get("data", payload)
+
+    items = []
+    if isinstance(data, dict):
+        raw_items = data.get("items") or data.get("inventory") or []
+        if isinstance(raw_items, list):
+            for item in raw_items:
+                if not isinstance(item, dict):
+                    continue
+                stock = item.get("current_stock", item.get("stock", item.get("quantity")))
+                if isinstance(stock, int) and stock <= threshold:
+                    items.append(item)
+
+    return {
+        "threshold": threshold,
+        "items": items,
+        "raw": data,
+    }
 
 
 async def get_failed_payments(
     params: Dict[str, Any],
     auth_header: Optional[str] = None,
     correlation_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    user_role: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Fetch failed payment transactions from the BFF.
     
     No parameters required.
     """
-    headers = _build_headers(auth_header, correlation_id)
+    headers = _build_headers(auth_header, correlation_id, user_id, user_role)
     client = await get_http_client()
     
+    # Current BFF does not expose a dedicated failed-payments admin endpoint.
+    # Derive likely failed payment events from dashboard recent activity.
     response = await client.get(
-        f"{BFF_BASE_URL}/admin/failed-payments",
+        f"{BFF_BASE_URL}/bff/admin/dashboard",
         headers=headers,
     )
     response.raise_for_status()
-    return response.json()
+    payload = response.json()
+    data = payload.get("data", payload)
+    activities = data.get("recentActivity", []) if isinstance(data, dict) else []
+
+    failed = []
+    for activity in activities:
+        if not isinstance(activity, dict):
+            continue
+        text = f"{activity.get('type', '')} {activity.get('description', '')}".lower()
+        if "payment" in text and ("fail" in text or "declin" in text or activity.get("variant") == "error"):
+            failed.append(activity)
+
+    return {
+        "count": len(failed),
+        "payments": failed,
+    }
 
 
 def _build_headers(
     auth_header: Optional[str] = None,
     correlation_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    user_role: Optional[str] = None,
 ) -> Dict[str, str]:
     """
     Build HTTP headers for proxying auth and tracing information.
@@ -212,5 +261,11 @@ def _build_headers(
     
     if correlation_id:
         headers["X-Correlation-ID"] = correlation_id
+
+    if user_id:
+        headers["X-User-ID"] = user_id
+
+    if user_role:
+        headers["X-User-Role"] = user_role
     
     return headers
