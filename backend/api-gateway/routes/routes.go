@@ -1,8 +1,8 @@
 package routes
 
 import (
-	"strings"
 	"net/http"
+	"strings"
 
 	"api-gateway/middlewares"
 	"api-gateway/utils"
@@ -32,7 +32,7 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	r.Use(middlewares.CorrelationIDMiddleware())
 
 	// ── service targets ───────────────────────────────────────────────────────
-	bff := forwardTo("http://bff-service:8088/bff")
+	bff := forwardTo("http://bff-service:8088/bff/admin")
 	products := forwardTo("http://product-service:8082/products")
 	categories := forwardTo("http://product-service:8082/categories")
 	users := forwardTo("http://user-service:8085/users")
@@ -51,7 +51,6 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	protected.Use(middlewares.JWTMiddleware())
 	admin := protected.Group("/")
 	admin.Use(middlewares.AdminRoleMiddleware())
-
 
 	// ── Global Rate Limiter ───────────────────────────────────────────────────
 	if redisClient != nil {
