@@ -1,7 +1,9 @@
 package middlewares
 
 import (
+	"api-gateway/logger"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strings"
