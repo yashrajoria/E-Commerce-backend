@@ -109,33 +109,57 @@ NOTIFICATION_TOPIC_ARN=$(retry create_topic_if_missing "notification-events")
 # --------------------------------------------------
 create_queue_with_dlq() {
     local queue_name="$1"
-    local dlq_name="${queue_name}-dlq"
     local max_receive_count="${2:-3}"
+    local dlq_name="${queue_name}-dlq"
 
-    # 1. Create DLQ
-    echo "Creating DLQ: $dlq_name"
-    awslocal sqs create-queue --queue-name "$dlq_name" >/dev/null
+    # --------------------------------------------------
+    # 1️⃣ Create DLQ if missing
+    # --------------------------------------------------
+    if ! awslocal sqs get-queue-url --queue-name "$dlq_name" >/dev/null 2>&1; then
+        echo "Creating DLQ: $dlq_name"
+        retry awslocal sqs create-queue --queue-name "$dlq_name" >/dev/null
+    else
+        echo "DLQ '$dlq_name' already exists"
+    fi
 
-    # 2. Get DLQ ARN
+    # Get DLQ ARN
+    local dlq_url
+    dlq_url=$(awslocal sqs get-queue-url --queue-name "$dlq_name" --query "QueueUrl" --output text)
     local dlq_arn
     dlq_arn=$(awslocal sqs get-queue-attributes \
-        --queue-url "http://localstack:4566/000000000000/$dlq_name" \
+        --queue-url "$dlq_url" \
         --attribute-names QueueArn \
         --query "Attributes.QueueArn" \
         --output text)
 
-    # 3. Create Main Queue with Redrive Policy
-    echo "Creating Main Queue: $queue_name with DLQ: $dlq_name"
-    local redrive_policy
-    redrive_policy="{\"deadLetterTargetArn\":\"$dlq_arn\",\"maxReceiveCount\":$max_receive_count}"
+    # --------------------------------------------------
+    # 2️⃣ Create Main Queue if missing
+    # --------------------------------------------------
+    if ! awslocal sqs get-queue-url --queue-name "$queue_name" >/dev/null 2>&1; then
+        echo "Creating Main Queue: $queue_name with DLQ: $dlq_name"
 
-    awslocal sqs create-queue \
-        --queue-name "$queue_name" \
-        --attributes "{\"RedrivePolicy\":$(echo $redrive_policy | jq -R .)}" >/dev/null
+        # Use temp file for RedrivePolicy JSON
+        local tmpfile
+        tmpfile=$(mktemp)
+        cat > "$tmpfile" <<EOF
+{
+  "RedrivePolicy": "{\"deadLetterTargetArn\":\"$dlq_arn\",\"maxReceiveCount\":$max_receive_count}"
+}
+EOF
+
+        retry awslocal sqs create-queue \
+            --queue-name "$queue_name" \
+            --attributes "file://$tmpfile" >/dev/null
+
+        rm -f "$tmpfile"
+    else
+        echo "Main queue '$queue_name' already exists"
+    fi
 
     # Return Queue URL
     awslocal sqs get-queue-url --queue-name "$queue_name" --query "QueueUrl" --output text
 }
+
 
 ORDER_QUEUE_URL=$(retry create_queue_with_dlq "$ORDER_QUEUE_NAME")
 PAYMENT_EVENTS_QUEUE_URL=$(retry create_queue_with_dlq "$PAYMENT_EVENTS_QUEUE_NAME")
