@@ -13,10 +13,22 @@ import (
 
 func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 
-	// ── helper defined FIRST before any use ──────────────────────────────────
+	// ── Global Middlewares ────────────────────────────────────────────────────
+	// FIX: ALL r.Use() calls must come BEFORE any group or route registration.
+	// In Gin, middleware added to the engine after groups are created is not
+	// reliably inherited by those groups (handler chains are built at registration
+	// time). This was causing /bff/auth/login and other routes to return 404.
+	r.Use(middlewares.CorrelationIDMiddleware())
+	if redisClient != nil {
+		r.Use(middlewares.GlobalRateLimiter(redisClient))
+	}
+
+	// ── forwardTo helper ──────────────────────────────────────────────────────
+	// URL path so it can append it correctly to TargetBase.
+	// with an empty path (""), producing 404s from bff-service.
 	forwardTo := func(targetBase string) gin.HandlerFunc {
 		return func(c *gin.Context) {
-			// SECURITY: Block public access to internal-only service endpoints
+			// SECURITY: Block public access to internal-only service endpoints.
 			if strings.Contains(c.Request.URL.Path, "/internal/") {
 				c.JSON(http.StatusForbidden, gin.H{"error": "access to internal endpoints is restricted"})
 				c.Abort()
@@ -28,11 +40,8 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 		}
 	}
 
-	// ── Global Middlewares ────────────────────────────────────────────────────
-	r.Use(middlewares.CorrelationIDMiddleware())
-
 	// ── service targets ───────────────────────────────────────────────────────
-	bff := forwardTo("http://bff-service:8088/bff/admin")
+	bff := forwardTo("http://bff-service:8088/bff")
 	products := forwardTo("http://product-service:8082/products")
 	categories := forwardTo("http://product-service:8082/categories")
 	users := forwardTo("http://user-service:8085/users")
@@ -43,19 +52,15 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	coupons := forwardTo("http://promotion-service:8090/coupons")
 	shipping := forwardTo("http://shipping-service:8091/shipping")
 	authProxy := forwardTo("http://auth-service:8081/auth")
-	notifications := forwardTo("http://notification-service:8092/notifications") // fixed: was 8089
+	notifications := forwardTo("http://notification-service:8092/notifications")
+	agent := forwardTo("http://agent-service:8000/agent")
 
-	// ── groups ────────────────────────────────────────────────────────────────
+	// ── route groups ──────────────────────────────────────────────────────────
 	public := r.Group("/")
 	protected := r.Group("/")
 	protected.Use(middlewares.JWTMiddleware())
 	admin := protected.Group("/")
 	admin.Use(middlewares.AdminRoleMiddleware())
-
-	// ── Global Rate Limiter ───────────────────────────────────────────────────
-	if redisClient != nil {
-		r.Use(middlewares.GlobalRateLimiter(redisClient))
-	}
 
 	// =========================================================================
 	// PUBLIC ROUTES — no authentication required
@@ -66,7 +71,7 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	public.GET("/docs/*any", forwardTo("http://bff-service:8088/docs"))
 
 	// Stripe webhook — Stripe calls this directly, no auth
-	public.POST("/stripe/webhook", forwardTo("http://payment-service:8087/stripe/webhook"))
+	public.POST("/stripe/webhook", forwardTo("http://payment-service:8087/payment"))
 
 	// Auth — sensitive public actions (strict rate limiting)
 	authStrict := public.Group("/auth")
@@ -77,7 +82,7 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	authStrict.POST("/register", authProxy)
 	authStrict.POST("/resend-verification", authProxy)
 
-	// Auth — other public actions (normal global limits)
+	// Auth — other public actions
 	public.POST("/auth/verify-email", authProxy)
 
 	// Products — read only, public browsing
@@ -88,6 +93,8 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	public.GET("/categories", categories)
 	public.GET("/categories/*any", categories)
 
+	// ── BFF routes ────────────────────────────────────────────────────────────
+
 	// BFF — PUBLIC (no auth required)
 	bffPublic := public.Group("/bff")
 	bffPublic.POST("/auth/register", bff)
@@ -95,34 +102,40 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	bffPublic.POST("/auth/verify-email", bff)
 	bffPublic.POST("/auth/refresh", bff)
 	bffPublic.GET("/products", bff)
-	bffPublic.GET("/products/*any", bff)
+	bffPublic.GET("/products/*action", bff)
 	bffPublic.GET("/categories", bff)
-	bffPublic.GET("/categories/*any", bff)
+	bffPublic.GET("/categories/*action", bff)
 	bffPublic.GET("/home", bff)
 
 	// BFF — PROTECTED (JWT required)
 	bffProtected := protected.Group("/bff")
-	bffProtected.Use(middlewares.JWTMiddleware())
 	bffProtected.POST("/auth/logout", bff)
 	bffProtected.GET("/auth/status", bff)
 	bffProtected.GET("/cart", bff)
-	bffProtected.POST("/cart/*any", bff)
-	bffProtected.DELETE("/cart/*any", bff)
+	bffProtected.POST("/cart/*action", bff)
+	bffProtected.DELETE("/cart/*action", bff)
 	bffProtected.POST("/checkout", bff)
 	bffProtected.GET("/orders", bff)
-	bffProtected.GET("/orders/*any", bff)
+	bffProtected.GET("/orders/*action", bff)
 	bffProtected.GET("/profile", bff)
 	bffProtected.PUT("/users/profile", bff)
 	bffProtected.POST("/users/change-password", bff)
-	bffProtected.GET("/payment/*any", bff)
-	bffProtected.POST("/payment/*any", bff)
+	bffProtected.GET("/payment/*action", bff)
+	bffProtected.POST("/payment/*action", bff)
 
 	// BFF — ADMIN (JWT + Admin Role required)
+	// FIX: removed redundant .Use(JWTMiddleware()) — already applied by `protected` group.
 	bffAdmin := protected.Group("/bff/admin")
-	bffAdmin.Use(middlewares.JWTMiddleware())
 	bffAdmin.Use(middlewares.AdminRoleMiddleware())
 	bffAdmin.Any("", bff)
-	bffAdmin.Any("/*any", bff)
+	bffAdmin.Any("/*action", bff)
+
+	// Agent — ADMIN (JWT + Admin Role required)
+	// FIX: same — no need to re-apply JWTMiddleware inside a protected sub-group.
+	agentAdmin := protected.Group("/agent")
+	agentAdmin.Use(middlewares.AdminRoleMiddleware())
+	agentAdmin.Any("", agent)
+	agentAdmin.Any("/*any", agent)
 
 	// =========================================================================
 	// PROTECTED ROUTES — JWT required
