@@ -42,6 +42,8 @@ info:
 servers:
   - url: http://localhost:8080
     description: API Gateway (primary ingress — use this in production)
+  - url: http://localhost:8089
+    description: Agent Service
   - url: http://localhost:8088
     description: BFF Service
   - url: http://localhost:8081
@@ -118,8 +120,129 @@ tags:
     description: |
       Administrative BFF endpoints under `/bff/admin/*`. These endpoints require admin role
       headers from the gateway and return a standardized BFF response envelope.
+  - name: Agent Service
+    description: |
+      AI agent endpoints used for natural language ecommerce analytics. These endpoints run
+      intent mapping, tool execution, formatting, and response synthesis.
 
 paths:
+  # ── Agent Service ───────────────────────────────────────────────────────────
+
+  /agent/query:
+    post:
+      tags:
+        - Agent Service
+      summary: Run an analytics prompt through the agent pipeline
+      description: |
+        Executes the full agent flow:
+        1. Intent mapping from natural-language prompt
+        2. Tool selection and API execution
+        3. Structured summary formatting
+        4. Final synthesized answer
+
+        This endpoint is typically called with admin session context so downstream `/bff/admin/*`
+        tools can be resolved.
+      operationId: agentQuery
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentQueryRequest"
+            examples:
+              orders15d:
+                summary: Order count in the last 15 days
+                value:
+                  session_id: demo-orders-15d
+                  prompt: How many orders do we have in 15 days?
+              dashboard:
+                summary: Executive snapshot prompt
+                value:
+                  session_id: demo-exec-snapshot
+                  prompt: Give me a 30-day executive summary: revenue, orders, top products, low stock.
+              lowStock:
+                summary: Inventory alert prompt
+                value:
+                  session_id: demo-low-stock
+                  prompt: Show low stock items below threshold 10.
+      responses:
+        "200":
+          description: Agent response with synthesized answer and tool traces
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /agent/session/{session_id}:
+    get:
+      tags:
+        - Agent Service
+      summary: Inspect in-memory session history
+      description: Returns stored session context for debugging and prompt continuity checks.
+      operationId: agentInspectSession
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session content
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentSessionInspectResponse"
+    delete:
+      tags:
+        - Agent Service
+      summary: Clear an in-memory agent session
+      description: Deletes the agent session history for the provided session ID.
+      operationId: agentClearSession
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session cleared response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cleared:
+                    type: boolean
+                    example: true
+                  session_id:
+                    type: string
+                    example: demo-orders-15d
+
+  /tools:
+    get:
+      tags:
+        - Agent Service
+      summary: List available agent tools
+      description: Returns the tool registry used by intent mapping and planner fallback.
+      operationId: agentListTools
+      responses:
+        "200":
+          description: Tool registry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolRegistryResponse"
+
   # ── Gateway ─────────────────────────────────────────────────────────────────
 
   /health:
@@ -3256,6 +3379,16 @@ components:
             error: Bad Gateway
             details: Upstream service is temporarily unavailable.
 
+    InternalServerError:
+      description: Internal server error.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: Internal Server Error
+            details: Unexpected error while processing the request.
+
     AdminSuccessResponse:
       description: Standard successful admin response.
       content:
@@ -3358,6 +3491,115 @@ components:
           type: string
           description: Human-readable description of what went wrong.
           example: No product found with the given ID.
+
+    AgentQueryRequest:
+      type: object
+      required:
+        - prompt
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Natural-language analytics prompt.
+          example: How many orders do we have in 15 days?
+        session_id:
+          type: string
+          description: |
+            Optional session identifier for multi-turn context persistence. If omitted, the
+            service generates one.
+          example: demo-orders-15d
+
+    AgentToolResult:
+      type: object
+      properties:
+        tool:
+          type: string
+          example: get_orders
+        success:
+          type: boolean
+          example: true
+        data:
+          nullable: true
+          description: Raw tool payload (shape varies by tool).
+        error:
+          type: string
+          nullable: true
+          example: null
+        summary:
+          type: string
+          nullable: true
+          example: "Total orders in the last 15 days: 6."
+
+    AgentResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        answer:
+          type: string
+          example: In the last 15 days, we have a total of 6 orders.
+        tool_results:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentToolResult"
+        tools_called:
+          type: array
+          items:
+            type: string
+          example:
+            - get_orders
+        session_id:
+          type: string
+          example: demo-orders-15d
+        correlation_id:
+          type: string
+          example: bcbb039f-8f81-4107-be5e-bbe34119c2cb
+        error:
+          type: string
+          nullable: true
+          example: null
+
+    AgentSessionInspectResponse:
+      type: object
+      properties:
+        session_id:
+          type: string
+          example: demo-orders-15d
+        turns:
+          type: integer
+          example: 2
+        history:
+          type: array
+          items:
+            type: object
+            properties:
+              role:
+                type: string
+                example: user
+              content:
+                type: string
+                example: How many orders do we have in 15 days?
+
+    ToolRegistryItem:
+      type: object
+      properties:
+        description:
+          type: string
+          example: Fetch order list with optional status filter.
+        params:
+          type: object
+          additionalProperties:
+            type: string
+
+    ToolRegistryResponse:
+      type: object
+      properties:
+        tools:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/ToolRegistryItem"
 
     AdminMeta:
       type: object
