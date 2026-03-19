@@ -1,12 +1,12 @@
 package middlewares
 
 import (
+	"api-gateway/logger"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strings"
-
-	"api-gateway/logger"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
@@ -22,12 +22,16 @@ var (
 
 func init() {
 	_ = godotenv.Load()
+	isProduction = os.Getenv("ENV") == "production"
 	secret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
 	if secret == "" {
-		logger.Log.Fatal("JWT_SECRET is not set in env")
+		if isProduction {
+			log.Fatal("JWT_SECRET is not set in env")
+		}
+		secret = "dev-insecure-jwt-secret"
+		log.Printf("[GATEWAY][JWT] JWT_SECRET missing, using local dev fallback secret")
 	}
 	secretKey = []byte(secret)
-	isProduction = os.Getenv("ENV") == "production"
 	cookieDomain = os.Getenv("COOKIE_DOMAIN")
 }
 

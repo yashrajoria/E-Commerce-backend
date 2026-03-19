@@ -47,19 +47,19 @@ func NewAdminAnalyticsController(logger *zap.Logger, httpClient *http.Client) *A
 func (ac *AdminAnalyticsController) SalesReport(c *gin.Context) {
 	defer ac.logger.Debug("admin request complete", zap.String("handler", "SalesReport"))
 
-	ac.forwardReport(c, "SalesReport", ac.orderServiceURL+"/orders/stats")
+	ac.forwardReport(c, "SalesReport", ac.orderServiceURL+"/orders/admin/stats")
 }
 
 func (ac *AdminAnalyticsController) UsersReport(c *gin.Context) {
 	defer ac.logger.Debug("admin request complete", zap.String("handler", "UsersReport"))
 
-	ac.forwardReport(c, "UsersReport", ac.userServiceURL+"/users/stats")
+	ac.forwardReport(c, "UsersReport", ac.userServiceURL+"/users")
 }
 
 func (ac *AdminAnalyticsController) InventoryReport(c *gin.Context) {
 	defer ac.logger.Debug("admin request complete", zap.String("handler", "InventoryReport"))
 
-	ac.forwardReport(c, "InventoryReport", ac.inventoryService+"/inventory/stats")
+	ac.forwardReport(c, "InventoryReport", ac.inventoryService+"/inventory")
 }
 
 func (ac *AdminAnalyticsController) forwardReport(c *gin.Context, handler, downstreamURL string) {
