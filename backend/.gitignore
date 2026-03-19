@@ -3,6 +3,7 @@
 # Environment files
 .env
 # .env.*
+*__pycache__/
 
 # Local env for local development (do NOT commit real secrets)
 .env.local
