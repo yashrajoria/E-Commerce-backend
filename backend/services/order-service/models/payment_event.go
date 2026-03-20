@@ -24,6 +24,7 @@ type PaymentRequest struct {
 	OrderID        string `json:"order_id"`
 	UserID         string `json:"user_id"`
 	Amount         int    `json:"amount"` // minor units
+	Currency       string `json:"currency,omitempty"`
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
 }
 

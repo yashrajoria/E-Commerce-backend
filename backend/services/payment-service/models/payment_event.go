@@ -10,7 +10,7 @@ type PaymentEvent struct {
 	Status      string    `json:"status"`     // "PROCESSING", "COMPLETED", "FAILED"
 	PaymentID   string    `json:"payment_id"` // UUID from Payment Service DB
 	Amount      int       `json:"amount"`     // smallest currency unit
-	Currency    string    `json:"currency"`   // "usd", "inr"
+	Currency    string    `json:"currency"`   // ISO 4217 code, e.g. "usd"
 	Timestamp   time.Time `json:"timestamp"`  // UTC event time
 }
 

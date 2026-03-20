@@ -187,6 +187,7 @@ func main() {
 			snsClient,
 			cfg.NotificationSNSTopicARN,
 			promotionClient,
+			cfg.StoreCurrency,
 		)
 		go checkoutConsumer.Start(shutdownCtx)
 		logger.Info("Started SQS checkout consumer", zap.String("queue", checkoutQueueURL))

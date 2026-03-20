@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"payment-service/models"
 	"payment-service/repository"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,6 +21,7 @@ type PaymentRequestConsumer struct {
 	paymentTopicArn      string
 	notificationTopicArn string
 	stripeSvc            *StripeService
+	defaultCurrency      string
 	logger               *zap.Logger
 	repo                 repository.PaymentRepository
 }
@@ -30,6 +32,7 @@ func NewPaymentRequestConsumer(
 	paymentTopicArn string,
 	notificationTopicArn string,
 	stripeSvc *StripeService,
+	defaultCurrency string,
 	repo repository.PaymentRepository,
 	logger *zap.Logger,
 ) *PaymentRequestConsumer {
@@ -39,6 +42,7 @@ func NewPaymentRequestConsumer(
 		paymentTopicArn:      paymentTopicArn,
 		notificationTopicArn: notificationTopicArn,
 		stripeSvc:            stripeSvc,
+		defaultCurrency:      normalizeCurrency(defaultCurrency),
 		logger:               logger,
 		repo:                 repo,
 	}
@@ -78,13 +82,18 @@ func (c *PaymentRequestConsumer) Start(ctx context.Context) {
 			return err
 		}
 
+		currency := normalizeCurrency(req.Currency)
+		if currency == "" {
+			currency = c.defaultCurrency
+		}
+
 		// Create payment record
 		payment := models.Payment{
 			Payment_ID: uuid.New(),
 			OrderID:    orderID,
 			UserID:     userID,
 			Amount:     req.Amount,
-			Currency:   "usd",
+			Currency:   currency,
 			Status:     "pending",
 			CreatedAt:  time.Now().UTC(),
 		}
@@ -100,9 +109,9 @@ func (c *PaymentRequestConsumer) Start(ctx context.Context) {
 		c.logger.Info("Payment record created", zap.String("payment_id", payment.Payment_ID.String()))
 
 		// Create Stripe Checkout Session (provides a hosted URL for the user to complete payment)
-		// Amount is already in the smallest currency unit (cents for USD) as set by the order-service.
+		// Amount is already in the smallest currency unit for the configured store currency.
 		// Do NOT multiply by 100 here; prices are stored and passed in cents throughout the system.
-		sess, err := c.stripeSvc.CreateCheckoutSession(int64(req.Amount), "usd", req.OrderID, req.UserID)
+		sess, err := c.stripeSvc.CreateCheckoutSession(int64(req.Amount), currency, req.OrderID, req.UserID)
 		if err != nil {
 			c.logger.Error("Failed to create Stripe Checkout Session", zap.Error(err))
 			payment.Status = "failed"
@@ -160,4 +169,8 @@ func (c *PaymentRequestConsumer) Start(ctx context.Context) {
 	if err != nil && err != context.Canceled {
 		c.logger.Error("SQS consumer error", zap.Error(err))
 	}
+}
+
+func normalizeCurrency(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }

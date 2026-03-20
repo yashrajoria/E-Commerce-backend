@@ -82,6 +82,7 @@ func main() {
 		paymentTopicArn,
 		notificationTopicArn,
 		stripeSvc,
+		cfg.StoreCurrency,
 		paymentRepo,
 		logger,
 	)
@@ -130,6 +131,7 @@ func main() {
 		SNS:                  snsPublisher,
 		TopicArn:             paymentTopicArn,
 		NotificationTopicArn: notificationTopicArn,
+		DefaultCurrency:      cfg.StoreCurrency,
 		Repo:                 paymentRepo,
 		Logger:               logger,
 	}

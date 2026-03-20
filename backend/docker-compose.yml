@@ -214,6 +214,7 @@ services:
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
       - ORDER_SNS_TOPIC_ARN=${ORDER_SNS_TOPIC_ARN:-arn:aws:sns:us-east-1:000000000000:order-events}
       - NOTIFICATION_SNS_TOPIC_ARN=${NOTIFICATION_SNS_TOPIC_ARN:-arn:aws:sns:us-east-1:000000000000:notification-events}
+      - STORE_CURRENCY=${STORE_CURRENCY:-USD}
     depends_on:
       postgres:
         condition: service_healthy
@@ -245,6 +246,7 @@ services:
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
       - PAYMENT_SNS_TOPIC_ARN=${PAYMENT_SNS_TOPIC_ARN:-arn:aws:sns:us-east-1:000000000000:payment-events}
       - NOTIFICATION_SNS_TOPIC_ARN=${NOTIFICATION_SNS_TOPIC_ARN:-arn:aws:sns:us-east-1:000000000000:notification-events}
+      - STORE_CURRENCY=${STORE_CURRENCY:-USD}
     depends_on:
       postgres:
         condition: service_healthy

@@ -37,7 +37,7 @@ info:
     All errors follow the `ErrorResponse` schema: `{ "error": "...", "details": "..." }`.
 
     ## Price Representation
-    Product prices are stored as floating-point numbers in the store's base currency (e.g. GBP). Order and payment amounts are stored as integers in the smallest currency unit (e.g. pence for GBP, cents for USD) to avoid floating-point rounding errors. Clients must divide order amounts by 100 to display them.
+    Product prices are stored as floating-point numbers in the configured store currency (`STORE_CURRENCY`, default `USD`). Order and payment amounts are stored as integers in the smallest unit of that currency (for example, cents for USD) to avoid floating-point rounding errors. Clients must divide order amounts by 100 to display them.
 
 servers:
   - url: http://localhost:8080
@@ -3826,7 +3826,7 @@ components:
           type: number
           format: float
           description: |
-            Price in the store's base currency (e.g. GBP). Note: order amounts are stored as
+            Price in the configured store currency (default USD). Note: order amounts are stored as
             integers in the smallest currency unit (pence/cents) — see `Order.amount`.
           example: 49.99
         quantity:
@@ -4204,7 +4204,7 @@ components:
         price:
           type: integer
           description: |
-            Unit price in the smallest currency unit (e.g. pence for GBP, cents for USD) at
+            Unit price in the smallest unit of the configured store currency (for example, cents for USD) at
             the time the order was placed. Divide by 100 to display.
           example: 4999
 
@@ -4227,7 +4227,7 @@ components:
         amount:
           type: integer
           description: |
-            Total order amount in the smallest currency unit (e.g. pence for GBP). Equals the
+            Total order amount in the smallest unit of the configured store currency (for example, cents for USD). Equals the
             sum of (`price` × `quantity`) for all line items. Divide by 100 to display.
           example: 9998
         status:

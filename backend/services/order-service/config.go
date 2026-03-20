@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 )
@@ -28,6 +29,7 @@ type Config struct {
 	PaymentSNSTopicARN      string
 	NotificationSNSTopicARN string
 	PromotionServiceURL     string
+	StoreCurrency           string
 }
 
 func LoadConfig() (*Config, error) {
@@ -49,6 +51,7 @@ func LoadConfig() (*Config, error) {
 		OrderSNSTopicARN:        os.Getenv("ORDER_SNS_TOPIC_ARN"),
 		PaymentSNSTopicARN:      os.Getenv("PAYMENT_SNS_TOPIC_ARN"),
 		NotificationSNSTopicARN: os.Getenv("NOTIFICATION_SNS_TOPIC_ARN"),
+		StoreCurrency:           normalizeCurrency(getEnv("STORE_CURRENCY", "USD")),
 	}
 
 	if os.Getenv("AWS_USE_SECRETS") == "true" {
@@ -92,4 +95,12 @@ func getEnv(key, fallback string) string {
 		return val
 	}
 	return fallback
+}
+
+func normalizeCurrency(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "" {
+		return "usd"
+	}
+	return normalized
 }

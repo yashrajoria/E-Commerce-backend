@@ -32,6 +32,7 @@ type PaymentController struct {
 	SNS                  *aws_pkg.SNSClient
 	TopicArn             string
 	NotificationTopicArn string
+	DefaultCurrency      string
 	Logger               *zap.Logger
 	Repo                 repository.PaymentRepository
 }
@@ -104,6 +105,10 @@ func (pc *PaymentController) CreateCheckoutSession(c *gin.Context) {
 	}
 
 	currency := payment.Currency
+	if currency == "" {
+		currency = pc.DefaultCurrency
+	}
+	currency = strings.ToLower(strings.TrimSpace(currency))
 	if currency == "" {
 		currency = "usd"
 	}

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 type Config struct {
@@ -16,6 +17,7 @@ type Config struct {
 	PostgresTimeZone       string
 	StripeSecretKey        string
 	StripeWebhookKey       string
+	StoreCurrency          string
 	PaymentRequestQueueURL string // SQS queue URL for payment requests
 	PaymentSNSTopicARN     string // SNS topic ARN for payment events
 }
@@ -32,6 +34,7 @@ func LoadConfig() (*Config, error) {
 		PostgresTimeZone:       getEnv("POSTGRES_TIMEZONE", "Asia/Kolkata"),
 		StripeSecretKey:        os.Getenv("STRIPE_API_KEY"),
 		StripeWebhookKey:       os.Getenv("STRIPE_WEBHOOK_SECRET"),
+		StoreCurrency:          normalizeCurrency(getEnv("STORE_CURRENCY", "USD")),
 		PaymentRequestQueueURL: os.Getenv("PAYMENT_REQUEST_QUEUE_URL"),
 		PaymentSNSTopicARN:     getEnv("PAYMENT_SNS_TOPIC_ARN", "arn:aws:sns:eu-west-2:000000000000:payment-events"),
 	}
@@ -49,4 +52,12 @@ func getEnv(key, fallback string) string {
 		return val
 	}
 	return fallback
+}
+
+func normalizeCurrency(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "" {
+		return "usd"
+	}
+	return normalized
 }

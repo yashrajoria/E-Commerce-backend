@@ -23,12 +23,16 @@ type SQSCheckoutConsumer struct {
 	snsClient            aws_pkg.SNSPublisher
 	notificationTopicArn string
 	promotionClient      *PromotionClient
+	storeCurrency        string
 }
 
 // NewSQSCheckoutConsumer creates a new SQS-based checkout consumer
-func NewSQSCheckoutConsumer(sqsConsumer *aws_pkg.SQSConsumer, sqsPublisher *aws_pkg.SQSConsumer, orderRepo repositories.OrderRepository, inventoryClient *InventoryClient, metricsClient *aws_pkg.MetricsClient, productServiceURL string, snsClient aws_pkg.SNSPublisher, notificationTopicArn string, promotionClient *PromotionClient) *SQSCheckoutConsumer {
+func NewSQSCheckoutConsumer(sqsConsumer *aws_pkg.SQSConsumer, sqsPublisher *aws_pkg.SQSConsumer, orderRepo repositories.OrderRepository, inventoryClient *InventoryClient, metricsClient *aws_pkg.MetricsClient, productServiceURL string, snsClient aws_pkg.SNSPublisher, notificationTopicArn string, promotionClient *PromotionClient, storeCurrency string) *SQSCheckoutConsumer {
 	if productServiceURL == "" {
 		productServiceURL = "http://product-service:8082"
+	}
+	if storeCurrency == "" {
+		storeCurrency = "usd"
 	}
 	return &SQSCheckoutConsumer{
 		sqsConsumer:          sqsConsumer,
@@ -40,6 +44,7 @@ func NewSQSCheckoutConsumer(sqsConsumer *aws_pkg.SQSConsumer, sqsPublisher *aws_
 		snsClient:            snsClient,
 		notificationTopicArn: notificationTopicArn,
 		promotionClient:      promotionClient,
+		storeCurrency:        storeCurrency,
 	}
 }
 
@@ -241,6 +246,7 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		OrderID:        order.ID.String(),
 		UserID:         order.UserID.String(),
 		Amount:         order.Amount,
+		Currency:       c.storeCurrency,
 		IdempotencyKey: idemKey,
 	}
 	reqBytes, _ := json.Marshal(req)
