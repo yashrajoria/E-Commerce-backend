@@ -17,7 +17,7 @@ info:
     - **Payment Service** (`:8087`) — Stripe payment session creation, verification, and webhook ingestion.
     - **Inventory Service** — Stock management, reservation, release, and confirmation as part of the order saga.
     - **Promotion Service** (`:8090`) — Coupon and discount management.
-    - **Shipping Service** (`:8091`) — Carrier rates, label creation, and shipment tracking via Shippo.
+    - **Shipping Service** (`:8091`) — Static shipping rate lookup based on a configured JSON catalog.
 
     ## Authentication
     All protected endpoints require a valid JWT `access_token` cookie issued by the Auth Service. The gateway rejects missing or expired tokens with `401 Unauthorized`. Refresh the token via `POST /auth/refresh` before it expires.
@@ -110,8 +110,10 @@ tags:
       discounts. Publishes a `coupon_applied` SNS event when a coupon is successfully applied.
   - name: Shipping Service
     description: |
-      Shipping management. Provides real-time carrier rates via Shippo, creates shipping labels,
-      and tracks shipments. Publishes `shipment_created` and `shipment_updated` SNS events.
+      Shipping management. Returns configured shipping rates based on destination country and
+      parcel weight. Rates are loaded from a local JSON catalog rather than a live carrier API.
+      Manual Postman tests are available in
+      `backend/test-data/postman/shipping-service-rates.postman_collection.json`.
   - name: Admin Only
     description: |
       🔐 Endpoints in this group require the caller to have the `admin` role. Requests from
@@ -2833,7 +2835,11 @@ paths:
       tags:
         - Shipping Service
       summary: Get shipping rates
-      description: Returns available carrier rates for the given weight and destination. Requires authentication.
+      description: |
+        Returns configured shipping rates for the given weight and destination. Requires authentication.
+
+        Postman collection for manual verification:
+        `backend/test-data/postman/shipping-service-rates.postman_collection.json`
       operationId: getShippingRates
       security:
         - cookieAuth: []
@@ -2863,81 +2869,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-        "502":
-          description: Carrier API error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-
-  /shipping/labels:
-    post:
-      tags:
-        - Shipping Service
-      summary: Create shipping label
-      description: |
-        Creates a shipping label via Shippo for the selected rate. Returns the shipment record
-        with tracking info. Publishes a `shipment_created` SNS event on success.
-      operationId: createShippingLabel
-      security:
-        - cookieAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateLabelRequest"
-      responses:
-        "201":
-          description: Shipment created
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  shipment:
-                    $ref: "#/components/schemas/Shipment"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "502":
-          description: Carrier API error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-
-  /shipping/track/{tracking_code}:
-    get:
-      tags:
-        - Shipping Service
-      summary: Track a shipment
-      description: |
-        Returns the current tracking status for a shipment from the carrier. Updates the DB
-        record if the status has changed since last poll. Publishes a `shipment_updated` SNS
-        event if the status changed.
-      operationId: trackShipment
-      security:
-        - cookieAuth: []
-      parameters:
-        - name: tracking_code
-          in: path
-          required: true
-          schema:
-            type: string
-          example: "1Z999AA10123456784"
-      responses:
-        "200":
-          description: Current tracking status
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/TrackingStatus"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "502":
-          description: Carrier API error
+        "500":
+          description: Shipping rate configuration error
           content:
             application/json:
               schema:
@@ -4860,10 +4793,10 @@ components:
       properties:
         provider:
           type: string
-          example: USPS
+          example: Internal
         service_level:
           type: string
-          example: Priority Mail
+          example: Standard
         amount:
           type: number
           format: double
@@ -4876,7 +4809,7 @@ components:
           example: 2
         rate_id:
           type: string
-          example: rate_abc123
+          example: us-standard-0-1
 
     ShippingRatesRequest:
       type: object
@@ -4890,94 +4823,3 @@ components:
           example: 1.5
         destination:
           $ref: "#/components/schemas/Address"
-
-    CreateLabelRequest:
-      type: object
-      required:
-        - order_id
-        - user_id
-        - rate_id
-        - weight_kg
-      properties:
-        order_id:
-          type: string
-          example: order-uuid-1234
-        user_id:
-          type: string
-          example: user-uuid-5678
-        rate_id:
-          type: string
-          example: rate_abc123
-        weight_kg:
-          type: number
-          format: double
-          example: 1.5
-        origin:
-          $ref: "#/components/schemas/Address"
-        destination:
-          $ref: "#/components/schemas/Address"
-
-    Shipment:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        order_id:
-          type: string
-        user_id:
-          type: string
-        carrier:
-          type: string
-          example: USPS
-        service_level:
-          type: string
-          example: Priority Mail
-        tracking_code:
-          type: string
-          example: "1Z999AA10123456784"
-        label_url:
-          type: string
-          format: uri
-        tracking_url:
-          type: string
-          format: uri
-        status:
-          type: string
-          enum:
-            - created
-            - in_transit
-            - delivered
-            - failure
-            - returned
-          example: created
-        weight_kg:
-          type: number
-          format: double
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
-
-    TrackingStatus:
-      type: object
-      properties:
-        tracking_code:
-          type: string
-        status:
-          type: string
-          example: TRANSIT
-        sub_status:
-          type: string
-          example: TRANSIT_IN_TRANSIT
-        location:
-          type: string
-          example: "Chicago, IL"
-        carrier:
-          type: string
-          example: USPS
-        updated_at:
-          type: string
-          format: date-time
