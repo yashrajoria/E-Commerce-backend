@@ -4,14 +4,8 @@ import (
 	"shipping-service/models"
 )
 
-// ShippingProvider defines the interface all carrier integrations must implement.
+// ShippingProvider defines the interface for shipping rate lookup.
 type ShippingProvider interface {
-	// GetRates returns available shipping options for the given weight and destination.
-	GetRates(weightKg float64, origin, destination models.Address) ([]models.ShippingRate, error)
-
-	// CreateLabel purchases the selected rate and returns tracking + label info.
-	CreateLabel(req models.CreateLabelRequest) (models.TrackingInfo, error)
-
-	// TrackShipment returns the current tracking status for a given tracking code.
-	TrackShipment(carrier, trackingCode string) (models.TrackingStatus, error)
+	// GetRates returns available shipping options for the given destination and parcel weight.
+	GetRates(weightKg float64, destination models.Address) ([]models.ShippingRate, error)
 }
