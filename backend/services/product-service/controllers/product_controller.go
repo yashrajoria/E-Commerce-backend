@@ -87,12 +87,14 @@ func (ctrl *ProductController) GetProductByID(c *gin.Context) {
 
 	// Try cache first
 	cacheKey := ProductCachePrefix + productID.String()
-	if cached, err := ctrl.redis.Get(ctx, cacheKey).Result(); err == nil {
-		var product models.Product
-		if err := json.Unmarshal([]byte(cached), &product); err == nil {
-			zap.L().Debug("Returning product from cache", zap.String("id", id))
-			c.JSON(http.StatusOK, product)
-			return
+	if ctrl.redis != nil {
+		if cached, err := ctrl.redis.Get(ctx, cacheKey).Result(); err == nil {
+			var product models.Product
+			if err := json.Unmarshal([]byte(cached), &product); err == nil {
+				zap.L().Debug("Returning product from cache", zap.String("id", id))
+				c.JSON(http.StatusOK, product)
+				return
+			}
 		}
 	}
 
