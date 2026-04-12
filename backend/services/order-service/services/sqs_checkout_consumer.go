@@ -245,6 +245,7 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 	req := models.PaymentRequest{
 		OrderID:        order.ID.String(),
 		UserID:         order.UserID.String(),
+		Email:          evt.Email,
 		Amount:         order.Amount,
 		Currency:       c.storeCurrency,
 		IdempotencyKey: idemKey,
