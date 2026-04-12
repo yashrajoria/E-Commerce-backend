@@ -109,6 +109,9 @@ func main() {
 	)
 	categoryService := services.NewCategoryServiceDDB(categoryRepo, productRepo)
 
+	// Link category service to product service for updating product counts
+	productService.SetCategoryService(categoryService)
+
 	// Initialize Controllers, injecting services
 	productController := controllers.NewProductController(productService, ProductRedis)
 	categoryController := controllers.NewCategoryController(categoryService)
