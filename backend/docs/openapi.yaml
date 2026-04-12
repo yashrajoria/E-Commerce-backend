@@ -163,7 +163,7 @@ paths:
                 summary: Executive snapshot prompt
                 value:
                   session_id: demo-exec-snapshot
-                  prompt: Give me a 30-day executive summary: revenue, orders, top products, low stock.
+                  prompt: "Give me a 30-day executive summary: revenue, orders, top products, low stock."
               lowStock:
                 summary: Inventory alert prompt
                 value:
@@ -941,6 +941,21 @@ paths:
         "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
         "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
         "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+    delete:
+      tags: [Admin]
+      summary: Delete product (admin)
+      description: Deletes a product by id in product-service.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: "#/components/parameters/ProductID"
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
 
   /bff/admin/products/{id}/images/presign:
     post:
@@ -967,21 +982,6 @@ paths:
           schema:
             type: string
           example: image/jpeg
-      responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
-    delete:
-      tags: [Admin]
-      summary: Delete product (admin)
-      description: Deletes a product by id in product-service.
-      parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
-        - $ref: "#/components/parameters/ProductID"
       responses:
         "200": { $ref: "#/components/responses/AdminSuccessResponse" }
         "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
