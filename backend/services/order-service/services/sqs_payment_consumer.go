@@ -256,11 +256,10 @@ func (c *SQSPaymentConsumer) publishOrderConfirmedNotification(ctx context.Conte
 		})
 	}
 
-	// evt.UserID comes from the payment event; email is not available in the payment event,
-	// so we pass it as empty and rely on the notification service to use the Recipient field.
-	// TODO: consider storing email in the order record for better reliability.
+	// Use email propagated from payment-service so notification-service can route
+	// order_confirmed events to the recipient address.
 	notifEvent := events.NewOrderConfirmedEvent(
-		evt.UserID, "", "", evt.OrderID, float64(order.Amount), notifItems,
+		evt.UserID, evt.Email, "", evt.OrderID, float64(order.Amount), notifItems,
 	)
 	notifBytes, err := json.Marshal(notifEvent)
 	if err != nil {
