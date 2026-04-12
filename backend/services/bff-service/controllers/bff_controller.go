@@ -265,10 +265,16 @@ func (b *BFFController) Checkout(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing Idempotency-Key header"})
 		return
 	}
+	userID := c.GetHeader("X-User-ID")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing user identity"})
+		return
+	}
+	cacheKey := "idem:bff:" + userID + ":" + idemKey
 
 	// Redis cache hit → return cached response immediately
 	if b.redisClient != nil {
-		if val, err := b.redisClient.Get(ctx, "idem:bff:"+idemKey).Result(); err == nil && val != "" {
+		if val, err := b.redisClient.Get(ctx, cacheKey).Result(); err == nil && val != "" {
 			c.Data(http.StatusOK, "application/json", []byte(val))
 			return
 		}
@@ -360,7 +366,7 @@ func (b *BFFController) Checkout(c *gin.Context) {
 					"checkout_url": createResult.CheckoutURL,
 				})
 				if b.redisClient != nil {
-					_ = b.redisClient.SetNX(ctx, "idem:bff:"+idemKey, out, 15*time.Minute).Err()
+					_ = b.redisClient.SetNX(ctx, cacheKey, out, 15*time.Minute).Err()
 				}
 				c.Data(http.StatusOK, "application/json", out)
 				return
@@ -390,7 +396,7 @@ func (b *BFFController) Checkout(c *gin.Context) {
 
 	// Cache in Redis so repeated calls with same Idempotency-Key return immediately
 	if b.redisClient != nil {
-		_ = b.redisClient.SetNX(ctx, "idem:bff:"+idemKey, out, 15*time.Minute).Err()
+		_ = b.redisClient.SetNX(ctx, cacheKey, out, 15*time.Minute).Err()
 	}
 
 	c.Data(http.StatusOK, "application/json", out)
