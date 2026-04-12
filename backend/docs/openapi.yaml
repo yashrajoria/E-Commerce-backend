@@ -881,11 +881,49 @@ paths:
         "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
         "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
 
+  /bff/admin/products/presign:
+    get:
+      tags: [Admin]
+      summary: Get product image presign URL (admin)
+      description: |
+        Proxies the product-service presign endpoint for new-product image uploads. Use the
+        returned `public_url` as the stable URL to persist later on the product record.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - name: sku
+          in: query
+          required: true
+          schema:
+            type: string
+          example: WIDGET-001
+        - name: filename
+          in: query
+          required: false
+          schema:
+            type: string
+          example: front-view.jpg
+        - name: content_type
+          in: query
+          required: false
+          schema:
+            type: string
+          example: image/jpeg
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+
   /bff/admin/products/{id}:
     put:
       tags: [Admin]
       summary: Update product (admin)
-      description: Updates a product by id in product-service.
+      description: |
+        Updates a product by id in product-service. To attach uploaded images, send the stable
+        `public_url` values in the `images` array.
       parameters:
         - $ref: "#/components/parameters/AdminAuthorizationHeader"
         - $ref: "#/components/parameters/AdminUserIDHeader"
@@ -897,6 +935,38 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/UpdateProductRequest"
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+
+  /bff/admin/products/{id}/images/presign:
+    post:
+      tags: [Admin]
+      summary: Get existing product image presign URL (admin)
+      description: |
+        Proxies the product-service image presign endpoint for an existing product. After upload,
+        persist the returned `public_url` with `PUT /bff/admin/products/{id}` by updating the
+        `images` array.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: "#/components/parameters/ProductID"
+        - name: filename
+          in: query
+          required: false
+          schema:
+            type: string
+          example: front-view.jpg
+        - name: content_type
+          in: query
+          required: false
+          schema:
+            type: string
+          example: image/jpeg
       responses:
         "200": { $ref: "#/components/responses/AdminSuccessResponse" }
         "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
@@ -1773,7 +1843,8 @@ paths:
         **Admin only.** Returns a presigned S3 `PUT` URL and any required form fields for
         uploading a product image before the product record is created. Provide the `sku` query
         parameter to namespace the object key. The presigned URL expires after a short window
-        (typically 15 minutes).
+        (typically 15 minutes). Use the returned `public_url` as the stable image URL to store
+        on the product after upload.
       operationId: getProductPresignUrl
       security:
         - cookieAuth:
@@ -1798,11 +1869,19 @@ paths:
                     type: string
                     description: The presigned S3 PUT URL.
                     example: "https://s3.amazonaws.com/bucket/..."
-                  fields:
-                    type: object
-                    description: Additional form fields required by the presigned POST policy.
-                    additionalProperties:
-                      type: string
+                  method:
+                    type: string
+                    example: PUT
+                  key:
+                    type: string
+                    example: products/product_img_WIDGET-001_9b5d0c2e.jpg
+                  public_url:
+                    type: string
+                    description: Stable browser-facing URL to store on the product after upload.
+                    example: "http://localhost:4566/shopswift/products/product_img_WIDGET-001_9b5d0c2e.jpg"
+                  expires_in:
+                    type: integer
+                    example: 900
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1818,7 +1897,7 @@ paths:
       description: |
         **Admin only.** Returns a presigned S3 `PUT` URL for uploading a new or replacement
         image for an existing product. After upload, update the product record with the
-        resulting image URL via `PUT /products/{id}`.
+        returned `public_url` via `PUT /products/{id}`.
       operationId: getProductImagePresignUrl
       security:
         - cookieAuth:
@@ -1848,6 +1927,18 @@ paths:
                   upload_url:
                     type: string
                     example: "https://s3.amazonaws.com/bucket/products/..."
+                  method:
+                    type: string
+                    example: PUT
+                  key:
+                    type: string
+                    example: products/product/7d8f0fdd-b124-4ad8-8f12-7caea5c2d441/front-view.jpg
+                  public_url:
+                    type: string
+                    example: "http://localhost:4566/shopswift/products/product/7d8f0fdd-b124-4ad8-8f12-7caea5c2d441/front-view.jpg"
+                  expires_in:
+                    type: integer
+                    example: 900
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -3172,7 +3263,8 @@ components:
       required: true
       description: |
         Partial product update payload. Only supply the fields you want to change — all other
-        fields will remain unchanged.
+        fields will remain unchanged. To update product images, send the full `images` array with
+        stable public URLs returned by the presign endpoints.
       content:
         application/json:
           schema:
@@ -3181,6 +3273,8 @@ components:
           example:
             price: 29.99
             is_featured: true
+            images:
+              - http://localhost:4566/shopswift/products/product/7d8f0fdd-b124-4ad8-8f12-7caea5c2d441/front-view.jpg
 
     BulkDeleteRequest:
       required: true

@@ -36,4 +36,5 @@ type ProductServiceAPI interface {
 	ValidateBulkImport(ctx context.Context, file multipart.File) (*models.BulkImportValidation, error)
 	ProcessBulkImport(ctx context.Context, file multipart.File, autoCreateCategories bool) (*models.BulkImportResult, error)
 	GeneratePresignedUpload(ctx context.Context, sku, filename, contentType string, expiresSeconds int64) (string, string, string, error)
+	GenerateProductImagePresignedUpload(ctx context.Context, productID uuid.UUID, filename, contentType string, expiresSeconds int64) (string, string, string, error)
 }

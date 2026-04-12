@@ -119,6 +119,8 @@ services:
       - LOCALSTACK_ENDPOINT=http://localstack:4566
       - AWS_S3_BUCKET=${AWS_S3_BUCKET:-shopswift}
       - AWS_S3_PREFIX=products/
+      - ASSET_PUBLIC_BASE_URL=${ASSET_PUBLIC_BASE_URL:-http://localhost:4566}
+      - AWS_CLOUDFRONT_DOMAIN=${AWS_CLOUDFRONT_DOMAIN:-}
       - DDB_TABLE_PRODUCTS=${DDB_TABLE_PRODUCTS:-Products}
       - DDB_TABLE_CATEGORIES=${DDB_TABLE_CATEGORIES:-Categories}
       - INVENTORY_SERVICE_URL=http://inventory-service:8084

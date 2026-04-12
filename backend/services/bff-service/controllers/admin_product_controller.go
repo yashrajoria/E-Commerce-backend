@@ -41,6 +41,7 @@ type adminProductUpdateRequest struct {
 	Quantity    *int      `json:"quantity,omitempty" binding:"omitempty,gte=0"`
 	IsFeatured  *bool     `json:"is_featured,omitempty"`
 	Categories  *[]string `json:"category,omitempty" binding:"omitempty,min=1,dive,required"`
+	Images      *[]string `json:"images,omitempty"`
 }
 
 func NewAdminProductController(logger *zap.Logger, httpClient *http.Client) *AdminProductController {
@@ -146,6 +147,45 @@ func (ac *AdminProductController) DeleteProduct(c *gin.Context) {
 	ac.handleForwardResponse(c, statusCode, body)
 }
 
+func (ac *AdminProductController) GetPresignUpload(c *gin.Context) {
+	defer ac.logger.Debug("admin request complete", zap.String("handler", "GetPresignUpload"))
+
+	downstreamURL := ac.withQuery(ac.baseURL+"/products/presign", c.Request.URL.RawQuery)
+	ac.logger.Debug("forward admin request", zap.String("handler", "GetPresignUpload"), zap.String("method", http.MethodGet), zap.String("url", downstreamURL))
+	body, statusCode, err := utils.ForwardGet(c.Request.Context(), ac.httpClient, downstreamURL, c.Request.Header)
+	if err != nil {
+		ac.logger.Error("downstream request failed", zap.String("handler", "GetPresignUpload"), zap.Error(err))
+		utils.ErrorResponse(c, http.StatusServiceUnavailable, "downstream service unavailable")
+		return
+	}
+	ac.logger.Debug("downstream response received", zap.String("handler", "GetPresignUpload"), zap.Int("status", statusCode))
+
+	ac.handleForwardResponse(c, statusCode, body)
+}
+
+func (ac *AdminProductController) PostProductImagePresign(c *gin.Context) {
+	defer ac.logger.Debug("admin request complete", zap.String("handler", "PostProductImagePresign"))
+
+	productID := strings.TrimSpace(c.Param("id"))
+	if !isValidPathID(productID) {
+		ac.logger.Warn("invalid product id", zap.String("handler", "PostProductImagePresign"), zap.String("product_id", productID))
+		utils.ErrorResponse(c, http.StatusBadRequest, "invalid request")
+		return
+	}
+
+	downstreamURL := ac.withQuery(fmt.Sprintf("%s/products/%s/images/presign", ac.baseURL, url.PathEscape(productID)), c.Request.URL.RawQuery)
+	ac.logger.Debug("forward admin request", zap.String("handler", "PostProductImagePresign"), zap.String("method", http.MethodPost), zap.String("url", downstreamURL))
+	body, statusCode, err := utils.ForwardPost(c.Request.Context(), ac.httpClient, downstreamURL, nil, c.Request.Header)
+	if err != nil {
+		ac.logger.Error("downstream request failed", zap.String("handler", "PostProductImagePresign"), zap.Error(err))
+		utils.ErrorResponse(c, http.StatusServiceUnavailable, "downstream service unavailable")
+		return
+	}
+	ac.logger.Debug("downstream response received", zap.String("handler", "PostProductImagePresign"), zap.Int("status", statusCode))
+
+	ac.handleForwardResponse(c, statusCode, body)
+}
+
 func (ac *AdminProductController) bindCreateProductBody(c *gin.Context) ([]byte, bool) {
 	var payload adminProductCreateRequest
 	if err := c.ShouldBindJSON(&payload); err != nil {
@@ -174,7 +214,7 @@ func (ac *AdminProductController) bindUpdateProductBody(c *gin.Context) ([]byte,
 
 	if payload.Name == nil && payload.Description == nil && payload.Brand == nil &&
 		payload.SKU == nil && payload.Price == nil && payload.Quantity == nil &&
-		payload.IsFeatured == nil && payload.Categories == nil {
+		payload.IsFeatured == nil && payload.Categories == nil && payload.Images == nil {
 		ac.logger.Warn("empty request body", zap.String("handler", "UpdateProduct"))
 		utils.ErrorResponse(c, http.StatusBadRequest, "invalid request")
 		return nil, false
@@ -265,4 +305,17 @@ func decodeResponseBody(responseBody []byte) interface{} {
 		return gin.H{"raw": string(responseBody)}
 	}
 	return decoded
+}
+
+func (ac *AdminProductController) withQuery(rawURL, rawQuery string) string {
+	if rawQuery == "" {
+		return rawURL
+	}
+
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	parsed.RawQuery = rawQuery
+	return parsed.String()
 }

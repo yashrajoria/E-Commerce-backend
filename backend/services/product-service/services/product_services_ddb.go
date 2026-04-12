@@ -62,6 +62,22 @@ func (s *ProductServiceDDB) GeneratePresignedUpload(ctx context.Context, sku, fi
 	ext := filepath.Ext(filename)
 	key := fmt.Sprintf("%sproduct_img_%s_%s%s", s.prefix, sku, uuid.New().String(), ext)
 
+	return s.presignObjectUpload(ctx, key, contentType, expiresSeconds)
+}
+
+// GenerateProductImagePresignedUpload returns a presigned PUT URL and stable public URL for an existing product.
+func (s *ProductServiceDDB) GenerateProductImagePresignedUpload(ctx context.Context, productID uuid.UUID, filename, contentType string, expiresSeconds int64) (string, string, string, error) {
+	cleanFilename := filepath.Base(filename)
+	if cleanFilename == "." || cleanFilename == "" {
+		cleanFilename = "upload"
+	}
+	key := fmt.Sprintf("%sproduct/%s/%s", s.prefix, productID.String(), cleanFilename)
+
+	return s.presignObjectUpload(ctx, key, contentType, expiresSeconds)
+}
+
+func (s *ProductServiceDDB) presignObjectUpload(ctx context.Context, key, contentType string, expiresSeconds int64) (string, string, string, error) {
+
 	input := &s3.PutObjectInput{
 		Bucket:      aws.String(s.bucket),
 		Key:         aws.String(key),
@@ -75,16 +91,7 @@ func (s *ProductServiceDDB) GeneratePresignedUpload(ctx context.Context, sku, fi
 		return "", "", "", fmt.Errorf("failed to presign put object: %w", err)
 	}
 
-	var publicURL string
-	if s.cdnDomain != "" {
-		publicURL = fmt.Sprintf("https://%s/%s", strings.TrimRight(s.cdnDomain, "/"), key)
-	} else if s.endpoint != "" {
-		publicURL = fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpoint, "/"), s.bucket, key)
-	} else {
-		publicURL = fmt.Sprintf("https://%s.s3.amazonaws.com/%s", s.bucket, key)
-	}
-
-	return presignedReq.URL, key, publicURL, nil
+	return presignedReq.URL, key, s.publicObjectURL(key), nil
 }
 
 func (s *ProductServiceDDB) GetProduct(ctx context.Context, id uuid.UUID) (*models.Product, error) {
@@ -192,13 +199,7 @@ func (s *ProductServiceDDB) CreateProduct(ctx context.Context, req ProductCreate
 		if err != nil {
 			continue
 		}
-		var urlStr string
-		if s.endpoint != "" {
-			urlStr = fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpoint, "/"), s.bucket, key)
-		} else {
-			urlStr = fmt.Sprintf("https://%s.s3.amazonaws.com/%s", s.bucket, key)
-		}
-		imageURLs = append(imageURLs, urlStr)
+		imageURLs = append(imageURLs, s.publicObjectURL(key))
 	}
 
 	// Step 3: Create the product model
@@ -849,8 +850,27 @@ func (s *ProductServiceDDB) uploadImageFromURL(ctx context.Context, imageURL, sk
 		return "", fmt.Errorf("failed to upload to s3: %w", err)
 	}
 
-	if s.endpoint != "" {
-		return fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpoint, "/"), s.bucket, key), nil
+	return s.publicObjectURL(key), nil
+}
+
+func (s *ProductServiceDDB) publicObjectURL(key string) string {
+	if s.cdnDomain != "" {
+		return fmt.Sprintf("%s/%s", normalizePublicBaseURL(s.cdnDomain), key)
 	}
-	return fmt.Sprintf("https://%s.s3.amazonaws.com/%s", s.bucket, key), nil
+	if s.endpoint != "" {
+		return fmt.Sprintf("%s/%s/%s", normalizePublicBaseURL(s.endpoint), s.bucket, key)
+	}
+	return fmt.Sprintf("https://%s.s3.amazonaws.com/%s", s.bucket, key)
+}
+
+func normalizePublicBaseURL(raw string) string {
+	base := strings.TrimSpace(raw)
+	base = strings.TrimRight(base, "/")
+	if base == "" {
+		return ""
+	}
+	if strings.HasPrefix(base, "http://") || strings.HasPrefix(base, "https://") {
+		return base
+	}
+	return "https://" + base
 }
