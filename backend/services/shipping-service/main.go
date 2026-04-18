@@ -7,16 +7,13 @@ import (
 	"os"
 	"os/signal"
 	"shipping-service/controllers"
-	"shipping-service/database"
 	"shipping-service/providers"
-	"shipping-service/repository"
 	"shipping-service/routes"
 	servicepkg "shipping-service/services"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"go.uber.org/zap"
 )
 
@@ -32,31 +29,13 @@ func main() {
 		logger.Fatal("Failed to load config", zap.Error(err))
 	}
 
-	if err := database.Connect(); err != nil {
-		logger.Fatal("Failed to connect to database", zap.Error(err))
-	}
-	defer database.Close() //nolint:errcheck
-
-	// AWS clients
-	awsCfg, awsErr := aws_pkg.LoadAWSConfig(context.Background())
-	var snsClient aws_pkg.SNSPublisher
-
-	if awsErr != nil {
-		logger.Warn("AWS config unavailable, SNS disabled", zap.Error(awsErr))
-	} else {
-		snsClient = aws_pkg.NewSNSClient(awsCfg)
+	shippingProvider, err := providers.NewStaticRateProvider(cfg.ShippingRatesFile)
+	if err != nil {
+		logger.Fatal("Failed to load shipping rates", zap.Error(err))
 	}
 
-	// Provider and DI chain
-	shippingProvider := providers.NewShippoProvider(cfg.ShippoAPIKey)
-	shipmentRepo := repository.NewGormShipmentRepository(database.DB)
 	shippingService := servicepkg.NewShippingService(
-		shipmentRepo,
 		shippingProvider,
-		snsClient,
-		cfg.ShippingSNSTopicARN,
-		cfg.NotificationSNSTopicARN,
-		cfg.OriginAddress(),
 		logger,
 	)
 	shippingController := controllers.NewShippingController(shippingService)

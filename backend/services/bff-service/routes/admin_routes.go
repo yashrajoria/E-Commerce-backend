@@ -32,7 +32,9 @@ func RegisterAdminRoutes(
 	if productCtrl != nil {
 		admin.GET("/products", productCtrl.ListProducts)
 		admin.POST("/products", productCtrl.CreateProduct)
+		admin.GET("/products/presign", productCtrl.GetPresignUpload)
 		admin.PUT("/products/:id", productCtrl.UpdateProduct)
+		admin.POST("/products/:id/images/presign", productCtrl.PostProductImagePresign)
 		admin.DELETE("/products/:id", productCtrl.DeleteProduct)
 	}
 

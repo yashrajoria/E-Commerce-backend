@@ -5,13 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
-
-	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -118,8 +115,13 @@ func (h *PresignedURLHandler) PostPresignUpload(c *gin.Context) {
 		return
 	}
 
-	// Generate presigned URL
-	url, key, err := h.generatePresignedURL(ctx, productID, params.Filename, params.Expires)
+	uploadURL, key, publicURL, err := h.productService.GenerateProductImagePresignedUpload(
+		ctx,
+		productID,
+		params.Filename,
+		params.ContentType,
+		params.Expires,
+	)
 	if err != nil {
 		zap.L().Error("Failed to generate presigned URL", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate presigned upload"})
@@ -127,9 +129,10 @@ func (h *PresignedURLHandler) PostPresignUpload(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"upload_url": url,
+		"upload_url": uploadURL,
 		"method":     "PUT",
 		"key":        key,
+		"public_url": publicURL,
 		"expires_in": params.Expires,
 	})
 }
@@ -161,26 +164,6 @@ func (h *PresignedURLHandler) parsePresignParams(c *gin.Context) (*presignParams
 		ContentType: contentType,
 		Expires:     expires,
 	}, nil
-}
-
-func (h *PresignedURLHandler) generatePresignedURL(ctx context.Context, productID uuid.UUID, filename string, expires int64) (string, string, error) {
-	cfg, err := aws_pkg.LoadAWSConfig(ctx)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to load AWS config: %w", err)
-	}
-
-	bucket := os.Getenv("S3_BUCKET_IMAGES")
-	if bucket == "" {
-		bucket = "ecommerce-product-images"
-	}
-
-	key := fmt.Sprintf("product/%s/%s", productID.String(), filename)
-	url, _, err := aws_pkg.GeneratePresignedPutURL(ctx, cfg, bucket, key, expires)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to generate presigned URL: %w", err)
-	}
-
-	return url, key, nil
 }
 
 func isAllowedImageContentType(contentType string) bool {

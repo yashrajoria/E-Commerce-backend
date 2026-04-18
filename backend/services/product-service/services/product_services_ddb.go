@@ -25,15 +25,16 @@ import (
 
 // ProductServiceDDB is a DynamoDB-backed product service
 type ProductServiceDDB struct {
-	productRepo     repository.ProductRepo
-	categoryRepo    repository.CategoryRepo
-	s3Client        *s3.Client
-	presignClient   *s3.PresignClient
-	bucket          string
-	prefix          string
-	endpoint        string
-	cdnDomain       string
-	inventoryClient *InventoryClient
+	productRepo      repository.ProductRepo
+	categoryRepo     repository.CategoryRepo
+	categoryService  *CategoryServiceDDB // For updating product counts when products change
+	s3Client         *s3.Client
+	presignClient    *s3.PresignClient
+	bucket           string
+	prefix           string
+	endpoint         string
+	cdnDomain        string
+	inventoryClient  *InventoryClient
 }
 
 func NewProductServiceDDB(
@@ -57,10 +58,32 @@ func NewProductServiceDDB(
 	}
 }
 
+// SetCategoryService sets the category service for updating product counts.
+// Called after service initialization to avoid circular dependency.
+func (s *ProductServiceDDB) SetCategoryService(cs *CategoryServiceDDB) {
+	s.categoryService = cs
+}
+
 // GeneratePresignedUpload returns a presigned PUT URL, the object key, and the public URL
 func (s *ProductServiceDDB) GeneratePresignedUpload(ctx context.Context, sku, filename, contentType string, expiresSeconds int64) (string, string, string, error) {
 	ext := filepath.Ext(filename)
 	key := fmt.Sprintf("%sproduct_img_%s_%s%s", s.prefix, sku, uuid.New().String(), ext)
+
+	return s.presignObjectUpload(ctx, key, contentType, expiresSeconds)
+}
+
+// GenerateProductImagePresignedUpload returns a presigned PUT URL and stable public URL for an existing product.
+func (s *ProductServiceDDB) GenerateProductImagePresignedUpload(ctx context.Context, productID uuid.UUID, filename, contentType string, expiresSeconds int64) (string, string, string, error) {
+	cleanFilename := filepath.Base(filename)
+	if cleanFilename == "." || cleanFilename == "" {
+		cleanFilename = "upload"
+	}
+	key := fmt.Sprintf("%sproduct/%s/%s", s.prefix, productID.String(), cleanFilename)
+
+	return s.presignObjectUpload(ctx, key, contentType, expiresSeconds)
+}
+
+func (s *ProductServiceDDB) presignObjectUpload(ctx context.Context, key, contentType string, expiresSeconds int64) (string, string, string, error) {
 
 	input := &s3.PutObjectInput{
 		Bucket:      aws.String(s.bucket),
@@ -75,16 +98,7 @@ func (s *ProductServiceDDB) GeneratePresignedUpload(ctx context.Context, sku, fi
 		return "", "", "", fmt.Errorf("failed to presign put object: %w", err)
 	}
 
-	var publicURL string
-	if s.cdnDomain != "" {
-		publicURL = fmt.Sprintf("https://%s/%s", strings.TrimRight(s.cdnDomain, "/"), key)
-	} else if s.endpoint != "" {
-		publicURL = fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpoint, "/"), s.bucket, key)
-	} else {
-		publicURL = fmt.Sprintf("https://%s.s3.amazonaws.com/%s", s.bucket, key)
-	}
-
-	return presignedReq.URL, key, publicURL, nil
+	return presignedReq.URL, key, s.publicObjectURL(key), nil
 }
 
 func (s *ProductServiceDDB) GetProduct(ctx context.Context, id uuid.UUID) (*models.Product, error) {
@@ -192,13 +206,7 @@ func (s *ProductServiceDDB) CreateProduct(ctx context.Context, req ProductCreate
 		if err != nil {
 			continue
 		}
-		var urlStr string
-		if s.endpoint != "" {
-			urlStr = fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpoint, "/"), s.bucket, key)
-		} else {
-			urlStr = fmt.Sprintf("https://%s.s3.amazonaws.com/%s", s.bucket, key)
-		}
-		imageURLs = append(imageURLs, urlStr)
+		imageURLs = append(imageURLs, s.publicObjectURL(key))
 	}
 
 	// Step 3: Create the product model
@@ -224,7 +232,10 @@ func (s *ProductServiceDDB) CreateProduct(ctx context.Context, req ProductCreate
 		return nil, err
 	}
 
-	// Step 5: Sync inventory (fire-and-forget; log errors but don't fail the product creation)
+	// Step 5: Update category product counts
+	go s.updateCategoryCountsAfterProductCreation(context.Background(), product.CategoryIDs)
+
+	// Step 6: Sync inventory (fire-and-forget; log errors but don't fail the product creation)
 	if s.inventoryClient != nil && product.Quantity > 0 {
 		if invErr := s.inventoryClient.SetStock(ctx, product.ID.String(), product.Quantity); invErr != nil {
 			zap.L().Warn("Failed to sync inventory for new product",
@@ -239,6 +250,13 @@ func (s *ProductServiceDDB) CreateProduct(ctx context.Context, req ProductCreate
 }
 
 func (s *ProductServiceDDB) UpdateProduct(ctx context.Context, id uuid.UUID, req ProductUpdateRequest) (int64, error) {
+	// Fetch current product to track old category IDs
+	oldProduct, err := s.productRepo.FindByID(ctx, id)
+	if err != nil {
+		return 0, fmt.Errorf("product not found: %w", err)
+	}
+	oldCategoryIDs := oldProduct.CategoryIDs
+
 	// Build map for DynamoDB update
 	updates := make(map[string]interface{})
 
@@ -279,9 +297,14 @@ func (s *ProductServiceDDB) UpdateProduct(ctx context.Context, id uuid.UUID, req
 
 	updates["updated_at"] = time.Now().UTC().Format(time.RFC3339)
 
-	err := s.productRepo.Update(ctx, id, updates)
+	err = s.productRepo.Update(ctx, id, updates)
 	if err != nil {
 		return 0, err
+	}
+
+	// If categories changed, update category product counts
+	if req.CategoryIDs != nil && !slicesEqual(oldCategoryIDs, req.CategoryIDs) {
+		go s.updateCategoryCountsAfterProductMove(context.Background(), oldCategoryIDs, req.CategoryIDs)
 	}
 
 	// Sync inventory if quantity is updated
@@ -297,10 +320,19 @@ func (s *ProductServiceDDB) UpdateProduct(ctx context.Context, id uuid.UUID, req
 }
 
 func (s *ProductServiceDDB) DeleteProduct(ctx context.Context, id uuid.UUID) (int64, error) {
-	err := s.productRepo.Delete(ctx, id)
+	// Fetch product before deletion to get its category IDs for count updates
+	product, err := s.productRepo.FindByID(ctx, id)
+	if err != nil {
+		return 0, fmt.Errorf("product not found: %w", err)
+	}
+
+	err = s.productRepo.Delete(ctx, id)
 	if err != nil {
 		return 0, err
 	}
+
+	// Update category product counts
+	go s.updateCategoryCountsAfterProductDeletion(context.Background(), product.CategoryIDs)
 
 	// Sync inventory: Set stock to 0 to prevent future orders
 	if s.inventoryClient != nil {
@@ -849,8 +881,146 @@ func (s *ProductServiceDDB) uploadImageFromURL(ctx context.Context, imageURL, sk
 		return "", fmt.Errorf("failed to upload to s3: %w", err)
 	}
 
-	if s.endpoint != "" {
-		return fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpoint, "/"), s.bucket, key), nil
+	return s.publicObjectURL(key), nil
+}
+
+func (s *ProductServiceDDB) publicObjectURL(key string) string {
+	if s.cdnDomain != "" {
+		return fmt.Sprintf("%s/%s", normalizePublicBaseURL(s.cdnDomain), key)
 	}
-	return fmt.Sprintf("https://%s.s3.amazonaws.com/%s", s.bucket, key), nil
+	if s.endpoint != "" {
+		return fmt.Sprintf("%s/%s/%s", normalizePublicBaseURL(s.endpoint), s.bucket, key)
+	}
+	return fmt.Sprintf("https://%s.s3.amazonaws.com/%s", s.bucket, key)
+}
+
+func normalizePublicBaseURL(raw string) string {
+	base := strings.TrimSpace(raw)
+	base = strings.TrimRight(base, "/")
+	if base == "" {
+		return ""
+	}
+	if strings.HasPrefix(base, "http://") || strings.HasPrefix(base, "https://") {
+		return base
+	}
+	return "https://" + base
+}
+
+// updateCategoryCountsAfterProductCreation updates product counts for all affected categories.
+// Called asynchronously after a product is created.
+func (s *ProductServiceDDB) updateCategoryCountsAfterProductCreation(ctx context.Context, categoryIDs []uuid.UUID) {
+	if s.categoryService == nil {
+		return
+	}
+
+	// Update counts for all categories and their parents
+	affectedCategories := s.getAllAncestorCategories(ctx, categoryIDs)
+	for _, catID := range affectedCategories {
+		if err := s.categoryService.RecalculateProductCountsForCategory(ctx, catID); err != nil {
+			zap.L().Warn("Failed to update category count after product creation",
+				zap.String("category_id", catID.String()),
+				zap.Error(err))
+		}
+	}
+}
+
+// updateCategoryCountsAfterProductDeletion updates product counts for all affected categories after a product is deleted.
+// Called asynchronously after a product is deleted.
+func (s *ProductServiceDDB) updateCategoryCountsAfterProductDeletion(ctx context.Context, categoryIDs []uuid.UUID) {
+	if s.categoryService == nil {
+		return
+	}
+
+	// Update counts for all categories and their parents
+	affectedCategories := s.getAllAncestorCategories(ctx, categoryIDs)
+	for _, catID := range affectedCategories {
+		if err := s.categoryService.RecalculateProductCountsForCategory(ctx, catID); err != nil {
+			zap.L().Warn("Failed to update category count after product deletion",
+				zap.String("category_id", catID.String()),
+				zap.Error(err))
+		}
+	}
+}
+
+// updateCategoryCountsAfterProductMove updates product counts after a product is moved between categories.
+// Called asynchronously after a product's categories are changed.
+func (s *ProductServiceDDB) updateCategoryCountsAfterProductMove(ctx context.Context, oldCategoryIDs, newCategoryIDs []uuid.UUID) {
+	if s.categoryService == nil {
+		return
+	}
+
+	// Combine old and new categories to update all affected categories and parents
+	allAffected := make(map[uuid.UUID]bool)
+	for _, cat := range oldCategoryIDs {
+		allAffected[cat] = true
+	}
+	for _, cat := range newCategoryIDs {
+		allAffected[cat] = true
+	}
+
+	// Get all ancestors and add them to the affected set
+	oldAncestors := s.getAllAncestorCategories(ctx, oldCategoryIDs)
+	newAncestors := s.getAllAncestorCategories(ctx, newCategoryIDs)
+	for _, cat := range oldAncestors {
+		allAffected[cat] = true
+	}
+	for _, cat := range newAncestors {
+		allAffected[cat] = true
+	}
+
+	// Update counts for all affected categories
+	for catID := range allAffected {
+		if err := s.categoryService.RecalculateProductCountsForCategory(ctx, catID); err != nil {
+			zap.L().Warn("Failed to update category count after product move",
+				zap.String("category_id", catID.String()),
+				zap.Error(err))
+		}
+	}
+}
+
+// getAllAncestorCategories returns all ancestor categories for the given category IDs.
+// This ensures parent categories also have their counts updated.
+func (s *ProductServiceDDB) getAllAncestorCategories(ctx context.Context, categoryIDs []uuid.UUID) []uuid.UUID {
+	allCategories, err := s.categoryRepo.FindAll(ctx)
+	if err != nil {
+		return categoryIDs
+	}
+
+	categoryMap := make(map[uuid.UUID]*models.Category)
+	for i := range allCategories {
+		categoryMap[allCategories[i].ID] = &allCategories[i]
+	}
+
+	ancestors := make(map[uuid.UUID]bool)
+	for _, catID := range categoryIDs {
+		ancestors[catID] = true
+		if cat, ok := categoryMap[catID]; ok {
+			for _, ancestorID := range cat.Ancestors {
+				ancestors[ancestorID] = true
+			}
+		}
+	}
+
+	result := make([]uuid.UUID, 0, len(ancestors))
+	for id := range ancestors {
+		result = append(result, id)
+	}
+	return result
+}
+
+// slicesEqual compares two UUID slices for equality.
+func slicesEqual(a, b []uuid.UUID) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	aMap := make(map[uuid.UUID]bool)
+	for _, id := range a {
+		aMap[id] = true
+	}
+	for _, id := range b {
+		if !aMap[id] {
+			return false
+		}
+	}
+	return true
 }

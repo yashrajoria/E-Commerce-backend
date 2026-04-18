@@ -1,4 +1,6 @@
-FROM localstack/localstack:latest
+# Pin to the last pre-transition release so local development does not require
+# a LocalStack auth token.
+FROM localstack/localstack:4.14.0
 
 # Use COPY instead of inline RUN printf to avoid the maintenance burden of
 # escaping every line, and to avoid accidentally regressing the script.

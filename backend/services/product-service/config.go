@@ -10,8 +10,12 @@ import (
 
 // Config holds all environment variables for the product-service.
 type Config struct {
-	JWTSecret string // JWT secret for authentication
-	Port      string // Service port (default: 8082)
+	JWTSecret          string // JWT secret for authentication
+	Port               string // Service port (default: 8082)
+	S3Bucket           string // S3 bucket for product images
+	S3Prefix           string // Object key prefix for product images
+	AssetPublicBaseURL string // Browser-reachable base URL for object access
+	CloudFrontDomain   string // Optional CDN domain for public asset delivery
 }
 
 // LoadConfig loads environment variables into Config struct and validates them.
@@ -26,6 +30,14 @@ func LoadConfig() (*Config, error) {
 	// Set default port if not provided
 	if cfg.Port == "" {
 		cfg.Port = "8082"
+	}
+	cfg.S3Bucket = firstNonEmpty(os.Getenv("AWS_S3_BUCKET"), os.Getenv("S3_BUCKET_IMAGES"), "shopswift")
+	cfg.S3Prefix = firstNonEmpty(os.Getenv("AWS_S3_PREFIX"), "products/")
+	cfg.AssetPublicBaseURL = os.Getenv("ASSET_PUBLIC_BASE_URL")
+	cfg.CloudFrontDomain = os.Getenv("AWS_CLOUDFRONT_DOMAIN")
+
+	if cfg.AssetPublicBaseURL == "" && aws_pkg.IsLocalStack() {
+		cfg.AssetPublicBaseURL = "http://localhost:4566"
 	}
 
 	if os.Getenv("AWS_USE_SECRETS") == "true" {
@@ -44,4 +56,13 @@ func LoadConfig() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

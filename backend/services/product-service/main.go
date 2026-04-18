@@ -69,18 +69,6 @@ func main() {
 
 	// --- 2. Dependency Injection (Wiring the layers together) ---
 
-	// Bucket and prefix (ensure these env vars are set; defaults provided)
-	bucket := os.Getenv("AWS_S3_BUCKET")
-	if bucket == "" {
-		bucket = "shopswift"
-	}
-	prefix := os.Getenv("AWS_S3_PREFIX")
-	if prefix == "" {
-		prefix = "products/"
-	}
-	endpoint := ""
-	cloudfrontDomain := os.Getenv("AWS_CLOUDFRONT_DOMAIN")
-
 	ddbClient := dynamodb.NewFromConfig(awsCfg)
 
 	// Products table
@@ -108,8 +96,21 @@ func main() {
 	inventoryClient := services.NewInventoryClient(inventoryURL)
 
 	// Initialize Services using DynamoDB repositories
-	productService := services.NewProductServiceDDB(productRepo, categoryRepo, s3Client, presignClient, bucket, prefix, endpoint, cloudfrontDomain, inventoryClient)
+	productService := services.NewProductServiceDDB(
+		productRepo,
+		categoryRepo,
+		s3Client,
+		presignClient,
+		cfg.S3Bucket,
+		cfg.S3Prefix,
+		cfg.AssetPublicBaseURL,
+		cfg.CloudFrontDomain,
+		inventoryClient,
+	)
 	categoryService := services.NewCategoryServiceDDB(categoryRepo, productRepo)
+
+	// Link category service to product service for updating product counts
+	productService.SetCategoryService(categoryService)
 
 	// Initialize Controllers, injecting services
 	productController := controllers.NewProductController(productService, ProductRedis)

@@ -119,6 +119,8 @@ services:
       - LOCALSTACK_ENDPOINT=http://localstack:4566
       - AWS_S3_BUCKET=${AWS_S3_BUCKET:-shopswift}
       - AWS_S3_PREFIX=products/
+      - ASSET_PUBLIC_BASE_URL=${ASSET_PUBLIC_BASE_URL:-http://localhost:4566}
+      - AWS_CLOUDFRONT_DOMAIN=${AWS_CLOUDFRONT_DOMAIN:-}
       - DDB_TABLE_PRODUCTS=${DDB_TABLE_PRODUCTS:-Products}
       - DDB_TABLE_CATEGORIES=${DDB_TABLE_CATEGORIES:-Categories}
       - INVENTORY_SERVICE_URL=http://inventory-service:8084
@@ -292,29 +294,12 @@ services:
     restart: unless-stopped
     volumes:
       - ./services/shipping-service:/app
-      - ./services/common:/common
-      - ./pkg/aws:/pkg/aws
     ports:
       - "8091:8091"
     env_file:
       - .env
     environment:
       - PORT=8091
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - AWS_REGION=${AWS_REGION}
-      - AWS_EC2_METADATA_DISABLED=true
-      - SHIPPO_API_KEY=${SHIPPO_API_KEY:-}
-      - SHIPPING_SNS_TOPIC_ARN=arn:aws:sns:us-east-1:000000000000:shipping-events
-      - NOTIFICATION_SNS_TOPIC_ARN=arn:aws:sns:us-east-1:000000000000:notification-events
-      - USE_LOCALSTACK=true
-      - LOCALSTACK_ENDPOINT=http://localstack:4566
-      - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
-      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
-      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
-    depends_on:
-      postgres:
-        condition: service_healthy
     networks:
       - ecommerce-network
 
@@ -390,6 +375,9 @@ services:
       # FIX: Override REDIS_URL here so the redis:// scheme from .env never
       # reaches main.go. redis.Options.Addr expects "host:port" only.
       - REDIS_URL=redis:6379
+      - RATE_LIMIT_GLOBAL=${RATE_LIMIT_GLOBAL:-1000}
+      - RATE_LIMIT_STRICT=${RATE_LIMIT_STRICT:-30}
+      - RATE_LIMIT_WINDOW_SECONDS=${RATE_LIMIT_WINDOW_SECONDS:-60}
     depends_on:
       redis:
         condition: service_healthy

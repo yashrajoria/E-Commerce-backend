@@ -23,6 +23,7 @@ type CheckoutItem struct {
 type PaymentRequest struct {
 	OrderID        string `json:"order_id"`
 	UserID         string `json:"user_id"`
+	Email          string `json:"email,omitempty"`
 	Amount         int    `json:"amount"` // minor units
 	Currency       string `json:"currency,omitempty"`
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
@@ -33,6 +34,7 @@ type PaymentEvent struct {
 	Type      string    `json:"type"` // "payment_succeeded" | "payment_failed"
 	OrderID   string    `json:"order_id"`
 	UserID    string    `json:"user_id"` // <-- Add this line
+	Email     string    `json:"email,omitempty"`
 	PaymentID string    `json:"payment_id,omitempty"`
 	Amount    int       `json:"amount,omitempty"`
 	Currency  string    `json:"currency,omitempty"`

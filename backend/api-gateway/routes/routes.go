@@ -181,8 +181,6 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 
 	// Shipping
 	protected.POST("/shipping/rates", shipping)
-	protected.POST("/shipping/labels", shipping)
-	protected.GET("/shipping/track/:tracking_code", shipping)
 
 	// =========================================================================
 	// ADMIN ROUTES — JWT + admin role required

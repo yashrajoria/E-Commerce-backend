@@ -40,23 +40,27 @@ services:
       - ecommerce-network
 
   # ── LocalStack Init ───────────────────────────────────────────────────────────
-  # Waits until LocalStack bootstrap resources exist. All application services
-  # depend on this completing successfully, eliminating startup races.
+  # Runs the bootstrap script that creates topics/queues/subscriptions and then
+  # verifies resource counts. All application services depend on this completing
+  # successfully, eliminating startup races.
   localstack-init:
     build: ./localstack
     entrypoint: ["/bin/bash", "-c"]
     command: >
       "set -euo pipefail;
+      /etc/localstack/init/ready.d/10-bootstrap-resources.sh;
       for i in $(seq 1 60); do
         q_count=$(awslocal --endpoint-url=http://localstack:4566 sqs list-queues --query 'length(QueueUrls)' --output text 2>/dev/null || echo 0);
         t_count=$(awslocal --endpoint-url=http://localstack:4566 sns list-topics --query 'length(Topics)' --output text 2>/dev/null || echo 0);
+        s_count=$(awslocal --endpoint-url=http://localstack:4566 sns list-subscriptions --query 'length(Subscriptions)' --output text 2>/dev/null || echo 0);
         if ! [[ \"$${q_count}\" =~ ^[0-9]+$ ]]; then q_count=0; fi;
         if ! [[ \"$${t_count}\" =~ ^[0-9]+$ ]]; then t_count=0; fi;
-        if [ \"$${q_count}\" -ge 8 ] && [ \"$${t_count}\" -ge 6 ]; then
-          echo \"LocalStack resources ready: queues=$${q_count}, topics=$${t_count}\";
+        if ! [[ \"$${s_count}\" =~ ^[0-9]+$ ]]; then s_count=0; fi;
+        if [ \"$${q_count}\" -ge 8 ] && [ \"$${t_count}\" -ge 6 ] && [ \"$${s_count}\" -ge 4 ]; then
+          echo \"LocalStack resources ready: queues=$${q_count}, topics=$${t_count}, subscriptions=$${s_count}\";
           exit 0;
         fi;
-        echo \"Waiting for LocalStack resources... (queues=$${q_count}, topics=$${t_count})\";
+        echo \"Waiting for LocalStack resources... (queues=$${q_count}, topics=$${t_count}, subscriptions=$${s_count})\";
         sleep 2;
       done;
       echo \"Timed out waiting for LocalStack bootstrap resources\";

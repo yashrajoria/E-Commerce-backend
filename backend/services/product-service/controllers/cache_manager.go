@@ -32,8 +32,16 @@ func NewCacheManager(redis *redis.Client) *CacheManager {
 	}
 }
 
+func (cm *CacheManager) enabled() bool {
+	return cm != nil && cm.redis != nil
+}
+
 // GetProductList retrieves a cached product list
 func (cm *CacheManager) GetProductList(ctx context.Context, page, perPage int, filters *ProductFilters) (map[string]interface{}, bool) {
+	if !cm.enabled() {
+		return nil, false
+	}
+
 	version, err := cm.getCacheVersion(ctx)
 	if err != nil || version == 0 {
 		return nil, false
@@ -56,6 +64,10 @@ func (cm *CacheManager) GetProductList(ctx context.Context, page, perPage int, f
 
 // SetProductListAsync caches a product list asynchronously
 func (cm *CacheManager) SetProductListAsync(page, perPage int, filters *ProductFilters, response map[string]interface{}) {
+	if !cm.enabled() {
+		return
+	}
+
 	go func() {
 		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -80,6 +92,10 @@ func (cm *CacheManager) SetProductListAsync(page, perPage int, filters *ProductF
 
 // SetProductAsync caches a single product asynchronously
 func (cm *CacheManager) SetProductAsync(productID string, product *models.Product) {
+	if !cm.enabled() {
+		return
+	}
+
 	go func() {
 		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -99,6 +115,10 @@ func (cm *CacheManager) SetProductAsync(productID string, product *models.Produc
 
 // Invalidate invalidates all product caches by bumping the version
 func (cm *CacheManager) Invalidate(ctx context.Context) error {
+	if !cm.enabled() {
+		return nil
+	}
+
 	newVersion, err := cm.redis.Incr(ctx, CacheVersionKey).Result()
 	if err != nil {
 		return fmt.Errorf("failed to invalidate cache: %w", err)
@@ -110,6 +130,10 @@ func (cm *CacheManager) Invalidate(ctx context.Context) error {
 
 // InvalidateProduct invalidates both list cache and specific product cache
 func (cm *CacheManager) InvalidateProduct(ctx context.Context, productID string) {
+	if !cm.enabled() {
+		return
+	}
+
 	// Invalidate list caches
 	if err := cm.Invalidate(ctx); err != nil {
 		zap.L().Error("CRITICAL: Failed to invalidate cache", zap.Error(err), zap.String("product_id", productID))
@@ -129,6 +153,10 @@ func (cm *CacheManager) InvalidateProduct(ctx context.Context, productID string)
 
 // getCacheVersion retrieves the current cache version with retry logic
 func (cm *CacheManager) getCacheVersion(ctx context.Context) (int64, error) {
+	if !cm.enabled() {
+		return 0, fmt.Errorf("redis cache disabled")
+	}
+
 	const maxRetries = 3
 
 	for i := 0; i < maxRetries; i++ {

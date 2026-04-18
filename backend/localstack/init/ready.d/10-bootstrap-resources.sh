@@ -5,6 +5,11 @@ set -x
 
 echo "Initializing LocalStack resources..."
 
+AWS_ENDPOINT="${LOCALSTACK_ENDPOINT:-http://localhost:4566}"
+awslocal_cmd() {
+    awslocal --endpoint-url "$AWS_ENDPOINT" "$@"
+}
+
 # --------------------------------------------------
 # Config (names driven by env; safe defaults)
 # --------------------------------------------------
@@ -49,8 +54,8 @@ retry() {
 # --------------------------------------------------
 BUCKET_NAME="${AWS_S3_BUCKET:-shopswift}"
 
-if ! awslocal s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
-    retry awslocal s3 mb "s3://$BUCKET_NAME"
+if ! awslocal_cmd s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+    retry awslocal_cmd s3 mb "s3://$BUCKET_NAME"
 else
     echo "S3 bucket '$BUCKET_NAME' already exists"
 fi
@@ -62,21 +67,21 @@ fi
 create_table_if_missing() {
     local tbl_name="$1"
 
-    if awslocal dynamodb describe-table --table-name "$tbl_name" >/dev/null 2>&1; then
+    if awslocal_cmd dynamodb describe-table --table-name "$tbl_name" >/dev/null 2>&1; then
         echo "DynamoDB table '$tbl_name' already exists"
         return 0
     fi
 
     echo "Creating DynamoDB table '$tbl_name'..."
 
-    retry awslocal dynamodb create-table \
+    retry awslocal_cmd dynamodb create-table \
         --table-name "$tbl_name" \
         --attribute-definitions AttributeName=id,AttributeType=S \
         --key-schema AttributeName=id,KeyType=HASH \
         --billing-mode PAY_PER_REQUEST
 
     # wait until ACTIVE
-    retry awslocal dynamodb wait table-exists --table-name "$tbl_name"
+    retry awslocal_cmd dynamodb wait table-exists --table-name "$tbl_name"
 }
 
 create_table_if_missing "${DDB_TABLE_PRODUCTS:-Products}"
@@ -90,7 +95,7 @@ create_table_if_missing "${DDB_TABLE_INVENTORY:-Inventory}"
 create_topic_if_missing() {
     local topic_name="$1"
 
-    awslocal sns create-topic \
+    awslocal_cmd sns create-topic \
         --name "$topic_name" \
         --query "TopicArn" \
         --output text
@@ -115,18 +120,18 @@ create_queue_with_dlq() {
     # --------------------------------------------------
     # 1️⃣ Create DLQ if missing
     # --------------------------------------------------
-    if ! awslocal sqs get-queue-url --queue-name "$dlq_name" >/dev/null 2>&1; then
-        echo "Creating DLQ: $dlq_name"
-        retry awslocal sqs create-queue --queue-name "$dlq_name" >/dev/null
+    if ! awslocal_cmd sqs get-queue-url --queue-name "$dlq_name" >/dev/null 2>&1; then
+        echo "Creating DLQ: $dlq_name" >&2
+        retry awslocal_cmd sqs create-queue --queue-name "$dlq_name" >/dev/null
     else
-        echo "DLQ '$dlq_name' already exists"
+        echo "DLQ '$dlq_name' already exists" >&2
     fi
 
     # Get DLQ ARN
     local dlq_url
-    dlq_url=$(awslocal sqs get-queue-url --queue-name "$dlq_name" --query "QueueUrl" --output text)
+    dlq_url=$(awslocal_cmd sqs get-queue-url --queue-name "$dlq_name" --query "QueueUrl" --output text)
     local dlq_arn
-    dlq_arn=$(awslocal sqs get-queue-attributes \
+    dlq_arn=$(awslocal_cmd sqs get-queue-attributes \
         --queue-url "$dlq_url" \
         --attribute-names QueueArn \
         --query "Attributes.QueueArn" \
@@ -135,8 +140,8 @@ create_queue_with_dlq() {
     # --------------------------------------------------
     # 2️⃣ Create Main Queue if missing
     # --------------------------------------------------
-    if ! awslocal sqs get-queue-url --queue-name "$queue_name" >/dev/null 2>&1; then
-        echo "Creating Main Queue: $queue_name with DLQ: $dlq_name"
+    if ! awslocal_cmd sqs get-queue-url --queue-name "$queue_name" >/dev/null 2>&1; then
+        echo "Creating Main Queue: $queue_name with DLQ: $dlq_name" >&2
 
         # Use temp file for RedrivePolicy JSON
         local tmpfile
@@ -147,17 +152,17 @@ create_queue_with_dlq() {
 }
 EOF
 
-        retry awslocal sqs create-queue \
+        retry awslocal_cmd sqs create-queue \
             --queue-name "$queue_name" \
             --attributes "file://$tmpfile" >/dev/null
 
         rm -f "$tmpfile"
     else
-        echo "Main queue '$queue_name' already exists"
+        echo "Main queue '$queue_name' already exists" >&2
     fi
 
     # Return Queue URL
-    awslocal sqs get-queue-url --queue-name "$queue_name" --query "QueueUrl" --output text
+    awslocal_cmd sqs get-queue-url --queue-name "$queue_name" --query "QueueUrl" --output text
 }
 
 
@@ -179,14 +184,14 @@ ensure_sqs_policy_allows_sns() {
     local queue_url="$2"
 
     local queue_arn
-    queue_arn=$(awslocal sqs get-queue-attributes \
+    queue_arn=$(awslocal_cmd sqs get-queue-attributes \
         --queue-url "$queue_url" \
         --attribute-names QueueArn \
         --query "Attributes.QueueArn" \
         --output text)
 
     local existing_policy
-    existing_policy=$(awslocal sqs get-queue-attributes \
+    existing_policy=$(awslocal_cmd sqs get-queue-attributes \
         --queue-url "$queue_url" \
         --attribute-names Policy \
         --query "Attributes.Policy" \
@@ -208,7 +213,7 @@ ensure_sqs_policy_allows_sns() {
 {"Policy":"{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"Allow-SNS-SendMessage\",\"Effect\":\"Allow\",\"Principal\":\"*\",\"Action\":\"sqs:SendMessage\",\"Resource\":\"${queue_arn}\",\"Condition\":{\"ArnEquals\":{\"aws:SourceArn\":\"${topic_arn}\"}}}]}"}
 EOF
 
-    retry awslocal sqs set-queue-attributes \
+    retry awslocal_cmd sqs set-queue-attributes \
         --queue-url "$queue_url" \
         --attributes "file://$attrs_file" >/dev/null
 
@@ -220,14 +225,14 @@ subscribe_if_missing() {
     local queue_url="$2"
 
     local queue_arn
-    queue_arn=$(awslocal sqs get-queue-attributes \
+    queue_arn=$(awslocal_cmd sqs get-queue-attributes \
         --queue-url "$queue_url" \
         --attribute-names QueueArn \
         --query "Attributes.QueueArn" \
         --output text)
 
     # check existing subscriptions
-    if awslocal sns list-subscriptions-by-topic \
+    if awslocal_cmd sns list-subscriptions-by-topic \
         --topic-arn "$topic_arn" \
         --query "Subscriptions[?Endpoint=='$queue_arn']" \
         --output text | grep -q "$queue_arn"; then
@@ -235,7 +240,7 @@ subscribe_if_missing() {
         return 0
     fi
 
-    retry awslocal sns subscribe \
+    retry awslocal_cmd sns subscribe \
         --topic-arn "$topic_arn" \
         --protocol sqs \
         --notification-endpoint "$queue_arn"
@@ -260,7 +265,7 @@ subscribe_if_missing "$NOTIFICATION_TOPIC_ARN" "$PROMOTION_ORDER_QUEUE_URL"
 # --------------------------------------------------
 # EC2 (dev-only, safe ignore if already exists)
 # --------------------------------------------------
-retry awslocal ec2 run-instances \
+retry awslocal_cmd ec2 run-instances \
     --image-id ami-ff000000 \
     --count 1 \
     --instance-type t2.micro \

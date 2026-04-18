@@ -12,10 +12,6 @@ func RegisterShippingRoutes(r *gin.Engine, sc *controllers.ShippingController) {
 	shipping := r.Group("/shipping")
 	shipping.Use(middleware.AuthMiddleware())
 
-	// Protected: calculate rates and track
+	// Protected: calculate rates
 	shipping.POST("/rates", sc.GetRates)
-	shipping.GET("/track/:tracking_code", sc.TrackShipment)
-
-	// Protected (internal/admin): create labels after order is placed
-	shipping.POST("/labels", sc.CreateLabel)
 }

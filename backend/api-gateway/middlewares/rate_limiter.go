@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -15,6 +17,12 @@ import (
 // rateLimiter is a helper function that implements the Redis sliding window pattern
 func rateLimiter(client *redis.Client, prefix string, limit int, duration time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Do not rate-limit CORS preflight requests.
+		if c.Request.Method == http.MethodOptions {
+			c.Next()
+			return
+		}
+
 		ip := c.ClientIP()
 		key := fmt.Sprintf("rate:%s:%s", prefix, ip)
 
@@ -75,12 +83,28 @@ func rateLimiter(client *redis.Client, prefix string, limit int, duration time.D
 	}
 }
 
+func getEnvInt(name string, defaultValue int) int {
+	v := os.Getenv(name)
+	if v == "" {
+		return defaultValue
+	}
+	parsed, err := strconv.Atoi(v)
+	if err != nil || parsed <= 0 {
+		return defaultValue
+	}
+	return parsed
+}
+
 // GlobalRateLimiter applies a 100 requests per minute limit across all routes
 func GlobalRateLimiter(client *redis.Client) gin.HandlerFunc {
-	return rateLimiter(client, "global", 100, time.Minute)
+	limit := getEnvInt("RATE_LIMIT_GLOBAL", 100)
+	windowSeconds := getEnvInt("RATE_LIMIT_WINDOW_SECONDS", 60)
+	return rateLimiter(client, "global", limit, time.Duration(windowSeconds)*time.Second)
 }
 
 // StrictRateLimiter applies a 5 requests per minute limit for sensitive endpoints like auth
 func StrictRateLimiter(client *redis.Client) gin.HandlerFunc {
-	return rateLimiter(client, "strict", 5, time.Minute)
+	limit := getEnvInt("RATE_LIMIT_STRICT", 5)
+	windowSeconds := getEnvInt("RATE_LIMIT_WINDOW_SECONDS", 60)
+	return rateLimiter(client, "strict", limit, time.Duration(windowSeconds)*time.Second)
 }
