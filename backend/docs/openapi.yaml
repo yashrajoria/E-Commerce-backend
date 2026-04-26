@@ -322,9 +322,15 @@ paths:
         - BFF
       summary: Register a new user account
       description: |
-        Creates a new user account. On success a verification email is sent to the provided
-        address. The user must verify their email before they can log in (if email verification
-        is enforced). Returns `409 Conflict` if the email is already registered.
+        Creates a new **user** account (role is always `user` for self-registration).
+        On success a verification email is sent to the provided address. The user must
+        verify their email before they can log in.
+
+        Returns `409 Conflict` if the email is already registered.
+
+        > **Admin Panel Signup:** To register an admin account directly from the Admin Panel UI, include the `X-Admin-Signup-Secret` header with the secret defined in the backend environment. This bypasses the email verification requirement.
+        
+        > **Standard Admin Creation:** Alternatively, use `POST /bff/admin/users` with an existing admin JWT cookie.
       operationId: bffRegister
       security: []
       requestBody:
@@ -345,12 +351,14 @@ paths:
         - BFF
       summary: Login and receive auth cookies
       description: |
-        Authenticates a user with email and password. On success, sets two HttpOnly cookies:
-        - `access_token` — short-lived JWT (e.g. 15 min) used to authenticate subsequent API requests.
-        - `refresh_token` — long-lived token (e.g. 7 days) used exclusively with `POST /auth/refresh`
-          to obtain a new access token.
+        Authenticates a user with email and password. On success, sets four HttpOnly cookies:
+        - `__session` — short-lived JWT access token (15 min). **This is the token the API
+          Gateway validates on every subsequent request.**
+        - `refresh_token` — long-lived token (7 days) used exclusively with `POST /bff/auth/refresh`.
+        - `user_id` — the authenticated user's UUID (readable by JS, used by BFF internally).
+        - `user_role` — the authenticated user's role (`user` or `admin`).
 
-        Returns `401 Unauthorized` for invalid credentials or unverified accounts.
+        Returns `401 Unauthorized` for invalid credentials or unverified email addresses.
       operationId: bffLogin
       security: []
       requestBody:
@@ -363,7 +371,7 @@ paths:
               description: HttpOnly auth cookies set on successful authentication.
               schema:
                 type: string
-              example: "access_token=eyJ...; HttpOnly; Secure; SameSite=Strict; Path=/"
+              example: "__session=eyJ...; HttpOnly; Secure; SameSite=None; Path=/"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "502":
@@ -448,6 +456,40 @@ paths:
           $ref: "#/components/responses/MessageResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /bff/auth/resend-verification:
+    post:
+      tags:
+        - BFF
+      summary: Resend email verification code
+      description: |
+        Generates a new one-time verification code and resends it to the provided email address.
+        Use this when the original code has expired or was not received.
+        Returns `404` if the email is not registered, and `400` if the email is already verified.
+      operationId: bffResendVerification
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: user@example.com
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
         "502":
@@ -1146,6 +1188,48 @@ paths:
                     total_pages: 2
                 error: ""
         "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+    post:
+      tags: [Admin]
+      summary: Create user (admin)
+      operationId: adminCreateUser
+      description: |
+        Creates a user through the auth-service admin flow.
+        Requires admin role and supports creating either `user` or `admin` accounts.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password, role]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 8
+                role:
+                  type: string
+                  enum: [admin, user]
+            example:
+              name: "Ops Admin"
+              email: "ops-admin@example.com"
+              password: "StrongPass#123"
+              role: "admin"
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
         "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
 
   /bff/admin/users/{id}/role:
