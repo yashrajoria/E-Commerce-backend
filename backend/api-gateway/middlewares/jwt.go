@@ -3,14 +3,12 @@ package middlewares
 import (
 	"api-gateway/logger"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
-	"github.com/joho/godotenv"
 	"go.uber.org/zap"
 )
 
@@ -20,19 +18,15 @@ var (
 	cookieDomain string
 )
 
-func init() {
-	_ = godotenv.Load()
+func InitJWTConfig() error {
 	isProduction = os.Getenv("ENV") == "production"
 	secret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
 	if secret == "" {
-		if isProduction {
-			log.Fatal("JWT_SECRET is not set in env")
-		}
-		secret = "dev-insecure-jwt-secret"
-		log.Printf("[GATEWAY][JWT] JWT_SECRET missing, using local dev fallback secret")
+		return fmt.Errorf("JWT_SECRET is not set in env")
 	}
 	secretKey = []byte(secret)
 	cookieDomain = os.Getenv("COOKIE_DOMAIN")
+	return nil
 }
 
 // JWTMiddleware validates JWT access token and refreshes when needed
@@ -79,8 +73,9 @@ func JWTMiddleware() gin.HandlerFunc {
 // AdminRoleMiddleware restricts access to users with role admin
 func AdminRoleMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		role, exists := c.Get("role")
-		if !exists || role != "admin" {
+		roleVal, exists := c.Get("role")
+		roleStr, ok := roleVal.(string)
+		if !exists || !ok || roleStr != "admin" {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Admin role required"})
 			c.Abort()
 			return
@@ -91,6 +86,10 @@ func AdminRoleMiddleware() gin.HandlerFunc {
 
 // parseToken validates and extracts claims
 func parseToken(tokenStr, expectedType string) (jwt.MapClaims, error) {
+	if len(secretKey) == 0 {
+		return nil, fmt.Errorf("JWT config not initialized")
+	}
+
 	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])

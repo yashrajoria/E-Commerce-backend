@@ -100,6 +100,7 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	bffPublic.POST("/auth/register", bff)
 	bffPublic.POST("/auth/login", bff)
 	bffPublic.POST("/auth/verify-email", bff)
+	bffPublic.POST("/auth/resend-verification", bff)
 	bffPublic.POST("/auth/refresh", bff)
 	bffPublic.GET("/products", bff)
 	bffPublic.GET("/products/*action", bff)
@@ -127,8 +128,43 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	// FIX: removed redundant .Use(JWTMiddleware()) — already applied by `protected` group.
 	bffAdmin := protected.Group("/bff/admin")
 	bffAdmin.Use(middlewares.AdminRoleMiddleware())
-	bffAdmin.Any("", bff)
-	bffAdmin.Any("/*action", bff)
+	
+	// Keep dashboard and analytics routed to BFF
+	bffAdmin.GET("/dashboard", bff)
+	bffAdmin.GET("/reports/*any", bff)
+
+	// Map CRUD operations directly to microservices to avoid bff double-proxy
+	bffAdmin.GET("/products", products)
+	bffAdmin.POST("/products", products)
+	bffAdmin.GET("/products/presign", forwardTo("http://product-service:8082/products/presign"))
+	bffAdmin.PUT("/products/*any", products)
+	bffAdmin.POST("/products/*any", products)
+	bffAdmin.DELETE("/products/*any", products)
+
+	bffAdmin.GET("/categories", categories)
+	bffAdmin.POST("/categories", categories)
+	bffAdmin.PUT("/categories/*any", categories)
+	bffAdmin.DELETE("/categories/*any", categories)
+
+	bffAdmin.GET("/users", users)
+	bffAdmin.POST("/users", forwardTo("http://auth-service:8081/auth/admin/users"))
+	bffAdmin.PUT("/users/*any", users) 
+	bffAdmin.DELETE("/users/*any", users)
+
+	bffAdmin.GET("/orders", forwardTo("http://order-service:8083/orders/admin/"))
+	bffAdmin.GET("/orders/*any", orders)
+	bffAdmin.PUT("/orders/*any", orders)
+
+	bffAdmin.GET("/inventory", inventory)
+	bffAdmin.PUT("/inventory/*any", inventory)
+
+	bffAdmin.GET("/coupons", coupons)
+	bffAdmin.POST("/coupons", coupons)
+	bffAdmin.PUT("/coupons/*any", coupons)
+	bffAdmin.DELETE("/coupons/*any", coupons)
+
+	bffAdmin.GET("/notifications", notifications)
+	bffAdmin.GET("/notifications/log", forwardTo("http://notification-service:8092/notifications/log"))
 
 	// Agent — ADMIN (JWT + Admin Role required)
 	// FIX: same — no need to re-apply JWTMiddleware inside a protected sub-group.
@@ -214,4 +250,6 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 
 	// Notifications — admin read
 	admin.GET("/notifications/log", notifications)
+	// Auth — admin-only user creation (forward to auth-service)
+	admin.POST("/auth/admin/users", authProxy)
 }
