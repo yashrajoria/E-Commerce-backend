@@ -6,6 +6,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue v1.20.31
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.55.0
 	github.com/gin-gonic/gin v1.10.1
+	github.com/joho/godotenv v1.5.1
 	github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws v0.0.0
 	go.uber.org/zap v1.27.1
 )
