@@ -110,10 +110,8 @@ tags:
       discounts. Publishes a `coupon_applied` SNS event when a coupon is successfully applied.
   - name: Shipping Service
     description: |
-      Shipping management. Returns configured shipping rates based on destination country and
-      parcel weight. Rates are loaded from a local JSON catalog rather than a live carrier API.
-      Manual Postman tests are available in
-      `backend/test-data/postman/shipping-service-rates.postman_collection.json`.
+      Shipping management. Returns dynamic shipping rates based on destination country and
+      parcel weight using a cost-free internal calculation engine. No external carrier APIs are required.
   - name: Admin Only
     description: |
       🔐 Endpoints in this group require the caller to have the `admin` role. Requests from
@@ -676,7 +674,8 @@ paths:
         session. Returns the new order ID, initial status, and an optional `checkout_url` to
         redirect the user to Stripe's hosted payment page.
 
-        This operation is idempotent when an `Idempotency-Key` is provided — retrying with the
+        This operation is protected by a distributed Redis lock (SetNX) to ensure atomicity. 
+        It is idempotent when an `Idempotency-Key` is provided — retrying with the
         same key within the deduplication window returns the same order and checkout URL without
         creating a duplicate order. The cart is cleared after a successful checkout initiation.
       operationId: bffCheckout

@@ -1,0 +1,76 @@
+flowchart LR
+  subgraph Users
+    U[Frontend / Client]
+  end
+
+  subgraph Edge
+    API[API Gateway (http://localhost:8080)]
+  end
+
+  subgraph BFF_Service
+    BFF[BFF Service (http://localhost:8088)]
+  end
+
+  subgraph Services
+    AUTH[Auth Service]
+    USER[User Service]
+    PROD[Product Service]
+    CART[Cart Service]
+    ORDER[Order Service]
+    PAYMENT[Payment Service]
+    INVENT[Inventory Service]
+    PROMO[Promotion Service]
+    SHIP[Shipping Service]
+  end
+
+  subgraph Infrastructure
+    PG[(Postgres)]
+    REDIS[(Redis)]
+    S3[(S3 / Localstack S3)]
+    SQS[(SQS / Localstack)]
+    DDB[(DynamoDB - optional)]
+    CW[CloudWatch]
+    STRIPE[(Stripe)]
+  end
+
+  U -->|HTTP /cookies| API
+  API -->|proxy| BFF
+  API -->|proxy| AUTH
+  API -->|proxy| USER
+  API -->|proxy| PROD
+  API -->|proxy| CART
+  API -->|proxy| ORDER
+  API -->|proxy| PAYMENT
+  API -->|proxy| INVENT
+  API -->|proxy| PROMO
+  API -->|proxy| SHIP
+
+  BFF -->|calls| PROD
+  BFF -->|calls| CART
+  BFF -->|calls| ORDER
+  BFF -->|calls| PAYMENT
+  BFF -->|calls| AUTH
+  BFF -->|calls| PROMO
+  BFF -->|calls| SHIP
+  BFF -->|idempotency/cache| REDIS
+
+  CART -->|store| REDIS
+  CART -->|writes| PG
+  ORDER -->|writes/read| PG
+  AUTH -->|writes| PG
+  USER -->|writes| PG
+  PROMO -->|writes| PG
+  SHIP -->|writes| PG
+
+  PROD -->|media| S3
+  PROD -->|category lookup| DDB
+
+  PAYMENT -->|publishes| SQS
+  PAYMENT -->|webhook| STRIPE
+  PAYMENT -->|stores| PG
+
+  PROMO -->|events| SQS
+  INVENT -->|events| SQS
+  ORDER -->|reserve| INVENT
+
+  ALL_SERVICES([All services]) -->|logs/metrics| CW
