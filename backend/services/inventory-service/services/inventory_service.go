@@ -110,112 +110,52 @@ func (s *InventoryService) UpdateStock(ctx context.Context, productID string, re
 	return s.repo.Get(ctx, productID)
 }
 
-// ReserveStock reserves inventory for order items
+// ReserveStock reserves inventory for order items atomically and idempotently.
 func (s *InventoryService) ReserveStock(ctx context.Context, req *models.ReserveRequest) ([]models.StockCheckResult, error) {
-	results := make([]models.StockCheckResult, 0, len(req.Items))
-
-	// First, check all items have sufficient stock
-	for _, item := range req.Items {
-		check, err := s.repo.CheckStock(ctx, item.ProductID, item.Quantity)
-		if err != nil {
-			return nil, fmt.Errorf("failed to check stock for product=%s: %w", item.ProductID, err)
-		}
-		if !check.IsSufficient {
-			return nil, fmt.Errorf("insufficient stock for product=%s: available=%d requested=%d",
-				item.ProductID, check.Available, item.Quantity)
-		}
+	// Call transactional repository method
+	if err := s.repo.ReserveAll(ctx, req.OrderID, req.Items); err != nil {
+		return nil, err
 	}
 
-	// Reserve each item
+	results := make([]models.StockCheckResult, 0, len(req.Items))
 	for _, item := range req.Items {
-		if err := s.repo.Reserve(ctx, item.ProductID, item.Quantity); err != nil {
-			// Rollback previously reserved items
-			for _, reserved := range results {
-				_ = s.repo.Release(ctx, reserved.ProductID, reserved.Requested)
-			}
-
-			if errors.Is(err, repository.ErrInsufficientStock) {
-				return nil, fmt.Errorf("insufficient stock for product=%s (race condition)", item.ProductID)
-			}
-			return nil, fmt.Errorf("failed to reserve stock for product=%s: %w", item.ProductID, err)
-		}
-
 		results = append(results, models.StockCheckResult{
 			ProductID:    item.ProductID,
 			Requested:    item.Quantity,
 			IsSufficient: true,
 		})
 
-		// Emit metrics
+		// Emit metrics (async)
 		if s.metricsClient != nil && s.metricsClient.IsEnabled() {
-			go func(productID string, quantity int) {
-				metricCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			go func(pID string, qty int) {
+				mCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				dims := map[string]string{"ProductID": productID}
-				_ = s.metricsClient.RecordCount(metricCtx, awspkg.MetricInventoryReserved, dims)
-				_ = s.metricsClient.RecordValue(metricCtx, "InventoryReservedQuantity", float64(quantity), dims)
-
-				// Check for low stock after reservation
-				inv, err := s.repo.Get(metricCtx, productID)
-				if err == nil && inv.Available <= inv.Threshold && inv.Threshold > 0 {
-					_ = s.metricsClient.RecordCount(metricCtx, awspkg.MetricInventoryLow, dims)
-				}
+				dims := map[string]string{"ProductID": pID}
+				_ = s.metricsClient.RecordCount(mCtx, awspkg.MetricInventoryReserved, dims)
+				_ = s.metricsClient.RecordValue(mCtx, "InventoryReservedQuantity", float64(qty), dims)
 			}(item.ProductID, item.Quantity)
 		}
 	}
 
-	log.Printf("[InventoryService] Reserved stock for order=%s items=%d", req.OrderID, len(results))
+	log.Printf("[InventoryService] Transactional reserve success for order=%s items=%d", req.OrderID, len(results))
 	return results, nil
 }
 
-// ReleaseStock releases previously reserved stock (order cancelled/payment failed)
+// ReleaseStock releases previously reserved stock atomically and idempotently.
 func (s *InventoryService) ReleaseStock(ctx context.Context, req *models.ReleaseRequest) error {
-	for _, item := range req.Items {
-		if err := s.repo.Release(ctx, item.ProductID, item.Quantity); err != nil {
-			log.Printf("[InventoryService] Failed to release stock for product=%s qty=%d: %v",
-				item.ProductID, item.Quantity, err)
-			// Continue releasing other items even if one fails
-			continue
-		}
-
-		// Emit metrics
-		if s.metricsClient != nil && s.metricsClient.IsEnabled() {
-			go func(productID string, quantity int) {
-				metricCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				dims := map[string]string{"ProductID": productID}
-				_ = s.metricsClient.RecordCount(metricCtx, awspkg.MetricInventoryReleased, dims)
-				_ = s.metricsClient.RecordValue(metricCtx, "InventoryReleasedQuantity", float64(quantity), dims)
-			}(item.ProductID, item.Quantity)
-		}
+	if err := s.repo.ReleaseAll(ctx, req.OrderID, req.Items); err != nil {
+		return err
 	}
-
-	log.Printf("[InventoryService] Released stock for order=%s items=%d", req.OrderID, len(req.Items))
+	log.Printf("[InventoryService] Transactional release success for order=%s items=%d", req.OrderID, len(req.Items))
 	return nil
 }
 
-// ConfirmStock permanently deducts reserved stock (payment succeeded)
+// ConfirmStock permanently deducts reserved stock atomically and idempotently.
 func (s *InventoryService) ConfirmStock(ctx context.Context, req *models.ConfirmRequest) error {
-	for _, item := range req.Items {
-		if err := s.repo.Confirm(ctx, item.ProductID, item.Quantity); err != nil {
-			log.Printf("[InventoryService] Failed to confirm stock for product=%s qty=%d: %v",
-				item.ProductID, item.Quantity, err)
-			continue
-		}
-
-		// Emit metrics
-		if s.metricsClient != nil && s.metricsClient.IsEnabled() {
-			go func(productID string, quantity int) {
-				metricCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				dims := map[string]string{"ProductID": productID}
-				_ = s.metricsClient.RecordCount(metricCtx, awspkg.MetricInventoryConfirmed, dims)
-				_ = s.metricsClient.RecordValue(metricCtx, "InventoryConfirmedQuantity", float64(quantity), dims)
-			}(item.ProductID, item.Quantity)
-		}
+	if err := s.repo.ConfirmAll(ctx, req.OrderID, req.Items); err != nil {
+		return err
 	}
-
-	log.Printf("[InventoryService] Confirmed stock for order=%s items=%d", req.OrderID, len(req.Items))
+	log.Printf("[InventoryService] Transactional confirm success for order=%s items=%d", req.OrderID, len(req.Items))
 	return nil
 }
 

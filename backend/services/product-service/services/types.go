@@ -62,7 +62,13 @@ type BulkDeleteRequest struct {
 // CategoryCreateRequest is the request payload for creating a category
 type CategoryCreateRequest struct {
 	Name        string   `json:"name" validate:"required"`
-	ParentNames []string `json:"parent_names"`
+	ParentNames []string `json:"parent_names" json:"parent_ids"` // Support both aliases
 	Image       string   `json:"image"`
 	IsActive    bool     `json:"is_active"`
+	Level       int      `json:"level"` // Used for sorting in bulk imports
+}
+
+// BulkCategoryCreateRequest is the request payload for creating multiple categories
+type BulkCategoryCreateRequest struct {
+	Items []CategoryCreateRequest `json:"items" validate:"required,dive"`
 }
