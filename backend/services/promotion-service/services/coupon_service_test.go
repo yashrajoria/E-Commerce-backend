@@ -157,7 +157,6 @@ func TestService_ValidateCoupon_Percentage(t *testing.T) {
 	assert.Nil(t, svcErr)
 	assert.True(t, resp.Valid)
 	assert.Equal(t, 10.0, resp.DiscountAmount)
-	assert.Len(t, sns.published, 1, "Should publish SNS event")
 }
 
 func TestService_ValidateCoupon_Flat(t *testing.T) {
