@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"strings"
@@ -86,4 +87,16 @@ func (ac *AdminAnalyticsController) forwardReport(c *gin.Context, handler, downs
 	}
 
 	utils.SuccessResponse(c, decodeResponseBody(body), nil)
+}
+
+func decodeResponseBody(body []byte) interface{} {
+	str := strings.TrimSpace(string(body))
+	if str == "" {
+		return gin.H{}
+	}
+	var v interface{}
+	if err := json.Unmarshal(body, &v); err != nil {
+		return gin.H{"raw": str}
+	}
+	return v
 }

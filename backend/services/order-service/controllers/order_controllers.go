@@ -1,8 +1,7 @@
 package controllers
 
 import (
-	"fmt"
-	"log"
+	"context"
 	"net/http"
 	"order-service/middleware"
 	"order-service/services"
@@ -10,7 +9,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
+
+type contextKey string
 
 type OrderController struct {
 	orderService *services.OrderService
@@ -43,7 +45,14 @@ func (oc *OrderController) CreateOrder(ctx *gin.Context) {
 		}
 	}
 
-	if err := oc.orderService.CreateOrder(ctx.Request.Context(), userID, email, &req); err != nil {
+	// Support idempotency: accept Idempotency-Key header and attach to context for downstream handling
+	idemKey := ctx.GetHeader("Idempotency-Key")
+	reqCtx := ctx.Request.Context()
+	if idemKey != "" {
+		reqCtx = context.WithValue(reqCtx, services.IdempotencyKeyContextKey, idemKey)
+	}
+
+	if err := oc.orderService.CreateOrder(reqCtx, userID, email, &req); err != nil {
 		ctx.JSON(err.StatusCode, gin.H{"error": err.Message})
 		return
 	}
@@ -59,7 +68,7 @@ func (oc *OrderController) GetOrders(ctx *gin.Context) {
 		return
 	}
 	if userID == "" {
-		log.Println("User Id is missing")
+		zap.L().Warn("missing user id in context for GetOrders")
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "User ID is required"})
 		return
 	}
@@ -73,8 +82,8 @@ func (oc *OrderController) GetOrders(ctx *gin.Context) {
 		if status == 0 {
 			status = http.StatusInternalServerError
 		}
+		zap.L().Error("failed to fetch user orders", zap.Int("status", status), zap.String("user_id", userID), zap.String("err", serviceErr.Message))
 		ctx.JSON(status, gin.H{"error": serviceErr.Message})
-		fmt.Printf("Error: %v\n", serviceErr)
 		return
 	}
 

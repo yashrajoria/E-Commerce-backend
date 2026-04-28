@@ -3,24 +3,34 @@ package aws
 import (
 	"context"
 	"fmt"
-	"log"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	"go.uber.org/zap"
 )
 
 // SQSConsumer provides methods for consuming messages from SQS queues
 type SQSConsumer struct {
 	client   *sqs.Client
 	queueURL string
+	logger   *zap.Logger
 }
 
 // NewSQSConsumer creates a new SQS consumer for the given queue URL
 func NewSQSConsumer(cfg aws.Config, queueURL string) *SQSConsumer {
+	return NewSQSConsumerWithLogger(cfg, queueURL, zap.NewNop())
+}
+
+// NewSQSConsumerWithLogger creates a new SQS consumer with structured logging.
+func NewSQSConsumerWithLogger(cfg aws.Config, queueURL string, logger *zap.Logger) *SQSConsumer {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
 	return &SQSConsumer{
 		client:   sqs.NewFromConfig(cfg),
 		queueURL: queueURL,
+		logger:   logger,
 	}
 }
 
@@ -30,16 +40,16 @@ type MessageHandler func(ctx context.Context, body string) error
 // StartPolling polls SQS for messages and processes them with the handler
 // Runs indefinitely until context is cancelled
 func (c *SQSConsumer) StartPolling(ctx context.Context, handler MessageHandler) error {
-	log.Printf("Starting SQS polling on queue: %s", c.queueURL)
+	c.logger.Info("starting SQS polling", zap.String("queue_url", c.queueURL))
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("SQS polling stopped")
+			c.logger.Info("SQS polling stopped", zap.String("queue_url", c.queueURL))
 			return ctx.Err()
 		default:
 			if err := c.pollOnce(ctx, handler); err != nil {
-				log.Printf("Error polling SQS: %v", err)
+				c.logger.Warn("error polling SQS", zap.String("queue_url", c.queueURL), zap.Error(err))
 			}
 		}
 	}
@@ -63,7 +73,7 @@ func (c *SQSConsumer) pollOnce(ctx context.Context, handler MessageHandler) erro
 
 		// Process message
 		if err := handler(ctx, *msg.Body); err != nil {
-			log.Printf("Failed to process message: %v", err)
+			c.logger.Warn("failed to process SQS message", zap.String("queue_url", c.queueURL), zap.Error(err))
 			// Message will become visible again after VisibilityTimeout
 			continue
 		}
@@ -73,7 +83,7 @@ func (c *SQSConsumer) pollOnce(ctx context.Context, handler MessageHandler) erro
 			QueueUrl:      &c.queueURL,
 			ReceiptHandle: msg.ReceiptHandle,
 		}); err != nil {
-			log.Printf("Failed to delete message: %v", err)
+			c.logger.Warn("failed to delete SQS message", zap.String("queue_url", c.queueURL), zap.Error(err))
 		}
 	}
 

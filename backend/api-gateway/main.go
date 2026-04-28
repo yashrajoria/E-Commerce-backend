@@ -2,8 +2,10 @@ package main
 
 import (
 	"api-gateway/logger"
+	"api-gateway/middlewares"
 	"api-gateway/routes"
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,6 +18,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
+	"github.com/joho/godotenv"
 	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"go.uber.org/zap"
 )
@@ -60,10 +63,19 @@ func CustomRecovery(zlogger *zap.Logger) gin.HandlerFunc {
 }
 
 func main() {
+	_ = godotenv.Load()
+
 	// Initialize logger
-	logger.InitLogger()
+	if err := logger.InitLogger(); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
 	defer logger.Sync()
 	logger.Log.Info("Starting API Gateway...")
+
+	if err := middlewares.InitJWTConfig(); err != nil {
+		logger.Log.Fatal("JWT middleware init failed", zap.Error(err))
+	}
 
 	// --- CloudWatch (Logs + Metrics) ---
 	cwLogsClient, err := awspkg.NewCloudWatchLogsClient(context.Background(), "api-gateway")

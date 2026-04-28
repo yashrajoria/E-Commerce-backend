@@ -42,7 +42,6 @@ type ddbProduct struct {
 	DeletedAt    *string  `dynamodbav:"deleted_at,omitempty"`
 }
 
-
 func (d *DynamoAdapter) FindByID(ctx context.Context, id uuid.UUID) (*models.Product, error) {
 	key, err := attributevalue.MarshalMap(map[string]string{"id": id.String()})
 	if err != nil {
@@ -494,48 +493,51 @@ func (d *DynamoAdapter) FindBySKUs(ctx context.Context, skus []string) ([]models
 	}
 	filterExpr := fmt.Sprintf("sku IN (%s)", expr)
 	input := &dynamodb.ScanInput{TableName: &d.table, FilterExpression: &filterExpr, ExpressionAttributeValues: values}
-	out, err := d.client.Scan(ctx, input)
-	if err != nil {
-		return nil, fmt.Errorf("scan for skus failed: %w", err)
-	}
+	paginator := dynamodb.NewScanPaginator(d.client, input)
 	var res []models.Product
-	for _, it := range out.Items {
-		var dp ddbProduct
-		if err := attributevalue.UnmarshalMap(it, &dp); err != nil {
-			return nil, fmt.Errorf("unmarshal item: %w", err)
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("scan for skus failed: %w", err)
 		}
-		p := models.Product{}
-		p.ID, _ = uuid.Parse(dp.ProductID)
-		p.Name = dp.Name
-		p.Price = dp.Price
-		p.Quantity = dp.Quantity
-		if dp.Description != nil {
-			p.Description = *dp.Description
-		}
-		p.Images = dp.Images
-		if dp.Brand != nil {
-			p.Brand = *dp.Brand
-		}
-		p.SKU = dp.SKU
-		for _, s := range dp.CategoryIDs {
-			if u, err := uuid.Parse(s); err == nil {
-				p.CategoryIDs = append(p.CategoryIDs, u)
+		for _, it := range page.Items {
+			var dp ddbProduct
+			if err := attributevalue.UnmarshalMap(it, &dp); err != nil {
+				return nil, fmt.Errorf("unmarshal item: %w", err)
 			}
-		}
-		p.CategoryPath = dp.CategoryPath
-		p.IsFeatured = dp.IsFeatured
-		if t, err := time.Parse(time.RFC3339, dp.CreatedAt); err == nil {
-			p.CreatedAt = t
-		}
-		if t, err := time.Parse(time.RFC3339, dp.UpdatedAt); err == nil {
-			p.UpdatedAt = t
-		}
-		if dp.DeletedAt != nil {
-			if t, err := time.Parse(time.RFC3339, *dp.DeletedAt); err == nil {
-				p.DeletedAt = &t
+			p := models.Product{}
+			p.ID, _ = uuid.Parse(dp.ProductID)
+			p.Name = dp.Name
+			p.Price = dp.Price
+			p.Quantity = dp.Quantity
+			if dp.Description != nil {
+				p.Description = *dp.Description
 			}
+			p.Images = dp.Images
+			if dp.Brand != nil {
+				p.Brand = *dp.Brand
+			}
+			p.SKU = dp.SKU
+			for _, s := range dp.CategoryIDs {
+				if u, err := uuid.Parse(s); err == nil {
+					p.CategoryIDs = append(p.CategoryIDs, u)
+				}
+			}
+			p.CategoryPath = dp.CategoryPath
+			p.IsFeatured = dp.IsFeatured
+			if t, err := time.Parse(time.RFC3339, dp.CreatedAt); err == nil {
+				p.CreatedAt = t
+			}
+			if t, err := time.Parse(time.RFC3339, dp.UpdatedAt); err == nil {
+				p.UpdatedAt = t
+			}
+			if dp.DeletedAt != nil {
+				if t, err := time.Parse(time.RFC3339, *dp.DeletedAt); err == nil {
+					p.DeletedAt = &t
+				}
+			}
+			res = append(res, p)
 		}
-		res = append(res, p)
 	}
 	return res, nil
 }

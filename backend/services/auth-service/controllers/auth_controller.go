@@ -48,6 +48,9 @@ func (ctrl *AuthController) Login(c *gin.Context) {
 		return
 	}
 
+	// Normalize email
+	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
+
 	tokenPair, err := ctrl.service.Login(c.Request.Context(), req.Email, req.Password)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
@@ -64,7 +67,7 @@ func (ctrl *AuthController) Login(c *gin.Context) {
 	c.SetSameSite(sameSite)
 	c.SetCookie("__session", tokenPair.AccessToken, 900, "/", domain, secure, true)
 	c.SetCookie("refresh_token", tokenPair.RefreshToken, 604800, "/", domain, secure, true)
-	
+
 	// Set identifiers for Next.js frontend and BFF downstream services
 	c.SetCookie("user_id", tokenPair.UserID, 604800, "/", domain, secure, false)
 	c.SetCookie("user_role", tokenPair.Role, 604800, "/", domain, secure, false)
@@ -78,7 +81,7 @@ func (ctrl *AuthController) Register(c *gin.Context) {
 		Email    string `json:"email" binding:"required,email"`
 		Password string `json:"password" binding:"required,min=8"`
 		// Role is always set to 'user' server-side — client value ignored
-		Role     string `json:"role" binding:"required"`
+		Role string `json:"role"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body", "details": err.Error()})
@@ -86,6 +89,9 @@ func (ctrl *AuthController) Register(c *gin.Context) {
 	}
 
 	req.Role = "user"
+
+	// Normalize email
+	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 
 	// Validate password strength before proceeding
 	pwValidator := services.NewPasswordValidator()
@@ -121,6 +127,7 @@ func (ctrl *AuthController) VerifyEmail(c *gin.Context) {
 		return
 	}
 
+	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 	err := ctrl.service.VerifyEmail(c.Request.Context(), req.Email, req.Code)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
@@ -238,6 +245,7 @@ func (ctrl *AuthController) ResendVerificationEmail(c *gin.Context) {
 		return
 	}
 
+	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 	err := ctrl.service.ResendVerificationEmail(c.Request.Context(), req.Email)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
