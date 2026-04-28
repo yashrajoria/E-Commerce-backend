@@ -66,7 +66,6 @@ func main() {
 	}
 
 	controller := controllers.NewBFFController(gateway, redisClient)
-	adminHTTPClient := utils.NewHTTPClient()
 
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -656,17 +655,13 @@ func main() {
 		c.File("/docs/openapi.yaml")
 	})
 
+	adminHTTPClient := utils.NewHTTPClient()
+
 	routes.RegisterRoutes(r, controller)
 	routes.RegisterAdminRoutes(
 		r,
 		zapLogger,
 		controllers.NewAdminProductController(zapLogger, adminHTTPClient),
-		controllers.NewAdminCategoryController(zapLogger, adminHTTPClient),
-		controllers.NewAdminUserController(zapLogger, adminHTTPClient),
-		controllers.NewAdminOrderController(zapLogger, adminHTTPClient),
-		controllers.NewAdminInventoryController(zapLogger, adminHTTPClient),
-		controllers.NewAdminPromotionController(zapLogger, adminHTTPClient),
-		controllers.NewAdminNotificationController(zapLogger, adminHTTPClient),
 		controllers.NewAdminAnalyticsController(zapLogger, adminHTTPClient),
 		controllers.NewAdminDashboardController(zapLogger, adminHTTPClient),
 	)
