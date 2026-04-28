@@ -1,0 +1,12 @@
+aws_region = "us-east-1"
+s3_bucket  = "shopswift"
+
+["ddb_tables"]
+products = "Products"
+categories = "Categories"
+inventory = "Inventory"
+
+["sqs_queues"]
+order_processing = "order-processing-queue"
+payment_events   = "payment-events-queue"
+payment_request  = "payment-request-queue"

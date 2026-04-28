@@ -9,10 +9,12 @@ import (
 	"github.com/google/uuid"
 )
 
-// TokenPair holds the generated access and refresh tokens.
+// TokenPair holds the generated access and refresh tokens along with user context.
 type TokenPair struct {
 	AccessToken  string
 	RefreshToken string
+	UserID       string
+	Role         string
 }
 
 // TokenService is responsible for creating and validating JWTs.
@@ -51,6 +53,8 @@ func (s *TokenService) GenerateTokenPair(userID, email, role string) (*TokenPair
 	return &TokenPair{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
+		UserID:       userID,
+		Role:         role,
 	}, tokenID, nil
 }
 

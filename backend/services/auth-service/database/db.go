@@ -105,4 +105,5 @@ func Close() error {
 	if err != nil {
 		return fmt.Errorf("failed to get database instance: %w", err)
 	}
-	return sqlDB.Close()}
+	return sqlDB.Close()
+}

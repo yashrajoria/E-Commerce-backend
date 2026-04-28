@@ -5,27 +5,46 @@ import (
 	"encoding/json"
 	"log"
 	"order-service/models"
-	"os"
+	repositories "order-service/repository"
 	"time"
 
 	"github.com/google/uuid"
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
-	"gorm.io/gorm"
+	"github.com/yashrajoria/common/events"
 )
 
-// SQSCheckoutConsumer consumes checkout events from SQS and creates orders
 type SQSCheckoutConsumer struct {
-	sqsConsumer    *aws_pkg.SQSConsumer
-	sqsPublisher   *aws_pkg.SQSConsumer // For sending payment requests
-	db             *gorm.DB
+	sqsConsumer          *aws_pkg.SQSConsumer
+	sqsPublisher         *aws_pkg.SQSConsumer // For sending payment requests
+	orderRepo            repositories.OrderRepository
+	inventoryClient      *InventoryClient
+	metricsClient        *aws_pkg.MetricsClient
+	productServiceURL    string // Base URL for the product service (internal endpoint)
+	snsClient            aws_pkg.SNSPublisher
+	notificationTopicArn string
+	promotionClient      *PromotionClient
+	storeCurrency        string
 }
 
 // NewSQSCheckoutConsumer creates a new SQS-based checkout consumer
-func NewSQSCheckoutConsumer(sqsConsumer *aws_pkg.SQSConsumer, sqsPublisher *aws_pkg.SQSConsumer, db *gorm.DB) *SQSCheckoutConsumer {
+func NewSQSCheckoutConsumer(sqsConsumer *aws_pkg.SQSConsumer, sqsPublisher *aws_pkg.SQSConsumer, orderRepo repositories.OrderRepository, inventoryClient *InventoryClient, metricsClient *aws_pkg.MetricsClient, productServiceURL string, snsClient aws_pkg.SNSPublisher, notificationTopicArn string, promotionClient *PromotionClient, storeCurrency string) *SQSCheckoutConsumer {
+	if productServiceURL == "" {
+		productServiceURL = "http://product-service:8082"
+	}
+	if storeCurrency == "" {
+		storeCurrency = "usd"
+	}
 	return &SQSCheckoutConsumer{
-		sqsConsumer:  sqsConsumer,
-		sqsPublisher: sqsPublisher,
-		db:           db,
+		sqsConsumer:          sqsConsumer,
+		sqsPublisher:         sqsPublisher,
+		orderRepo:            orderRepo,
+		inventoryClient:      inventoryClient,
+		metricsClient:        metricsClient,
+		productServiceURL:    productServiceURL,
+		snsClient:            snsClient,
+		notificationTopicArn: notificationTopicArn,
+		promotionClient:      promotionClient,
+		storeCurrency:        storeCurrency,
 	}
 }
 
@@ -74,10 +93,20 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		return nil
 	}
 
+	// Idempotency: if CheckoutEvent contains an idempotency key, check DB for existing order
+	if evt.IdempotencyKey != "" {
+		if existing, err := c.orderRepo.FindByIdempotencyKey(ctx, evt.IdempotencyKey); err == nil {
+			log.Printf("⚠️  [IDEMPOTENCY] Order already exists for key=%s order_id=%s user=%s (skipping creation)", evt.IdempotencyKey, existing.ID.String(), existing.UserID.String())
+			return nil
+		}
+	}
+
 	orderItems := make([]models.OrderItem, 0, len(evt.Items))
 	totalAmount := 0
 	validItems := 0
-	productServiceURL := os.Getenv("PRODUCT_SERVICE_URL")
+	productServiceURL := c.productServiceURL
+	inventoryItems := make([]ReserveItem, 0, len(evt.Items))
+	notificationItems := make([]events.NotificationItem, 0, len(evt.Items))
 
 	for _, it := range evt.Items {
 		pid, err := uuid.Parse(it.ProductID)
@@ -97,11 +126,6 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 			continue
 		}
 
-		if product.Stock < it.Quantity {
-			log.Printf("⚠️ insufficient stock for product_id=%s: available=%d requested=%d", it.ProductID, product.Stock, it.Quantity)
-			continue
-		}
-
 		orderItem := models.OrderItem{
 			ID:        uuid.New(),
 			ProductID: pid,
@@ -111,46 +135,120 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 
 		totalAmount += it.Quantity * int(product.Price)
 		orderItems = append(orderItems, orderItem)
+		inventoryItems = append(inventoryItems, ReserveItem{
+			ProductID: it.ProductID,
+			Quantity:  it.Quantity,
+		})
+		notificationItems = append(notificationItems, events.NotificationItem{
+			ProductName: product.Name,
+			Quantity:    it.Quantity,
+			Price:       product.Price,
+		})
 		validItems++
 	}
 
 	if validItems == 0 {
-		log.Printf("❌ no valid items for user=%s, skipping order", evt.UserID)
-		return nil
+		log.Printf("❌ [CHECKOUT] No valid items for user=%s order=%s, aborting order creation", evt.UserID, evt.OrderID)
+		return nil // Don't retry - this is a data issue, not a transient error
+	}
+
+	// Process Coupon if present
+	discountAmount := 0
+	if evt.CouponCode != "" && c.promotionClient != nil {
+		resp, err := c.promotionClient.ValidateCoupon(ctx, evt.CouponCode, evt.UserID, float64(totalAmount))
+		if err != nil {
+			log.Printf("⚠️  [CHECKOUT] Coupon validation failed for code=%s: %v", evt.CouponCode, err)
+		} else if resp != nil && resp.Valid {
+			discountAmount = int(resp.DiscountAmount)
+			log.Printf("✅ [CHECKOUT] Coupon applied: code=%s discount=%d", evt.CouponCode, discountAmount)
+		} else {
+			log.Printf("⚠️  [CHECKOUT] Coupon invalid: code=%s", evt.CouponCode)
+		}
+	}
+
+	finalTotal := totalAmount - discountAmount
+	if finalTotal < 0 {
+		finalTotal = 0
+	}
+
+	// Reserve inventory via inventory service (non-fatal: proceed even on failure)
+	if c.inventoryClient != nil {
+		if err := c.inventoryClient.ReserveStock(ctx, orderIDUUID.String(), inventoryItems); err != nil {
+			// Log as a warning but do NOT abort order creation.
+			// Inventory can be reconciled later; blocking checkout on inventory failures
+			// causes silent order drops which break the entire checkout_url flow.
+			log.Printf("⚠️  [CHECKOUT] Inventory reservation failed for order=%s (proceeding anyway): %v", orderIDUUID.String(), err)
+		} else {
+			log.Printf("✅ [CHECKOUT] Inventory reserved for order=%s items=%d", orderIDUUID.String(), len(inventoryItems))
+		}
+	} else {
+		log.Printf("⚠️  [CHECKOUT] Inventory client not configured, skipping reservation")
 	}
 
 	order := models.Order{
-		UserID:      userUUID,
-		ID:          orderIDUUID,
-		Amount:      totalAmount,
-		Status:      "pending_payment",
-		OrderNumber: "ORD-" + time.Now().Format("20060102-150405") + "-" + uuid.New().String()[:8],
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		UserID:         userUUID,
+		ID:             orderIDUUID,
+		Amount:         finalTotal,
+		CouponCode:     evt.CouponCode,
+		DiscountAmount: discountAmount,
+		Status:         "pending_payment",
+		OrderNumber:    "ORD-" + time.Now().Format("20060102-150405") + "-" + uuid.New().String()[:8],
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		OrderItems:     orderItems,
+	}
+	if evt.IdempotencyKey != "" {
+		order.IdempotencyKey = &evt.IdempotencyKey
 	}
 
-	err = c.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&order).Error; err != nil {
-			return err
-		}
-		for i := range orderItems {
-			orderItems[i].OrderID = order.ID
-		}
-		return tx.Create(&orderItems).Error
-	})
-	if err != nil {
-		log.Printf("❌ DB transaction failed for user=%s err=%v", evt.UserID, err)
-		return err // Retry
+	if err := c.orderRepo.Create(ctx, &order); err != nil {
+		log.Printf("❌ [CHECKOUT] Failed to create order record (will retry): %v", err)
+		return err
 	}
 
 	log.Printf("✅ order created id=%s user=%s items=%d total_amount=%d",
 		order.ID.String(), order.UserID.String(), validItems, order.Amount)
 
+	// Publish order_created notification with correct total and items
+	if c.snsClient != nil && c.notificationTopicArn != "" {
+		notifEvent := events.NewOrderCreatedEvent(
+			evt.UserID, evt.Email, "", "", order.ID.String(), order.CouponCode,
+			float64(order.Amount), notificationItems,
+		)
+		notifBytes, err := json.Marshal(notifEvent)
+		if err != nil {
+			log.Printf("⚠️ failed to marshal order_created notification: %v", err)
+		} else if err := c.snsClient.Publish(ctx, c.notificationTopicArn, notifBytes); err != nil {
+			log.Printf("⚠️ failed to publish order_created notification: %v", err)
+		} else {
+			log.Printf("✅ order_created notification published for order=%s", order.ID.String())
+		}
+	}
+
+	// Emit metrics
+	if c.metricsClient != nil && c.metricsClient.IsEnabled() {
+		go func() {
+			metricCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			dims := map[string]string{"Service": "order-service"}
+			_ = c.metricsClient.RecordCount(metricCtx, aws_pkg.MetricOrdersCreated, dims)
+			_ = c.metricsClient.RecordValue(metricCtx, "OrderAmount", float64(order.Amount), dims)
+		}()
+	}
+
 	// Send payment request to SQS
+	idemKey := evt.IdempotencyKey
+	if idemKey == "" {
+		idemKey = order.ID.String()
+	}
+
 	req := models.PaymentRequest{
-		OrderID: order.ID.String(),
-		UserID:  order.UserID.String(),
-		Amount:  order.Amount,
+		OrderID:        order.ID.String(),
+		UserID:         order.UserID.String(),
+		Email:          evt.Email,
+		Amount:         order.Amount,
+		Currency:       c.storeCurrency,
+		IdempotencyKey: idemKey,
 	}
 	reqBytes, _ := json.Marshal(req)
 	if err := c.sqsPublisher.SendMessage(ctx, string(reqBytes)); err != nil {

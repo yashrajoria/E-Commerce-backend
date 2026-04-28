@@ -20,18 +20,21 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 // ProductServiceDDB is a DynamoDB-backed product service
 type ProductServiceDDB struct {
-	productRepo   repository.ProductRepo
-	categoryRepo  repository.CategoryRepo
-	s3Client      *s3.Client
-	presignClient *s3.PresignClient
-	bucket        string
-	prefix        string
-	endpoint      string
-	cdnDomain     string
+	productRepo      repository.ProductRepo
+	categoryRepo     repository.CategoryRepo
+	categoryService  *CategoryServiceDDB // For updating product counts when products change
+	s3Client         *s3.Client
+	presignClient    *s3.PresignClient
+	bucket           string
+	prefix           string
+	endpoint         string
+	cdnDomain        string
+	inventoryClient  *InventoryClient
 }
 
 func NewProductServiceDDB(
@@ -40,23 +43,47 @@ func NewProductServiceDDB(
 	s3Client *s3.Client,
 	presignClient *s3.PresignClient,
 	bucket, prefix, endpoint, cdnDomain string,
+	inventoryClient *InventoryClient,
 ) *ProductServiceDDB {
 	return &ProductServiceDDB{
-		productRepo:   pr,
-		categoryRepo:  cr,
-		s3Client:      s3Client,
-		presignClient: presignClient,
-		bucket:        bucket,
-		prefix:        prefix,
-		endpoint:      endpoint,
-		cdnDomain:     cdnDomain,
+		productRepo:     pr,
+		categoryRepo:    cr,
+		s3Client:        s3Client,
+		presignClient:   presignClient,
+		bucket:          bucket,
+		prefix:          prefix,
+		endpoint:        endpoint,
+		cdnDomain:       cdnDomain,
+		inventoryClient: inventoryClient,
 	}
+}
+
+// SetCategoryService sets the category service for updating product counts.
+// Called after service initialization to avoid circular dependency.
+func (s *ProductServiceDDB) SetCategoryService(cs *CategoryServiceDDB) {
+	s.categoryService = cs
 }
 
 // GeneratePresignedUpload returns a presigned PUT URL, the object key, and the public URL
 func (s *ProductServiceDDB) GeneratePresignedUpload(ctx context.Context, sku, filename, contentType string, expiresSeconds int64) (string, string, string, error) {
 	ext := filepath.Ext(filename)
 	key := fmt.Sprintf("%sproduct_img_%s_%s%s", s.prefix, sku, uuid.New().String(), ext)
+
+	return s.presignObjectUpload(ctx, key, contentType, expiresSeconds)
+}
+
+// GenerateProductImagePresignedUpload returns a presigned PUT URL and stable public URL for an existing product.
+func (s *ProductServiceDDB) GenerateProductImagePresignedUpload(ctx context.Context, productID uuid.UUID, filename, contentType string, expiresSeconds int64) (string, string, string, error) {
+	cleanFilename := filepath.Base(filename)
+	if cleanFilename == "." || cleanFilename == "" {
+		cleanFilename = "upload"
+	}
+	key := fmt.Sprintf("%sproduct/%s/%s", s.prefix, productID.String(), cleanFilename)
+
+	return s.presignObjectUpload(ctx, key, contentType, expiresSeconds)
+}
+
+func (s *ProductServiceDDB) presignObjectUpload(ctx context.Context, key, contentType string, expiresSeconds int64) (string, string, string, error) {
 
 	input := &s3.PutObjectInput{
 		Bucket:      aws.String(s.bucket),
@@ -71,16 +98,7 @@ func (s *ProductServiceDDB) GeneratePresignedUpload(ctx context.Context, sku, fi
 		return "", "", "", fmt.Errorf("failed to presign put object: %w", err)
 	}
 
-	var publicURL string
-	if s.cdnDomain != "" {
-		publicURL = fmt.Sprintf("https://%s/%s", strings.TrimRight(s.cdnDomain, "/"), key)
-	} else if s.endpoint != "" {
-		publicURL = fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpoint, "/"), s.bucket, key)
-	} else {
-		publicURL = fmt.Sprintf("https://%s.s3.amazonaws.com/%s", s.bucket, key)
-	}
-
-	return presignedReq.URL, key, publicURL, nil
+	return presignedReq.URL, key, s.publicObjectURL(key), nil
 }
 
 func (s *ProductServiceDDB) GetProduct(ctx context.Context, id uuid.UUID) (*models.Product, error) {
@@ -88,20 +106,31 @@ func (s *ProductServiceDDB) GetProduct(ctx context.Context, id uuid.UUID) (*mode
 }
 
 func (s *ProductServiceDDB) ListProducts(ctx context.Context, params ListProductsParams) ([]*models.Product, int64, error) {
-	// Build filter map
+	// Build filter map (use plain types for repository layer)
 	filter := make(map[string]interface{})
 
 	if params.IsFeatured != nil {
 		filter["is_featured"] = *params.IsFeatured
 	}
 	if len(params.CategoryID) > 0 {
-		filter["category_ids"] = params.CategoryID
+		// convert to []string for easier handling in the repo layer
+		ids := make([]string, 0, len(params.CategoryID))
+		for _, u := range params.CategoryID {
+			ids = append(ids, u.String())
+		}
+		filter["category_ids"] = ids
 	}
 	if params.MinPrice != nil {
 		filter["min_price"] = *params.MinPrice
 	}
 	if params.MaxPrice != nil {
 		filter["max_price"] = *params.MaxPrice
+	}
+	if params.Brand != nil {
+		filter["brand"] = *params.Brand
+	}
+	if params.InStock != nil {
+		filter["in_stock"] = *params.InStock
 	}
 
 	limit := params.PerPage
@@ -121,6 +150,16 @@ func (s *ProductServiceDDB) ListProducts(ctx context.Context, params ListProduct
 }
 
 func (s *ProductServiceDDB) CreateProduct(ctx context.Context, req ProductCreateRequest, images []*multipart.FileHeader) (*models.Product, error) {
+	if req.SKU != "" {
+		existing, err := s.productRepo.FindBySKUs(ctx, []string{req.SKU})
+		if err != nil {
+			return nil, fmt.Errorf("failed to check SKU uniqueness: %w", err)
+		}
+		if len(existing) > 0 {
+			return nil, fmt.Errorf("product with sku '%s' already exists", req.SKU)
+		}
+	}
+
 	// Step 1: Look up categories
 	categories, err := s.categoryRepo.FindByNames(ctx, req.Categories)
 	if err != nil {
@@ -167,13 +206,7 @@ func (s *ProductServiceDDB) CreateProduct(ctx context.Context, req ProductCreate
 		if err != nil {
 			continue
 		}
-		var urlStr string
-		if s.endpoint != "" {
-			urlStr = fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpoint, "/"), s.bucket, key)
-		} else {
-			urlStr = fmt.Sprintf("https://%s.s3.amazonaws.com/%s", s.bucket, key)
-		}
-		imageURLs = append(imageURLs, urlStr)
+		imageURLs = append(imageURLs, s.publicObjectURL(key))
 	}
 
 	// Step 3: Create the product model
@@ -199,32 +232,180 @@ func (s *ProductServiceDDB) CreateProduct(ctx context.Context, req ProductCreate
 		return nil, err
 	}
 
+	// Step 5: Update category product counts
+	go s.updateCategoryCountsAfterProductCreation(context.Background(), product.CategoryIDs)
+
+	// Step 6: Sync inventory (fire-and-forget; log errors but don't fail the product creation)
+	if s.inventoryClient != nil && product.Quantity > 0 {
+		if invErr := s.inventoryClient.SetStock(ctx, product.ID.String(), product.Quantity); invErr != nil {
+			zap.L().Warn("Failed to sync inventory for new product",
+				zap.String("product_id", product.ID.String()),
+				zap.Int("quantity", product.Quantity),
+				zap.Error(invErr),
+			)
+		}
+	}
+
 	return product, nil
 }
 
-func (s *ProductServiceDDB) UpdateProduct(ctx context.Context, id uuid.UUID, updates map[string]interface{}) (int64, error) {
+func (s *ProductServiceDDB) UpdateProduct(ctx context.Context, id uuid.UUID, req ProductUpdateRequest) (int64, error) {
+	// Fetch current product to track old category IDs
+	oldProduct, err := s.productRepo.FindByID(ctx, id)
+	if err != nil {
+		return 0, fmt.Errorf("product not found: %w", err)
+	}
+	oldCategoryIDs := oldProduct.CategoryIDs
+
+	// Build map for DynamoDB update
+	updates := make(map[string]interface{})
+
+	if req.Name != nil {
+		updates["name"] = *req.Name
+	}
+	if req.Description != nil {
+		updates["description"] = *req.Description
+	}
+	if req.Brand != nil {
+		updates["brand"] = *req.Brand
+	}
+	if req.SKU != nil {
+		updates["sku"] = *req.SKU
+	}
+	if req.Price != nil {
+		updates["price"] = *req.Price
+	}
+	if req.Quantity != nil {
+		updates["quantity"] = *req.Quantity
+	}
+	if req.IsFeatured != nil {
+		updates["is_featured"] = *req.IsFeatured
+	}
+	if req.CategoryIDs != nil {
+		updates["category_ids"] = req.CategoryIDs
+	}
+	if req.CategoryPath != nil {
+		updates["category_path"] = req.CategoryPath
+	}
+	if req.Images != nil {
+		updates["images"] = req.Images
+	}
+
 	if len(updates) == 0 {
 		return 0, fmt.Errorf("no update fields provided")
 	}
-	delete(updates, "_id")
-	delete(updates, "product_id")
 
 	updates["updated_at"] = time.Now().UTC().Format(time.RFC3339)
 
-	err := s.productRepo.Update(ctx, id, updates)
+	err = s.productRepo.Update(ctx, id, updates)
 	if err != nil {
 		return 0, err
+	}
+
+	// If categories changed, update category product counts
+	if req.CategoryIDs != nil && !slicesEqual(oldCategoryIDs, req.CategoryIDs) {
+		go s.updateCategoryCountsAfterProductMove(context.Background(), oldCategoryIDs, req.CategoryIDs)
+	}
+
+	// Sync inventory if quantity is updated
+	if req.Quantity != nil && s.inventoryClient != nil {
+		// Fire-and-forget sync to ensure Inventory Service has the latest count
+		if err := s.inventoryClient.SetStock(ctx, id.String(), *req.Quantity); err != nil {
+			zap.L().Warn("Failed to sync inventory on product update",
+				zap.String("product_id", id.String()), zap.Error(err))
+		}
 	}
 
 	return 1, nil
 }
 
 func (s *ProductServiceDDB) DeleteProduct(ctx context.Context, id uuid.UUID) (int64, error) {
-	err := s.productRepo.Delete(ctx, id)
+	// Fetch product before deletion to get its category IDs for count updates
+	product, err := s.productRepo.FindByID(ctx, id)
+	if err != nil {
+		return 0, fmt.Errorf("product not found: %w", err)
+	}
+
+	err = s.productRepo.Delete(ctx, id)
 	if err != nil {
 		return 0, err
 	}
+
+	// Update category product counts
+	go s.updateCategoryCountsAfterProductDeletion(context.Background(), product.CategoryIDs)
+
+	// Sync inventory: Set stock to 0 to prevent future orders
+	if s.inventoryClient != nil {
+		// Ideally, InventoryService should have a DeleteStock method, but SetStock(0) is a safe fallback
+		_ = s.inventoryClient.SetStock(ctx, id.String(), 0)
+	}
+
 	return 1, nil
+}
+
+// BulkDeleteProducts deletes products by IDs, by category membership, or all products when requested.
+func (s *ProductServiceDDB) BulkDeleteProducts(ctx context.Context, req BulkDeleteRequest) (int64, error) {
+	// If DeleteAll, fetch all product IDs
+	var idsToDelete []uuid.UUID
+	if req.DeleteAll {
+		products, err := s.productRepo.Find(ctx, nil, 0, 0)
+		if err != nil {
+			return 0, fmt.Errorf("failed to fetch products for delete-all: %w", err)
+		}
+		for _, p := range products {
+			idsToDelete = append(idsToDelete, p.ID)
+		}
+	} else {
+		// Add explicit IDs
+		idsSet := make(map[string]uuid.UUID)
+		for _, id := range req.IDs {
+			idsSet[id.String()] = id
+		}
+
+		// If categories provided, scan products and add matches
+		if len(req.CategoryIDs) > 0 {
+			// Fetch all products (Find currently does table scan)
+			products, err := s.productRepo.Find(ctx, nil, 0, 0)
+			if err != nil {
+				return 0, fmt.Errorf("failed to fetch products for category delete: %w", err)
+			}
+			for _, p := range products {
+				for _, cat := range p.CategoryIDs {
+					for _, target := range req.CategoryIDs {
+						if cat == target {
+							idsSet[p.ID.String()] = p.ID
+							break
+						}
+					}
+				}
+			}
+		}
+
+		for _, v := range idsSet {
+			idsToDelete = append(idsToDelete, v)
+		}
+	}
+
+	if len(idsToDelete) == 0 {
+		return 0, nil
+	}
+
+	// Perform batch delete via repo
+	if err := s.productRepo.DeleteMany(ctx, idsToDelete); err != nil {
+		return 0, fmt.Errorf("failed to delete products: %w", err)
+	}
+
+	// Sync inventory for bulk deletes (async to avoid blocking response)
+	if s.inventoryClient != nil && len(idsToDelete) > 0 {
+		go func(ids []uuid.UUID) {
+			bgCtx := context.Background()
+			for _, id := range ids {
+				_ = s.inventoryClient.SetStock(bgCtx, id.String(), 0)
+			}
+		}(idsToDelete)
+	}
+
+	return int64(len(idsToDelete)), nil
 }
 
 func (s *ProductServiceDDB) GetProductInternal(ctx context.Context, id uuid.UUID) (*ProductInternalDTO, error) {
@@ -255,6 +436,14 @@ func (s *ProductServiceDDB) ValidateBulkImport(ctx context.Context, file multipa
 		index[strings.ToLower(strings.TrimSpace(h))] = i
 	}
 
+	// Ensure required headers exist to avoid panics on indexing
+	requiredHeaders := []string{"name", "sku", "price", "quantity", "is_featured", "categories", "imageurl"}
+	for _, h := range requiredHeaders {
+		if _, ok := index[h]; !ok {
+			return nil, fmt.Errorf("missing required CSV header: %s", h)
+		}
+	}
+
 	type pendingProduct struct {
 		Row           []string
 		RowNum        int
@@ -283,11 +472,19 @@ func (s *ProductServiceDDB) ValidateBulkImport(ctx context.Context, file multipa
 			continue
 		}
 
-		name := strings.TrimSpace(row[index["name"]])
-		sku := strings.TrimSpace(row[index["sku"]])
-		priceStr := strings.TrimSpace(row[index["price"]])
-		quantityStr := strings.TrimSpace(row[index["quantity"]])
-		isFeaturedStr := strings.TrimSpace(row[index["is_featured"]])
+		// Safe access helper in case the row is malformed or short
+		get := func(key string) string {
+			if idx, ok := index[key]; ok && idx < len(row) {
+				return strings.TrimSpace(row[idx])
+			}
+			return ""
+		}
+
+		name := get("name")
+		sku := get("sku")
+		priceStr := get("price")
+		quantityStr := get("quantity")
+		isFeaturedStr := get("is_featured")
 
 		hasError := false
 
@@ -321,7 +518,7 @@ func (s *ProductServiceDDB) ValidateBulkImport(ctx context.Context, file multipa
 			hasError = true
 		}
 
-		imageURL := strings.TrimSpace(row[index["imageurl"]])
+		imageURL := get("imageurl")
 		if imageURL != "" {
 			if u, err := url.Parse(imageURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 				warningsList = append(warningsList, map[string]interface{}{"row": rowNum, "warning": "Invalid image URL - product will be created without image"})
@@ -394,7 +591,7 @@ func (s *ProductServiceDDB) ValidateBulkImport(ctx context.Context, file multipa
 	}, nil
 }
 
-func (s *ProductServiceDDB) ProcessBulkImport(ctx context.Context, file multipart.File) (*models.BulkImportResult, error) {
+func (s *ProductServiceDDB) ProcessBulkImport(ctx context.Context, file multipart.File, autoCreateCategories bool) (*models.BulkImportResult, error) {
 	r := csv.NewReader(file)
 	headers, err := r.Read()
 	if err != nil {
@@ -404,6 +601,14 @@ func (s *ProductServiceDDB) ProcessBulkImport(ctx context.Context, file multipar
 	index := make(map[string]int)
 	for i, h := range headers {
 		index[strings.ToLower(strings.TrimSpace(h))] = i
+	}
+
+	// Ensure required headers exist
+	requiredHeaders := []string{"name", "sku", "price", "quantity", "is_featured", "categories", "imageurl"}
+	for _, h := range requiredHeaders {
+		if _, ok := index[h]; !ok {
+			return nil, fmt.Errorf("missing required CSV header: %s", h)
+		}
 	}
 
 	type pendingProduct struct {
@@ -428,9 +633,16 @@ func (s *ProductServiceDDB) ProcessBulkImport(ctx context.Context, file multipar
 			rowNum++
 			continue
 		}
+		// Safe access helper
+		get := func(key string) string {
+			if idx, ok := index[key]; ok && idx < len(row) {
+				return strings.TrimSpace(row[idx])
+			}
+			return ""
+		}
 
-		sku := strings.TrimSpace(row[index["sku"]])
-		rawCategories := strings.Split(row[index["categories"]], ",")
+		sku := get("sku")
+		rawCategories := strings.Split(get("categories"), ",")
 		var catNames []string
 		for _, cName := range rawCategories {
 			trimmed := strings.TrimSpace(cName)
@@ -461,13 +673,47 @@ func (s *ProductServiceDDB) ProcessBulkImport(ctx context.Context, file multipar
 		catNameToIDs[cat.Name] = ids
 	}
 
+	if autoCreateCategories {
+		now := time.Now().UTC()
+		for _, catName := range allCatNames {
+			if _, exists := catNameToIDs[catName]; exists {
+				continue
+			}
+
+			newCategory := &models.Category{
+				ID:        uuid.New(),
+				Name:      catName,
+				ParentIDs: []uuid.UUID{},
+				Ancestors: []uuid.UUID{},
+				Slug:      strings.ToLower(strings.ReplaceAll(catName, " ", "-")),
+				IsActive:  true,
+				CreatedAt: now,
+				UpdatedAt: now,
+			}
+
+			if err := s.categoryRepo.Create(ctx, newCategory); err != nil {
+				return nil, fmt.Errorf("failed to auto-create category '%s': %w", catName, err)
+			}
+
+			catNameToIDs[catName] = []uuid.UUID{newCategory.ID}
+		}
+	}
+
 	var productsToInsert []models.Product
 	for _, pp := range pendingProducts {
-		name := strings.TrimSpace(pp.Row[index["name"]])
-		sku := strings.TrimSpace(pp.Row[index["sku"]])
-		price, _ := strconv.ParseFloat(strings.TrimSpace(pp.Row[index["price"]]), 64)
-		quantity, _ := strconv.Atoi(strings.TrimSpace(pp.Row[index["quantity"]]))
-		isFeatured, _ := strconv.ParseBool(strings.TrimSpace(pp.Row[index["is_featured"]]))
+		// Safe getters for fields
+		get := func(key string) string {
+			if idx, ok := index[key]; ok && idx < len(pp.Row) {
+				return strings.TrimSpace(pp.Row[idx])
+			}
+			return ""
+		}
+
+		name := get("name")
+		sku := get("sku")
+		price, _ := strconv.ParseFloat(get("price"), 64)
+		quantity, _ := strconv.Atoi(get("quantity"))
+		isFeatured, _ := strconv.ParseBool(get("is_featured"))
 
 		categorySet := make(map[uuid.UUID]bool)
 		for _, catName := range pp.CategoryNames {
@@ -482,7 +728,7 @@ func (s *ProductServiceDDB) ProcessBulkImport(ctx context.Context, file multipar
 			categoryIDs = append(categoryIDs, id)
 		}
 
-		imageURL := strings.TrimSpace(pp.Row[index["imageurl"]])
+		imageURL := get("imageurl")
 		var imageURLs []string
 		if imageURL != "" {
 			uploadedURL, err := s.uploadImageFromURL(ctx, imageURL, sku, 0)
@@ -497,9 +743,9 @@ func (s *ProductServiceDDB) ProcessBulkImport(ctx context.Context, file multipar
 			Name:        name,
 			Price:       price,
 			Quantity:    quantity,
-			Description: strings.TrimSpace(pp.Row[index["description"]]),
+			Description: get("description"),
 			Images:      imageURLs,
-			Brand:       strings.TrimSpace(pp.Row[index["brand"]]),
+			Brand:       get("brand"),
 			SKU:         sku,
 			IsFeatured:  isFeatured,
 			CategoryIDs: categoryIDs,
@@ -509,23 +755,108 @@ func (s *ProductServiceDDB) ProcessBulkImport(ctx context.Context, file multipar
 		productsToInsert = append(productsToInsert, product)
 	}
 
-	if len(productsToInsert) > 0 {
-		err := s.productRepo.CreateMany(ctx, productsToInsert)
+	// Insert in chunks and skip duplicates by SKU
+	insertedCount := 0
+	var rowResults []map[string]interface{}
+	const chunkSize = 25
+	for i := 0; i < len(productsToInsert); i += chunkSize {
+		end := i + chunkSize
+		if end > len(productsToInsert) {
+			end = len(productsToInsert)
+		}
+		chunk := productsToInsert[i:end]
+
+		// Build SKU list for this chunk and check existing SKUs
+		var skus []string
+		for _, p := range chunk {
+			skus = append(skus, p.SKU)
+		}
+		existing, err := s.productRepo.FindBySKUs(ctx, skus)
 		if err != nil {
 			return nil, err
+		}
+		existingSet := make(map[string]bool)
+		for _, ep := range existing {
+			existingSet[ep.SKU] = true
+		}
+
+		var toInsert []models.Product
+		for _, p := range chunk {
+			// find corresponding pendingProducts rowNum for SKU
+			rowNumForSKU := -1
+			for _, pp := range pendingProducts {
+				if pp.SKU == p.SKU {
+					rowNumForSKU = pp.RowNum
+					break
+				}
+			}
+			if p.SKU != "" && existingSet[p.SKU] {
+				// record duplicate SKU as an error and row result
+				errorsList = append(errorsList, map[string]interface{}{"row": rowNumForSKU, "sku": p.SKU, "error": "duplicate SKU - already exists"})
+				rowResults = append(rowResults, map[string]interface{}{"row": rowNumForSKU, "sku": p.SKU, "status": "skipped", "reason": "duplicate SKU"})
+				continue
+			}
+			toInsert = append(toInsert, p)
+		}
+
+		if len(toInsert) > 0 {
+			if err := s.productRepo.CreateMany(ctx, toInsert); err != nil {
+				// mark all rows in this toInsert as failed
+				for _, p := range toInsert {
+					rowNumForSKU := -1
+					for _, pp := range pendingProducts {
+						if pp.SKU == p.SKU {
+							rowNumForSKU = pp.RowNum
+							break
+						}
+					}
+					errorsList = append(errorsList, map[string]interface{}{"row": rowNumForSKU, "sku": p.SKU, "error": err.Error()})
+					rowResults = append(rowResults, map[string]interface{}{"row": rowNumForSKU, "sku": p.SKU, "status": "failed", "reason": err.Error()})
+				}
+				return nil, err
+			}
+			insertedCount += len(toInsert)
+			for _, p := range toInsert {
+				rowNumForSKU := -1
+				for _, pp := range pendingProducts {
+					if pp.SKU == p.SKU {
+						rowNumForSKU = pp.RowNum
+						break
+					}
+				}
+				rowResults = append(rowResults, map[string]interface{}{"row": rowNumForSKU, "sku": p.SKU, "status": "inserted"})
+
+				// Sync inventory for each inserted product
+				if s.inventoryClient != nil && p.Quantity > 0 {
+					if invErr := s.inventoryClient.SetStock(ctx, p.ID.String(), p.Quantity); invErr != nil {
+						zap.L().Warn("Failed to sync inventory for bulk product",
+							zap.String("product_id", p.ID.String()),
+							zap.Int("quantity", p.Quantity),
+							zap.Error(invErr),
+						)
+					}
+				}
+			}
 		}
 	}
 
 	return &models.BulkImportResult{
-		InsertedCount: len(productsToInsert),
+		InsertedCount: insertedCount,
 		ErrorsCount:   len(errorsList),
 		Errors:        errorsList,
 		Message:       "Bulk import process completed",
+		RowResults:    rowResults,
 	}, nil
 }
 
 func (s *ProductServiceDDB) uploadImageFromURL(ctx context.Context, imageURL, sku string, index int) (string, error) {
-	resp, err := http.Get(imageURL)
+	// Use a context-aware HTTP client with a timeout to avoid hanging
+	client := &http.Client{Timeout: 15 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request for image download: %w", err)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to download image: %w", err)
 	}
@@ -550,8 +881,146 @@ func (s *ProductServiceDDB) uploadImageFromURL(ctx context.Context, imageURL, sk
 		return "", fmt.Errorf("failed to upload to s3: %w", err)
 	}
 
-	if s.endpoint != "" {
-		return fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpoint, "/"), s.bucket, key), nil
+	return s.publicObjectURL(key), nil
+}
+
+func (s *ProductServiceDDB) publicObjectURL(key string) string {
+	if s.cdnDomain != "" {
+		return fmt.Sprintf("%s/%s", normalizePublicBaseURL(s.cdnDomain), key)
 	}
-	return fmt.Sprintf("https://%s.s3.amazonaws.com/%s", s.bucket, key), nil
+	if s.endpoint != "" {
+		return fmt.Sprintf("%s/%s/%s", normalizePublicBaseURL(s.endpoint), s.bucket, key)
+	}
+	return fmt.Sprintf("https://%s.s3.amazonaws.com/%s", s.bucket, key)
+}
+
+func normalizePublicBaseURL(raw string) string {
+	base := strings.TrimSpace(raw)
+	base = strings.TrimRight(base, "/")
+	if base == "" {
+		return ""
+	}
+	if strings.HasPrefix(base, "http://") || strings.HasPrefix(base, "https://") {
+		return base
+	}
+	return "https://" + base
+}
+
+// updateCategoryCountsAfterProductCreation updates product counts for all affected categories.
+// Called asynchronously after a product is created.
+func (s *ProductServiceDDB) updateCategoryCountsAfterProductCreation(ctx context.Context, categoryIDs []uuid.UUID) {
+	if s.categoryService == nil {
+		return
+	}
+
+	// Update counts for all categories and their parents
+	affectedCategories := s.getAllAncestorCategories(ctx, categoryIDs)
+	for _, catID := range affectedCategories {
+		if err := s.categoryService.RecalculateProductCountsForCategory(ctx, catID); err != nil {
+			zap.L().Warn("Failed to update category count after product creation",
+				zap.String("category_id", catID.String()),
+				zap.Error(err))
+		}
+	}
+}
+
+// updateCategoryCountsAfterProductDeletion updates product counts for all affected categories after a product is deleted.
+// Called asynchronously after a product is deleted.
+func (s *ProductServiceDDB) updateCategoryCountsAfterProductDeletion(ctx context.Context, categoryIDs []uuid.UUID) {
+	if s.categoryService == nil {
+		return
+	}
+
+	// Update counts for all categories and their parents
+	affectedCategories := s.getAllAncestorCategories(ctx, categoryIDs)
+	for _, catID := range affectedCategories {
+		if err := s.categoryService.RecalculateProductCountsForCategory(ctx, catID); err != nil {
+			zap.L().Warn("Failed to update category count after product deletion",
+				zap.String("category_id", catID.String()),
+				zap.Error(err))
+		}
+	}
+}
+
+// updateCategoryCountsAfterProductMove updates product counts after a product is moved between categories.
+// Called asynchronously after a product's categories are changed.
+func (s *ProductServiceDDB) updateCategoryCountsAfterProductMove(ctx context.Context, oldCategoryIDs, newCategoryIDs []uuid.UUID) {
+	if s.categoryService == nil {
+		return
+	}
+
+	// Combine old and new categories to update all affected categories and parents
+	allAffected := make(map[uuid.UUID]bool)
+	for _, cat := range oldCategoryIDs {
+		allAffected[cat] = true
+	}
+	for _, cat := range newCategoryIDs {
+		allAffected[cat] = true
+	}
+
+	// Get all ancestors and add them to the affected set
+	oldAncestors := s.getAllAncestorCategories(ctx, oldCategoryIDs)
+	newAncestors := s.getAllAncestorCategories(ctx, newCategoryIDs)
+	for _, cat := range oldAncestors {
+		allAffected[cat] = true
+	}
+	for _, cat := range newAncestors {
+		allAffected[cat] = true
+	}
+
+	// Update counts for all affected categories
+	for catID := range allAffected {
+		if err := s.categoryService.RecalculateProductCountsForCategory(ctx, catID); err != nil {
+			zap.L().Warn("Failed to update category count after product move",
+				zap.String("category_id", catID.String()),
+				zap.Error(err))
+		}
+	}
+}
+
+// getAllAncestorCategories returns all ancestor categories for the given category IDs.
+// This ensures parent categories also have their counts updated.
+func (s *ProductServiceDDB) getAllAncestorCategories(ctx context.Context, categoryIDs []uuid.UUID) []uuid.UUID {
+	allCategories, err := s.categoryRepo.FindAll(ctx)
+	if err != nil {
+		return categoryIDs
+	}
+
+	categoryMap := make(map[uuid.UUID]*models.Category)
+	for i := range allCategories {
+		categoryMap[allCategories[i].ID] = &allCategories[i]
+	}
+
+	ancestors := make(map[uuid.UUID]bool)
+	for _, catID := range categoryIDs {
+		ancestors[catID] = true
+		if cat, ok := categoryMap[catID]; ok {
+			for _, ancestorID := range cat.Ancestors {
+				ancestors[ancestorID] = true
+			}
+		}
+	}
+
+	result := make([]uuid.UUID, 0, len(ancestors))
+	for id := range ancestors {
+		result = append(result, id)
+	}
+	return result
+}
+
+// slicesEqual compares two UUID slices for equality.
+func slicesEqual(a, b []uuid.UUID) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	aMap := make(map[uuid.UUID]bool)
+	for _, id := range a {
+		aMap[id] = true
+	}
+	for _, id := range b {
+		if !aMap[id] {
+			return false
+		}
+	}
+	return true
 }

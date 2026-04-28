@@ -19,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	commonmw "github.com/yashrajoria/common/middleware"
 	"go.uber.org/zap"
 )
 
@@ -59,19 +60,18 @@ func main() {
 	if paymentTopicArn == "" {
 		paymentTopicArn = "arn:aws:sns:eu-west-2:000000000000:payment-events"
 	}
+	notificationTopicArn := os.Getenv("NOTIFICATION_SNS_TOPIC_ARN")
 	snsPublisher := aws_pkg.NewSNSClient(awsCfg)
 
 	// SQS consumer for payment requests
 	paymentQueueURL := os.Getenv("PAYMENT_REQUEST_QUEUE_URL")
 	if paymentQueueURL == "" {
-		// Get queue URL from LocalStack
+		// Attempt to discover the queue URL from AWS; require configuration if discovery fails.
 		queueURL, err := aws_pkg.GetQueueURL(context.Background(), awsCfg, "payment-request-queue")
 		if err != nil {
-			logger.Warn("Could not get payment queue URL", zap.Error(err))
-			paymentQueueURL = "http://localhost:4566/000000000000/payment-request-queue"
-		} else {
-			paymentQueueURL = queueURL
+			logger.Fatal("Payment queue URL not configured and could not be discovered; set PAYMENT_REQUEST_QUEUE_URL", zap.Error(err))
 		}
+		paymentQueueURL = queueURL
 	}
 
 	stripeSvc := services.NewStripeService(cfg.StripeSecretKey, cfg.StripeWebhookKey)
@@ -80,7 +80,9 @@ func main() {
 		sqsConsumer,
 		snsPublisher,
 		paymentTopicArn,
+		notificationTopicArn,
 		stripeSvc,
+		cfg.StoreCurrency,
 		paymentRepo,
 		logger,
 	)
@@ -92,9 +94,29 @@ func main() {
 	// Start consuming payment requests in the background
 	go paymentRequestConsumer.Start(shutdownCtx)
 
+	// --- CloudWatch (Logs + Metrics) ---
+	cwLogsClient, err := aws_pkg.NewCloudWatchLogsClient(context.Background(), "payment-service")
+	if err != nil {
+		logger.Warn("CloudWatch logs client init failed (non-fatal)", zap.Error(err))
+	}
+	_ = cwLogsClient
+
+	metricsClient, err := aws_pkg.NewMetricsClient(context.Background())
+	if err != nil {
+		logger.Warn("CloudWatch metrics client init failed (non-fatal)", zap.Error(err))
+	}
+
 	// HTTP server
 	r := gin.New()
 	r.Use(gin.Recovery())
+
+	// CloudWatch HTTP metrics middleware
+	if metricsClient != nil {
+		r.Use(commonmw.MetricsMiddleware(metricsClient, "payment-service"))
+	}
+
+	// Structured HTTP request logging → CloudWatch via Zap writer
+	r.Use(commonmw.RequestLogger(logger))
 
 	// Add request timeout middleware
 	r.Use(func(c *gin.Context) {
@@ -105,11 +127,13 @@ func main() {
 	})
 
 	pc := &controllers.PaymentController{
-		Stripe:   stripeSvc,
-		SNS:      snsPublisher,
-		TopicArn: paymentTopicArn,
-		Repo:     paymentRepo,
-		Logger:   logger,
+		Stripe:               stripeSvc,
+		SNS:                  snsPublisher,
+		TopicArn:             paymentTopicArn,
+		NotificationTopicArn: notificationTopicArn,
+		DefaultCurrency:      cfg.StoreCurrency,
+		Repo:                 paymentRepo,
+		Logger:               logger,
 	}
 	routes.RegisterPaymentRoutes(r, pc)
 

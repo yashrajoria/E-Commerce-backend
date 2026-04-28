@@ -2,7 +2,6 @@ package utils
 
 import (
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -19,10 +18,36 @@ type ForwardOptions struct {
 }
 
 func ForwardRequest(c *gin.Context, opts ForwardOptions) {
-	// Get the path - handle case where there's no wildcard parameter
+	// Build the path suffix to append to TargetBase.
+	// 1. Try the wildcard param (*any) used by most routes.
+	// 2. Fall back to deriving it from the full request path by stripping
+	//    the gateway-level prefix that mirrors the TargetBase tail segment.
+	//    e.g. TargetBase="http://inventory-service:8084/inventory"
+	//         request path="/inventory/check"  →  suffix="/check"
 	targetPath := ""
 	if any := c.Param("any"); any != "" {
 		targetPath = any
+	} else {
+		// Derive the gateway prefix from the last path segment of TargetBase.
+		// For "http://host:port/inventory" the prefix is "/inventory".
+		basePath := opts.TargetBase
+		if idx := strings.Index(basePath, "://"); idx != -1 {
+			// strip scheme+host → "/inventory"
+			after := basePath[idx+3:]
+			if si := strings.Index(after, "/"); si != -1 {
+				basePath = after[si:]
+			} else {
+				basePath = ""
+			}
+		}
+		reqPath := c.Request.URL.Path
+		if basePath != "" && strings.HasPrefix(reqPath, basePath) {
+			targetPath = strings.TrimPrefix(reqPath, basePath)
+		}
+		// Also check for named params (e.g. :productId) and append them
+		if productId := c.Param("productId"); productId != "" && targetPath == "" {
+			targetPath = "/" + productId
+		}
 	}
 
 	if opts.StripPrefix != "" && strings.HasPrefix(targetPath, opts.StripPrefix) {
@@ -38,6 +63,7 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 		zap.String("method", c.Request.Method),
 		zap.String("url", targetURL),
 		zap.String("path", targetPath),
+		zap.String("correlation_id", c.GetString("CorrelationID")),
 	)
 
 	req, err := http.NewRequest(c.Request.Method, targetURL, c.Request.Body)
@@ -52,25 +78,34 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 		req.Header[k] = v
 	}
 
-	// Inject user claims headers for downstream services
+	// Propagate user claims to downstream services.
+	// Set both X-User-* headers (for services that check headers) and cookies
+	// (for services that check cookies). This dual-injection ensures compatibility
+	// across all microservices regardless of how they read the user identity.
 	if userID, exists := c.Get("user_id"); exists {
-		if uid, ok := userID.(string); ok {
+		if uid, ok := userID.(string); ok && uid != "" {
 			req.Header.Set("X-User-ID", uid)
+			req.AddCookie(&http.Cookie{Name: "user_id", Value: uid})
 		}
 	}
 	if email, exists := c.Get("email"); exists {
-		if e, ok := email.(string); ok {
+		if e, ok := email.(string); ok && e != "" {
 			req.Header.Set("X-User-Email", e)
+			req.AddCookie(&http.Cookie{Name: "user_email", Value: e})
 		}
 	}
 	if role, exists := c.Get("role"); exists {
-		if r, ok := role.(string); ok {
+		if r, ok := role.(string); ok && r != "" {
 			req.Header.Set("X-User-Role", r)
+			req.AddCookie(&http.Cookie{Name: "user_role", Value: r})
 		}
 	}
 
 	client := &http.Client{
 		Timeout: 30 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -98,10 +133,7 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 		}
 
 		for _, val := range v {
-			if strings.ToLower(k) == "set-cookie" {
-				// Log Set-Cookie values coming from downstream for visibility
-				log.Printf("[GATEWAY][FORWARD] downstream Set-Cookie: %s", val)
-			}
+
 			c.Writer.Header().Add(k, val)
 		}
 	}

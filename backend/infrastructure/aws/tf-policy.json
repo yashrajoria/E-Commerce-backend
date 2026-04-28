@@ -1,0 +1,97 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "S3BucketManagement",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:DeleteBucket",
+        "s3:ListBucket",
+        "s3:GetBucketLocation",
+        "s3:PutBucketPolicy",
+        "s3:PutBucketPublicAccessBlock",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:GetObject",
+        "s3:ListBucketVersions",
+        "s3:GetBucketPolicy"
+      ],
+      "Resource": ["arn:aws:s3:::shopswift", "arn:aws:s3:::shopswift/*"]
+    },
+    {
+      "Sid": "DynamoDBManagement",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:CreateTable",
+        "dynamodb:DeleteTable",
+        "dynamodb:DescribeTable",
+        "dynamodb:UpdateTable",
+        "dynamodb:ListTagsOfResource",
+        "dynamodb:TagResource",
+        "dynamodb:PutItem",
+        "dynamodb:GetItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Scan",
+        "dynamodb:Query"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:${AWS_REGION}:${ACCOUNT_ID}:table/Products",
+        "arn:aws:dynamodb:${AWS_REGION}:${ACCOUNT_ID}:table/Categories",
+        "arn:aws:dynamodb:${AWS_REGION}:${ACCOUNT_ID}:table/Inventory"
+      ]
+    },
+    {
+      "Sid": "SQSManagement",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:CreateQueue",
+        "sqs:DeleteQueue",
+        "sqs:GetQueueAttributes",
+        "sqs:SetQueueAttributes",
+        "sqs:SendMessage",
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:ListQueues"
+      ],
+      "Resource": [
+        "arn:aws:sqs:${AWS_REGION}:${ACCOUNT_ID}:order-processing-queue",
+        "arn:aws:sqs:${AWS_REGION}:${ACCOUNT_ID}:payment-events-queue",
+        "arn:aws:sqs:${AWS_REGION}:${ACCOUNT_ID}:payment-request-queue"
+      ]
+    },
+    {
+      "Sid": "CloudWatchLogs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:DeleteLogGroup",
+        "logs:PutRetentionPolicy",
+        "logs:DescribeLogGroups"
+      ],
+      "Resource": [
+        "arn:aws:logs:${AWS_REGION}:${ACCOUNT_ID}:log-group:/ecommerce/services*"
+      ]
+    },
+    {
+      "Sid": "SecretsManager",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:CreateSecret",
+        "secretsmanager:PutSecretValue",
+        "secretsmanager:DeleteSecret",
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:GetSecretValue"
+      ],
+      "Resource": [
+        "arn:aws:secretsmanager:${AWS_REGION}:${ACCOUNT_ID}:secret:ecommerce/*"
+      ]
+    },
+    {
+      "Sid": "TerraformReadHelpers",
+      "Effect": "Allow",
+      "Action": ["ec2:Describe*", "iam:ListRoles", "iam:GetRole"],
+      "Resource": "*"
+    }
+  ]
+}

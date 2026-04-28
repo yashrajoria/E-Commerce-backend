@@ -4,65 +4,58 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
-	"time"
+
+	"order-service/models"
 
 	"github.com/google/uuid"
 )
 
-// mockSNS implements aws.SNSPublisher (avoids importing aws pkg in test)
-type mockSNS struct {
-	publishedArn string
-	publishedMsg []byte
+type fakeSNSPublisher struct {
+	lastTopic   string
+	lastMessage []byte
+	publishErr  error
 }
 
-func (m *mockSNS) Publish(ctx context.Context, topicArn string, message []byte) error {
-	m.publishedArn = topicArn
-	m.publishedMsg = append([]byte(nil), message...)
-	return nil
+func (f *fakeSNSPublisher) Publish(ctx context.Context, topicArn string, message []byte) error {
+	f.lastTopic = topicArn
+	f.lastMessage = append([]byte(nil), message...)
+	return f.publishErr
 }
 
-func TestCreateOrder_PublishesToSNS(t *testing.T) {
-	// Arrange
-	sns := &mockSNS{}
+func TestCreateOrderPropagatesIdempotencyKey(t *testing.T) {
+	fakePublisher := &fakeSNSPublisher{}
+	svc := NewOrderServiceSQS(nil, fakePublisher, "arn:aws:sns:local:123456789012:orders", "")
 
-	// Use a nil repo (we don't reach DB in CreateOrder)
-	svc := NewOrderServiceSQS(nil, sns, "arn:aws:sns:eu-west-2:000000000000:order-events")
-
+	ctx := context.WithValue(context.Background(), IdempotencyKeyContextKey, "user-123:req-456")
 	req := &CreateOrderRequest{
 		Items: []struct {
-			ProductID uuid.UUID "json:\"product_id\" binding:\"required\""
-			Quantity  int       "json:\"quantity\" binding:\"required,min=1\""
-		}{},
+			ProductID uuid.UUID `json:"product_id" binding:"required"`
+			Quantity  int       `json:"quantity" binding:"required,min=1"`
+		}{
+			{ProductID: uuid.MustParse("11111111-1111-1111-1111-111111111111"), Quantity: 2},
+		},
 	}
-	pid := uuid.New()
-	req.Items = append(req.Items, struct {
-		ProductID uuid.UUID `json:"product_id" binding:"required"`
-		Quantity  int       `json:"quantity" binding:"required,min=1"`
-	}{ProductID: pid, Quantity: 2})
 
-	// Act
-	err := svc.CreateOrder(context.Background(), "1", req)
-	if err != nil {
+	if err := svc.CreateOrder(ctx, "22222222-2222-2222-2222-222222222222", "user@example.com", req); err != nil {
 		t.Fatalf("CreateOrder returned error: %v", err)
 	}
 
-	// Assert SNS published
-	if sns.publishedArn != "arn:aws:sns:eu-west-2:000000000000:order-events" {
-		t.Fatalf("expected sns arn published, got %s", sns.publishedArn)
-	}
-	if len(sns.publishedMsg) == 0 {
-		t.Fatalf("expected sns message to be published")
+	if fakePublisher.lastTopic != "arn:aws:sns:local:123456789012:orders" {
+		t.Fatalf("unexpected topic: %s", fakePublisher.lastTopic)
 	}
 
-	// Verify message is valid JSON
-	var out map[string]interface{}
-	if err := json.Unmarshal(sns.publishedMsg, &out); err != nil {
-		t.Fatalf("sns published invalid json: %v", err)
-	}
-	if _, ok := out["items"]; !ok {
-		t.Fatalf("sns payload missing items")
+	var evt models.CheckoutEvent
+	if err := json.Unmarshal(fakePublisher.lastMessage, &evt); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
 	}
 
-	// small timing sanity
-	time.Sleep(10 * time.Millisecond)
+	if got := evt.IdempotencyKey; got != "user-123:req-456" {
+		t.Fatalf("expected propagated idempotency key, got %q", got)
+	}
+	if evt.UserID != "22222222-2222-2222-2222-222222222222" {
+		t.Fatalf("unexpected user id: %s", evt.UserID)
+	}
+	if len(evt.Items) != 1 {
+		t.Fatalf("unexpected items length: %d", len(evt.Items))
+	}
 }

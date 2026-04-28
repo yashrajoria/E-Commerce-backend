@@ -28,6 +28,7 @@ func main() {
 		panic("failed to initialize logger: " + err.Error())
 	}
 	defer logger.Sync()
+	zap.ReplaceGlobals(logger)
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -55,6 +56,53 @@ func main() {
 	r.Use(gin.Recovery())
 	r.Use(middleware.ConfigMiddleware(cfg.ProductServiceURL))
 
+	// CloudWatch HTTP metrics middleware (metricsClient created later, use closure)
+	var metricsClient *aws_pkg.MetricsClient
+	r.Use(func(c *gin.Context) {
+		if metricsClient == nil || !metricsClient.IsEnabled() {
+			c.Next()
+			return
+		}
+		start := time.Now()
+		c.Next()
+		go func(path, method string, status int, dur time.Duration) {
+			mctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			dims := map[string]string{"Service": "order-service", "Method": method, "Path": path}
+			_ = metricsClient.RecordCount(mctx, aws_pkg.MetricHTTPRequests, dims)
+			_ = metricsClient.RecordLatency(mctx, aws_pkg.MetricHTTPLatency, dur, dims)
+			if status >= 400 {
+				_ = metricsClient.RecordCount(mctx, aws_pkg.MetricHTTPErrors, dims)
+			}
+		}(c.Request.URL.Path, c.Request.Method, c.Writer.Status(), time.Since(start))
+	})
+
+	// Structured HTTP request logging → CloudWatch via Zap writer
+	r.Use(func(c *gin.Context) {
+		start := time.Now()
+		path := c.Request.URL.Path
+		method := c.Request.Method
+		c.Next()
+		latency := time.Since(start)
+		status := c.Writer.Status()
+		fields := []zap.Field{
+			zap.String("method", method),
+			zap.String("path", path),
+			zap.Int("status", status),
+			zap.Duration("latency", latency),
+			zap.String("client_ip", c.ClientIP()),
+			zap.Int("body_size", c.Writer.Size()),
+		}
+		switch {
+		case status >= 500:
+			logger.Error("http_request", fields...)
+		case status >= 400:
+			logger.Warn("http_request", fields...)
+		default:
+			logger.Info("http_request", fields...)
+		}
+	})
+
 	// Add request timeout middleware
 	r.Use(func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
@@ -69,6 +117,7 @@ func main() {
 		orderRepository,
 		snsClient,
 		cfg.OrderSNSTopicARN,
+		cfg.NotificationSNSTopicARN,
 	)
 	orderController := controllers.NewOrderController(orderService)
 	routes.RegisterOrderRoutes(r, orderController)
@@ -109,12 +158,37 @@ func main() {
 		}
 	}
 
+	// Inventory client for stock management
+	inventoryClient := services.NewInventoryClient(cfg.InventoryServiceURL)
+
+	// CloudWatch Metrics
+	cwLogsClient, err := aws_pkg.NewCloudWatchLogsClient(context.Background(), "order-service")
+	if err != nil {
+		logger.Warn("CloudWatch logs client init failed (non-fatal)", zap.Error(err))
+	}
+	_ = cwLogsClient
+
+	metricsClient, err = aws_pkg.NewMetricsClient(context.Background())
+	if err != nil {
+		logger.Warn("CloudWatch metrics client init failed (non-fatal)", zap.Error(err))
+	}
+
+	// Promotion client for coupon validation
+	promotionClient := services.NewPromotionClient(cfg.PromotionServiceURL)
+
 	// Start SQS consumers
 	if checkoutQueueURL != "" && paymentRequestQueueURL != "" {
 		checkoutConsumer := services.NewSQSCheckoutConsumer(
 			aws_pkg.NewSQSConsumer(awsCfg, checkoutQueueURL),
 			aws_pkg.NewSQSConsumer(awsCfg, paymentRequestQueueURL), // For sending payment requests
-			database.DB,
+			orderRepository,
+			inventoryClient,
+			metricsClient,
+			cfg.ProductServiceURL,
+			snsClient,
+			cfg.NotificationSNSTopicARN,
+			promotionClient,
+			cfg.StoreCurrency,
 		)
 		go checkoutConsumer.Start(shutdownCtx)
 		logger.Info("Started SQS checkout consumer", zap.String("queue", checkoutQueueURL))
@@ -125,7 +199,12 @@ func main() {
 	if paymentEventsQueueURL != "" {
 		paymentConsumer := services.NewSQSPaymentConsumer(
 			aws_pkg.NewSQSConsumer(awsCfg, paymentEventsQueueURL),
-			database.DB,
+			orderRepository,
+			inventoryClient,
+			metricsClient,
+			snsClient,
+			cfg.NotificationSNSTopicARN,
+			cfg.ProductServiceURL,
 		)
 		go paymentConsumer.Start(shutdownCtx)
 		logger.Info("Started SQS payment events consumer", zap.String("queue", paymentEventsQueueURL))

@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Payment Confirmed – ShopSwift</title>
+    <style>
+      body {
+        background: #f0ede8;
+        font-family: "DM Sans", Arial, sans-serif;
+        color: #1a1a1a;
+        margin: 0;
+        padding: 24px;
+      }
+      .card {
+        max-width: 580px;
+        margin: 0 auto;
+        background: #faf8f5;
+        border-radius: 14px;
+        overflow: hidden;
+      }
+      .hero {
+        background: linear-gradient(145deg, #1a1a1a 0%, #2d2418 100%);
+        color: #f5f0e8;
+        padding: 28px;
+      }
+      .logo {
+        font-family: "Playfair Display", serif;
+        font-size: 24px;
+        font-weight: 600;
+      }
+      .logo span {
+        color: #c9a96e;
+      }
+      .title {
+        margin-top: 10px;
+        font-size: 26px;
+        font-family: "Playfair Display", serif;
+      }
+      .body {
+        padding: 28px;
+      }
+      .summary {
+        margin-top: 16px;
+        background: #f0ede8;
+        border-left: 3px solid #27ae60;
+        border-radius: 8px;
+        padding: 14px;
+      }
+      .label {
+        font-size: 12px;
+        text-transform: uppercase;
+        color: #8b7d6b;
+        letter-spacing: 1px;
+      }
+      .value {
+        font-size: 16px;
+        color: #1a1a1a;
+        margin-bottom: 8px;
+      }
+      .badge {
+        display: inline-block;
+        background: #27ae60;
+        color: #fff;
+        padding: 4px 12px;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 600;
+        margin-bottom: 12px;
+      }
+      .items-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+      }
+      .items-table th {
+        text-align: left;
+        font-size: 12px;
+        text-transform: uppercase;
+        color: #8b7d6b;
+        letter-spacing: 1px;
+        padding: 8px 4px;
+        border-bottom: 1px solid #ddd;
+      }
+      .items-table td {
+        font-size: 14px;
+        color: #1a1a1a;
+        padding: 8px 4px;
+        border-bottom: 1px solid #eee;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="hero">
+        <div class="logo">Shop<span>Swift</span></div>
+        <div class="title">Payment Confirmed</div>
+      </div>
+      <div class="body">
+        <p>Hello {{.name}},</p>
+        <span class="badge">&#10003; Payment Successful</span>
+        <p>
+          Your payment for order <strong>#{{.order_id}}</strong> has been
+          confirmed. We're now processing your order!
+        </p>
+        <div class="summary">
+          <div class="label">Order Details</div>
+          <div class="value">Order ID: {{.order_id}}</div>
+          {{if .items}}
+          <table class="items-table">
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Qty</th>
+                <th>Price</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{range .items}}
+              <tr>
+                <td>{{.product_name}}</td>
+                <td>{{.quantity}}</td>
+                <td>{{.price}}</td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+          {{end}}
+          <div class="value" style="margin-top: 12px; font-weight: bold">
+            Total Paid: {{.total}}
+          </div>
+        </div>
+        <p>Thank you for shopping with ShopSwift!</p>
+      </div>
+    </div>
+  </body>
+</html>

@@ -116,7 +116,133 @@ func (s *CategoryServiceDDB) GetCategoryTree(ctx context.Context) ([]*models.Cat
 			}
 		}
 	}
+
+	// Attach product counts to all categories
+	for _, cat := range rootCategories {
+		s.attachProductCounts(ctx, cat, categoryMap)
+	}
+
 	return rootCategories, nil
+}
+
+// attachProductCounts recursively attaches direct and total product counts to categories and their children.
+func (s *CategoryServiceDDB) attachProductCounts(ctx context.Context, cat *models.Category, categoryMap map[uuid.UUID]*models.Category) {
+	// Compute direct product count for this category
+	directCount, err := s.productRepo.Count(ctx, map[string]interface{}{
+		"category_ids": cat.ID.String(),
+	})
+	if err == nil {
+		cat.DirectProductCount = int(directCount)
+	}
+
+	// Compute total product count (including descendants)
+	totalCount := int(directCount) // start with direct products
+	if len(cat.Children) > 0 {
+		descendantCount := s.countDescendantProducts(ctx, cat, categoryMap)
+		totalCount += descendantCount
+	}
+	cat.TotalProductCount = totalCount
+
+	// Recursively process children
+	for _, child := range cat.Children {
+		s.attachProductCounts(ctx, child, categoryMap)
+	}
+}
+
+// countDescendantProducts recursively counts all products in descendant categories.
+func (s *CategoryServiceDDB) countDescendantProducts(ctx context.Context, cat *models.Category, categoryMap map[uuid.UUID]*models.Category) int {
+	total := 0
+	for _, child := range cat.Children {
+		// Direct count for this child
+		directCount, err := s.productRepo.Count(ctx, map[string]interface{}{
+			"category_ids": child.ID.String(),
+		})
+		if err == nil {
+			total += int(directCount)
+		}
+		// Recurse to grandchildren
+		total += s.countDescendantProducts(ctx, child, categoryMap)
+	}
+	return total
+}
+
+// RecalculateProductCountsForCategory recalculates product counts for a specific category and updates storage.
+// Called when products are created, deleted, or moved between categories.
+func (s *CategoryServiceDDB) RecalculateProductCountsForCategory(ctx context.Context, categoryID uuid.UUID) error {
+	_, err := s.repo.FindByID(ctx, categoryID)
+	if err != nil {
+		return err
+	}
+
+	// Calculate direct product count
+	directCount, err := s.productRepo.Count(ctx, map[string]interface{}{
+		"category_ids": categoryID.String(),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to count direct products: %w", err)
+	}
+
+	// Get all descendants and sum their direct counts
+	descendants := s.getAllDescendantCategoryIDs(ctx, categoryID)
+	totalCount := int(directCount)
+	for _, descendantID := range descendants {
+		count, err := s.productRepo.Count(ctx, map[string]interface{}{
+			"category_ids": descendantID.String(),
+		})
+		if err != nil {
+			return fmt.Errorf("failed to count products in descendant: %w", err)
+		}
+		totalCount += int(count)
+	}
+
+	// Update category with new counts
+	updates := map[string]interface{}{
+		"direct_product_count": int(directCount),
+		"total_product_count":  totalCount,
+		"updated_at":           time.Now().UTC().Format(time.RFC3339),
+	}
+
+	err = s.repo.Update(ctx, categoryID, updates)
+	if err != nil {
+		return fmt.Errorf("failed to update category counts: %w", err)
+	}
+
+	// Also update parent categories' total counts
+	category, err := s.repo.FindByID(ctx, categoryID)
+	if err == nil && len(category.ParentIDs) > 0 {
+		for _, parentID := range category.ParentIDs {
+			_ = s.RecalculateProductCountsForCategory(ctx, parentID) // Propagate up the tree
+		}
+	}
+
+	return nil
+}
+
+// getAllDescendantCategoryIDs fetches all descendant category IDs for a given category.
+func (s *CategoryServiceDDB) getAllDescendantCategoryIDs(ctx context.Context, categoryID uuid.UUID) []uuid.UUID {
+	allCategories, err := s.repo.FindAll(ctx)
+	if err != nil {
+		return []uuid.UUID{}
+	}
+
+	descendants := []uuid.UUID{}
+	s.collectDescendantIDs(categoryID, allCategories, &descendants)
+	return descendants
+}
+
+// collectDescendantIDs recursively collects all descendant category IDs.
+func (s *CategoryServiceDDB) collectDescendantIDs(categoryID uuid.UUID, allCategories []models.Category, descendants *[]uuid.UUID) {
+	for i := range allCategories {
+		cat := &allCategories[i]
+		for _, parentID := range cat.ParentIDs {
+			if parentID == categoryID {
+				*descendants = append(*descendants, cat.ID)
+				// Recurse to find grandchildren
+				s.collectDescendantIDs(cat.ID, allCategories, descendants)
+				break
+			}
+		}
+	}
 }
 
 func (s *CategoryServiceDDB) UpdateCategory(ctx context.Context, id uuid.UUID, req CategoryCreateRequest) (int64, error) {

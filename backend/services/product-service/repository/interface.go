@@ -18,6 +18,8 @@ type ProductRepo interface {
 	CreateMany(ctx context.Context, products []models.Product) error
 	Update(ctx context.Context, id uuid.UUID, updates map[string]interface{}) error
 	Delete(ctx context.Context, id uuid.UUID) error
+	// DeleteMany deletes multiple products by their UUIDs using batch operations
+	DeleteMany(ctx context.Context, ids []uuid.UUID) error
 	FindBySKUs(ctx context.Context, skus []string) ([]models.Product, error)
 	EnsureIndexes(ctx context.Context) error
 }

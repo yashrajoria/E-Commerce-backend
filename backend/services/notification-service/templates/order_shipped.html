@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Your ShopSwift order has shipped</title>
+    <style>
+      body {
+        background: #f0ede8;
+        font-family: "DM Sans", Arial, sans-serif;
+        color: #1a1a1a;
+        margin: 0;
+        padding: 24px;
+      }
+      .card {
+        max-width: 580px;
+        margin: 0 auto;
+        background: #faf8f5;
+        border-radius: 14px;
+        overflow: hidden;
+      }
+      .hero {
+        background: linear-gradient(145deg, #1a1a1a 0%, #2d2418 100%);
+        color: #f5f0e8;
+        padding: 28px;
+      }
+      .logo {
+        font-family: "Playfair Display", serif;
+        font-size: 24px;
+        font-weight: 600;
+      }
+      .logo span {
+        color: #c9a96e;
+      }
+      .title {
+        margin-top: 10px;
+        font-size: 26px;
+        font-family: "Playfair Display", serif;
+      }
+      .body {
+        padding: 28px;
+      }
+      .track {
+        margin-top: 16px;
+        background: #f0ede8;
+        border-left: 3px solid #c9a96e;
+        border-radius: 8px;
+        padding: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="hero">
+        <div class="logo">Shop<span>Swift</span></div>
+        <div class="title">Order Shipped</div>
+      </div>
+      <div class="body">
+        <p>Hello {{.name}},</p>
+        <p>Your order <strong>#{{.order_id}}</strong> is now on the way.</p>
+        <div class="track">
+          <p><strong>Tracking Number:</strong> {{.tracking_code}}</p>
+        </div>
+        <p>We’ll notify you again once it is delivered.</p>
+      </div>
+    </div>
+  </body>
+</html>

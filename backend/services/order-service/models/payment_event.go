@@ -4,11 +4,14 @@ import "time"
 
 // From cart-service → order-service
 type CheckoutEvent struct {
-	Event     string         `json:"event"`   // expected: "checkout.requested"
-	UserID    string         `json:"user_id"` // must be UUID string
-	Items     []CheckoutItem `json:"items"`
-	Timestamp time.Time      `json:"timestamp"`
-	OrderID   string         `json:"order_id"`
+	Event          string         `json:"event"`   // expected: "checkout.requested"
+	UserID         string         `json:"user_id"` // must be UUID string
+	Email          string         `json:"email,omitempty"`
+	IdempotencyKey string         `json:"idempotency_key,omitempty"`
+	Items          []CheckoutItem `json:"items"`
+	Timestamp      time.Time      `json:"timestamp"`
+	OrderID        string         `json:"order_id"`
+	CouponCode     string         `json:"coupon_code,omitempty"`
 }
 
 type CheckoutItem struct {
@@ -18,9 +21,12 @@ type CheckoutItem struct {
 
 // order-service → payment-service
 type PaymentRequest struct {
-	OrderID string `json:"order_id"`
-	UserID  string `json:"user_id"`
-	Amount  int    `json:"amount"` // minor units
+	OrderID        string `json:"order_id"`
+	UserID         string `json:"user_id"`
+	Email          string `json:"email,omitempty"`
+	Amount         int    `json:"amount"` // minor units
+	Currency       string `json:"currency,omitempty"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
 }
 
 // payment-service → order-service
@@ -28,6 +34,7 @@ type PaymentEvent struct {
 	Type      string    `json:"type"` // "payment_succeeded" | "payment_failed"
 	OrderID   string    `json:"order_id"`
 	UserID    string    `json:"user_id"` // <-- Add this line
+	Email     string    `json:"email,omitempty"`
 	PaymentID string    `json:"payment_id,omitempty"`
 	Amount    int       `json:"amount,omitempty"`
 	Currency  string    `json:"currency,omitempty"`

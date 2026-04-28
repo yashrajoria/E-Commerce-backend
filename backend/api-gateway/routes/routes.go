@@ -1,94 +1,255 @@
 package routes
 
 import (
+	"net/http"
+	"strings"
+
 	"api-gateway/middlewares"
 	"api-gateway/utils"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis/v8"
 )
 
-func RegisterAllRoutes(r *gin.Engine) {
+func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
+
+	// ── Global Middlewares ────────────────────────────────────────────────────
+	// FIX: ALL r.Use() calls must come BEFORE any group or route registration.
+	// In Gin, middleware added to the engine after groups are created is not
+	// reliably inherited by those groups (handler chains are built at registration
+	// time). This was causing /bff/auth/login and other routes to return 404.
+	r.Use(middlewares.CorrelationIDMiddleware())
+	if redisClient != nil {
+		r.Use(middlewares.GlobalRateLimiter(redisClient))
+	}
+
+	// ── forwardTo helper ──────────────────────────────────────────────────────
+	// URL path so it can append it correctly to TargetBase.
+	// with an empty path (""), producing 404s from bff-service.
 	forwardTo := func(targetBase string) gin.HandlerFunc {
 		return func(c *gin.Context) {
+			// SECURITY: Block public access to internal-only service endpoints.
+			if strings.Contains(c.Request.URL.Path, "/internal/") {
+				c.JSON(http.StatusForbidden, gin.H{"error": "access to internal endpoints is restricted"})
+				c.Abort()
+				return
+			}
 			utils.ForwardRequest(c, utils.ForwardOptions{
 				TargetBase: targetBase,
 			})
 		}
 	}
 
-	// ===== PUBLIC ROUTES =====
-	public := r.Group("/")
-
-	// Products routes - handle both /products and /products/*
+	// ── service targets ───────────────────────────────────────────────────────
+	bff := forwardTo("http://bff-service:8088/bff")
 	products := forwardTo("http://product-service:8082/products")
+	categories := forwardTo("http://product-service:8082/categories")
+	users := forwardTo("http://user-service:8085/users")
+	cart := forwardTo("http://cart-service:8086/cart")
+	orders := forwardTo("http://order-service:8083/orders")
+	payment := forwardTo("http://payment-service:8087/payment")
+	inventory := forwardTo("http://inventory-service:8084/inventory")
+	coupons := forwardTo("http://promotion-service:8090/coupons")
+	shipping := forwardTo("http://shipping-service:8091/shipping")
+	authProxy := forwardTo("http://auth-service:8081/auth")
+	notifications := forwardTo("http://notification-service:8092/notifications")
+	agent := forwardTo("http://agent-service:8000/agent")
+
+	// ── route groups ──────────────────────────────────────────────────────────
+	public := r.Group("/")
+	protected := r.Group("/")
+	protected.Use(middlewares.JWTMiddleware())
+	admin := protected.Group("/")
+	admin.Use(middlewares.AdminRoleMiddleware())
+
+	// =========================================================================
+	// PUBLIC ROUTES — no authentication required
+	// =========================================================================
+
+	// Docs
+	public.GET("/docs", forwardTo("http://bff-service:8088/docs"))
+	public.GET("/docs/*any", forwardTo("http://bff-service:8088/docs"))
+
+	// Stripe webhook — Stripe calls this directly, no auth
+	public.POST("/stripe/webhook", forwardTo("http://payment-service:8087/payment"))
+
+	// Auth — sensitive public actions (strict rate limiting)
+	authStrict := public.Group("/auth")
+	if redisClient != nil {
+		authStrict.Use(middlewares.StrictRateLimiter(redisClient))
+	}
+	authStrict.POST("/login", authProxy)
+	authStrict.POST("/register", authProxy)
+	authStrict.POST("/resend-verification", authProxy)
+
+	// Auth — other public actions
+	public.POST("/auth/verify-email", authProxy)
+
+	// Products — read only, public browsing
 	public.GET("/products", products)
 	public.GET("/products/*any", products)
 
-	// Categories routes - handle both /categories and /categories/*
-	categories := forwardTo("http://product-service:8082/categories")
+	// Categories — read only, public browsing
 	public.GET("/categories", categories)
 	public.GET("/categories/*any", categories)
 
-	// ===== AUTH ROUTES (PUBLIC) =====
-	// ===== PROTECTED ROUTES (JWT Required) =====
-	protected := r.Group("/")
-	protected.Use(middlewares.JWTMiddleware())
-	auth := r.Group("/auth")
-	authProxy := forwardTo("http://auth-service:8081/auth")
+	// ── BFF routes ────────────────────────────────────────────────────────────
 
-	// Auth routes with wildcard
+	// BFF — PUBLIC (no auth required)
+	bffPublic := public.Group("/bff")
+	bffPublic.POST("/auth/register", bff)
+	bffPublic.POST("/auth/login", bff)
+	bffPublic.POST("/auth/verify-email", bff)
+	bffPublic.POST("/auth/resend-verification", bff)
+	bffPublic.POST("/auth/refresh", bff)
+	bffPublic.GET("/products", bff)
+	bffPublic.GET("/products/*action", bff)
+	bffPublic.GET("/categories", bff)
+	bffPublic.GET("/categories/*action", bff)
+	bffPublic.GET("/home", bff)
+
+	// BFF — PROTECTED (JWT required)
+	bffProtected := protected.Group("/bff")
+	bffProtected.POST("/auth/logout", bff)
+	bffProtected.GET("/auth/status", bff)
+	bffProtected.GET("/cart", bff)
+	bffProtected.POST("/cart/*action", bff)
+	bffProtected.DELETE("/cart/*action", bff)
+	bffProtected.POST("/checkout", bff)
+	bffProtected.GET("/orders", bff)
+	bffProtected.GET("/orders/*action", bff)
+	bffProtected.GET("/profile", bff)
+	bffProtected.PUT("/users/profile", bff)
+	bffProtected.POST("/users/change-password", bff)
+	bffProtected.GET("/payment/*action", bff)
+	bffProtected.POST("/payment/*action", bff)
+
+	// BFF — ADMIN (JWT + Admin Role required)
+	// FIX: removed redundant .Use(JWTMiddleware()) — already applied by `protected` group.
+	bffAdmin := protected.Group("/bff/admin")
+	bffAdmin.Use(middlewares.AdminRoleMiddleware())
+	
+	// Keep dashboard and analytics routed to BFF
+	bffAdmin.GET("/dashboard", bff)
+	bffAdmin.GET("/reports/*any", bff)
+
+	// Map CRUD operations directly to microservices to avoid bff double-proxy
+	bffAdmin.GET("/products", products)
+	bffAdmin.POST("/products", products)
+	bffAdmin.GET("/products/presign", forwardTo("http://product-service:8082/products/presign"))
+	bffAdmin.PUT("/products/*any", products)
+	bffAdmin.POST("/products/*any", products)
+	bffAdmin.DELETE("/products/*any", products)
+
+	bffAdmin.GET("/categories", categories)
+	bffAdmin.POST("/categories", categories)
+	bffAdmin.PUT("/categories/*any", categories)
+	bffAdmin.DELETE("/categories/*any", categories)
+
+	bffAdmin.GET("/users", users)
+	bffAdmin.POST("/users", forwardTo("http://auth-service:8081/auth/admin/users"))
+	bffAdmin.PUT("/users/*any", users) 
+	bffAdmin.DELETE("/users/*any", users)
+
+	bffAdmin.GET("/orders", forwardTo("http://order-service:8083/orders/admin/"))
+	bffAdmin.GET("/orders/*any", orders)
+	bffAdmin.PUT("/orders/*any", orders)
+
+	bffAdmin.GET("/inventory", inventory)
+	bffAdmin.PUT("/inventory/*any", inventory)
+
+	bffAdmin.GET("/coupons", coupons)
+	bffAdmin.POST("/coupons", coupons)
+	bffAdmin.PUT("/coupons/*any", coupons)
+	bffAdmin.DELETE("/coupons/*any", coupons)
+
+	bffAdmin.GET("/notifications", notifications)
+	bffAdmin.GET("/notifications/log", forwardTo("http://notification-service:8092/notifications/log"))
+
+	// Agent — ADMIN (JWT + Admin Role required)
+	// FIX: same — no need to re-apply JWTMiddleware inside a protected sub-group.
+	agentAdmin := protected.Group("/agent")
+	agentAdmin.Use(middlewares.AdminRoleMiddleware())
+	agentAdmin.Any("", agent)
+	agentAdmin.Any("/*any", agent)
+
+	// =========================================================================
+	// PROTECTED ROUTES — JWT required
+	// =========================================================================
+
+	// Auth — protected actions
+	protected.POST("/auth/logout", authProxy)
+	protected.POST("/auth/refresh", authProxy)
 	protected.GET("/auth/*any", authProxy)
-	auth.POST("/*any", authProxy)
 
-	// User routes - handle both /users and /users/*
-	users := forwardTo("http://user-service:8085/users")
+	// Users
 	protected.GET("/users", users)
 	protected.GET("/users/*any", users)
 	protected.POST("/users/*any", users)
 	protected.PUT("/users/*any", users)
 	protected.DELETE("/users/*any", users)
 
-	// Cart routes - handle both /cart and /cart/*
-	cart := forwardTo("http://cart-service:8086/cart")
+	// Cart
 	protected.GET("/cart", cart)
 	protected.GET("/cart/*any", cart)
 	protected.POST("/cart/*any", cart)
 	protected.PUT("/cart/*any", cart)
 	protected.DELETE("/cart/*any", cart)
 
-	// Order routes - handle both /orders and /orders/*
-	orders := forwardTo("http://order-service:8083/orders")
+	// Orders — create and read
 	protected.GET("/orders", orders)
 	protected.GET("/orders/*any", orders)
 	protected.POST("/orders", orders)
 	protected.POST("/orders/*any", orders)
 
-	// ===== ADMIN ROUTES (JWT + Admin Role Required) =====
-	admin := protected.Group("/")
-	admin.Use(middlewares.AdminRoleMiddleware())
+	// Payment
+	protected.POST("/payment", payment)
+	protected.POST("/payment/*any", payment)
+	protected.GET("/payment/*any", payment)
 
-	// Admin product routes
+	// Inventory — read
+	protected.GET("/inventory/:productId", inventory)
+	protected.POST("/inventory/check", inventory)
+
+	// Coupons — validate and read single
+	protected.POST("/coupons/validate", coupons)
+	protected.GET("/coupons/:code", coupons)
+
+	// Shipping
+	protected.POST("/shipping/rates", shipping)
+
+	// =========================================================================
+	// ADMIN ROUTES — JWT + admin role required
+	// =========================================================================
+
+	// Products — write
 	admin.POST("/products", products)
 	admin.POST("/products/*any", products)
 	admin.PUT("/products/*any", products)
 	admin.DELETE("/products/*any", products)
 
-	// Admin category routes
+	// Categories — write
 	admin.POST("/categories", categories)
 	admin.POST("/categories/*any", categories)
 	admin.PUT("/categories/*any", categories)
 	admin.DELETE("/categories/*any", categories)
 
-	// Admin order routes
+	// Orders — write
 	admin.PUT("/orders/*any", orders)
 	admin.DELETE("/orders/*any", orders)
 
-	// Payment routes (protected)
-	payment := forwardTo("http://payment-service:8087/payment")
-	protected.POST("/payment", payment)
-	protected.POST("/payment/*any", payment)
-	protected.GET("/payment/*any", payment)
+	// Inventory — write
+	admin.GET("/inventory", inventory)
+	admin.POST("/inventory", inventory)
+	admin.PUT("/inventory/:productId", inventory)
 
-	// Stripe webhook (public)
-	public.POST("/stripe/webhook", forwardTo("http://payment-service:8087/stripe/webhook"))
+	// Coupons — write
+	admin.POST("/coupons", coupons)
+	admin.GET("/coupons", coupons)
+	admin.DELETE("/coupons/:code", coupons)
+
+	// Notifications — admin read
+	admin.GET("/notifications/log", notifications)
+	// Auth — admin-only user creation (forward to auth-service)
+	admin.POST("/auth/admin/users", authProxy)
 }

@@ -29,6 +29,15 @@ func NewAuthController(s IAuthService) *AuthController {
 	return &AuthController{service: s}
 }
 
+func cookieSettings() (http.SameSite, bool) {
+	crossOrigin := os.Getenv("COOKIE_CROSS_ORIGIN") == "true"
+	prod := os.Getenv("ENV") == "production"
+	if crossOrigin || prod {
+		return http.SameSiteNoneMode, true
+	}
+	return http.SameSiteLaxMode, false
+}
+
 func (ctrl *AuthController) Login(c *gin.Context) {
 	var req struct {
 		Email    string `json:"email" binding:"required,email"`
@@ -38,6 +47,9 @@ func (ctrl *AuthController) Login(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body", "details": err.Error()})
 		return
 	}
+
+	// Normalize email
+	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 
 	tokenPair, err := ctrl.service.Login(c.Request.Context(), req.Email, req.Password)
 	if err != nil {
@@ -50,15 +62,15 @@ func (ctrl *AuthController) Login(c *gin.Context) {
 	// log.Printf("[AUTH][LOGIN] email=%s refresh_token=%s", req.Email, tokenPair.RefreshToken)
 
 	domain := os.Getenv("COOKIE_DOMAIN")
-	isSecure := os.Getenv("ENV") == "production"
+	sameSite, secure := cookieSettings()
 
-	// Set cookies. Use SameSite=None for refresh cookie to allow cross-site refresh requests.
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie("__session", tokenPair.AccessToken, 900, "/", domain, isSecure, true)
+	c.SetSameSite(sameSite)
+	c.SetCookie("__session", tokenPair.AccessToken, 900, "/", domain, secure, true)
+	c.SetCookie("refresh_token", tokenPair.RefreshToken, 604800, "/", domain, secure, true)
 
-	// Refresh cookie must be SameSite=None and Secure in cross-site contexts
-	c.SetSameSite(http.SameSiteNoneMode)
-	c.SetCookie("refresh_token", tokenPair.RefreshToken, 604800, "/", domain, isSecure, true)
+	// Set identifiers for Next.js frontend and BFF downstream services
+	c.SetCookie("user_id", tokenPair.UserID, 604800, "/", domain, secure, false)
+	c.SetCookie("user_role", tokenPair.Role, 604800, "/", domain, secure, false)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Logged in successfully"})
 }
@@ -68,12 +80,18 @@ func (ctrl *AuthController) Register(c *gin.Context) {
 		Name     string `json:"name" binding:"required"`
 		Email    string `json:"email" binding:"required,email"`
 		Password string `json:"password" binding:"required,min=8"`
-		Role     string `json:"role" binding:"required"`
+		// Role is always set to 'user' server-side — client value ignored
+		Role string `json:"role"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body", "details": err.Error()})
 		return
 	}
+
+	req.Role = "user"
+
+	// Normalize email
+	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 
 	// Validate password strength before proceeding
 	pwValidator := services.NewPasswordValidator()
@@ -109,6 +127,7 @@ func (ctrl *AuthController) VerifyEmail(c *gin.Context) {
 		return
 	}
 
+	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 	err := ctrl.service.VerifyEmail(c.Request.Context(), req.Email, req.Code)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
@@ -132,14 +151,13 @@ func (ctrl *AuthController) Logout(c *gin.Context) {
 	_ = ctrl.service.Logout(c.Request.Context(), refreshToken)
 
 	domain := os.Getenv("COOKIE_DOMAIN")
-	isSecure := os.Getenv("ENV") == "production"
+	sameSite, secure := cookieSettings()
 
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie("__session", "", -1, "/", domain, isSecure, true)
-
-	// Clear refresh cookie with SameSite=None to match how it was set
-	c.SetSameSite(http.SameSiteNoneMode)
-	c.SetCookie("refresh_token", "", -1, "/", domain, isSecure, true)
+	c.SetSameSite(sameSite)
+	c.SetCookie("__session", "", -1, "/", domain, secure, true)
+	c.SetCookie("refresh_token", "", -1, "/", domain, secure, true)
+	c.SetCookie("user_id", "", -1, "/", domain, secure, false)
+	c.SetCookie("user_role", "", -1, "/", domain, secure, false)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
 }
@@ -158,14 +176,13 @@ func (ctrl *AuthController) Refresh(c *gin.Context) {
 	}
 
 	domain := os.Getenv("COOKIE_DOMAIN")
-	isSecure := os.Getenv("ENV") == "production"
+	sameSite, secure := cookieSettings()
 
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie("__session", newTokenPair.AccessToken, 900, "/", domain, isSecure, true)
-
-	// Refresh cookie must be SameSite=None
-	c.SetSameSite(http.SameSiteNoneMode)
-	c.SetCookie("refresh_token", newTokenPair.RefreshToken, 604800, "/", domain, isSecure, true)
+	c.SetSameSite(sameSite)
+	c.SetCookie("__session", newTokenPair.AccessToken, 900, "/", domain, secure, true)
+	c.SetCookie("refresh_token", newTokenPair.RefreshToken, 604800, "/", domain, secure, true)
+	c.SetCookie("user_id", newTokenPair.UserID, 604800, "/", domain, secure, false)
+	c.SetCookie("user_role", newTokenPair.Role, 604800, "/", domain, secure, false)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Token refreshed successfully"})
 }
@@ -181,10 +198,27 @@ func (ctrl *AuthController) GetAuthStatus(c *gin.Context) {
 	if userID == "" {
 		// If not in context, try headers (forwarded by API gateway)
 		userID = c.GetHeader("X-User-ID")
+		if userID == "" {
+			if v, err := c.Cookie("user_id"); err == nil && v != "" {
+				userID = v
+			}
+		}
 	}
 
 	email := c.GetHeader("X-User-Email")
 	role := c.GetHeader("X-User-Role")
+
+	// Fallback to cookies if headers not present
+	if email == "" {
+		if v, err := c.Cookie("user_email"); err == nil && v != "" {
+			email = v
+		}
+	}
+	if role == "" {
+		if v, err := c.Cookie("user_role"); err == nil && v != "" {
+			role = v
+		}
+	}
 
 	if userID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Not authenticated"})
@@ -211,6 +245,7 @@ func (ctrl *AuthController) ResendVerificationEmail(c *gin.Context) {
 		return
 	}
 
+	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 	err := ctrl.service.ResendVerificationEmail(c.Request.Context(), req.Email)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {

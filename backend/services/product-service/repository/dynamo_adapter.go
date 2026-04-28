@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"product-service/models"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
@@ -13,8 +14,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// DynamoAdapter is a starter DynamoDB-backed ProductRepo implementation.
-// It stores products in table with primary key `product_id` (string).
+// DynamoAdapter is a DynamoDB-backed ProductRepo implementation.
+// It stores products in table with primary key `id` (string).
 type DynamoAdapter struct {
 	client *dynamodb.Client
 	table  string
@@ -25,7 +26,7 @@ func NewDynamoAdapter(client *dynamodb.Client, table string) *DynamoAdapter {
 }
 
 type ddbProduct struct {
-	ProductID    string   `dynamodbav:"product_id"`
+	ProductID    string   `dynamodbav:"id"`
 	Name         string   `dynamodbav:"name"`
 	Price        float64  `dynamodbav:"price"`
 	Quantity     int      `dynamodbav:"quantity"`
@@ -42,7 +43,7 @@ type ddbProduct struct {
 }
 
 func (d *DynamoAdapter) FindByID(ctx context.Context, id uuid.UUID) (*models.Product, error) {
-	key, err := attributevalue.MarshalMap(map[string]string{"product_id": id.String()})
+	key, err := attributevalue.MarshalMap(map[string]string{"id": id.String()})
 	if err != nil {
 		return nil, fmt.Errorf("marshal key: %w", err)
 	}
@@ -131,27 +132,125 @@ func (d *DynamoAdapter) Create(ctx context.Context, product *models.Product) err
 	return nil
 }
 
-// Find performs a Scan with basic pagination. Filter support is limited to nil (no filter).
+// buildFilterExpression constructs DynamoDB filter expressions from the map
+func (d *DynamoAdapter) buildFilterExpression(filter map[string]interface{}) (filterExpr *string, attrValues map[string]types.AttributeValue, attrNames map[string]string) {
+	if filter == nil || len(filter) == 0 {
+		return nil, nil, nil
+	}
+
+	var expressions []string
+	attrValues = make(map[string]types.AttributeValue)
+	attrNames = make(map[string]string)
+	i := 0
+
+	if v, ok := filter["is_featured"].(bool); ok {
+		ph := fmt.Sprintf(":v%d", i)
+		nm := fmt.Sprintf("#f%d", i)
+		expressions = append(expressions, fmt.Sprintf("%s = %s", nm, ph))
+		av, _ := attributevalue.Marshal(v)
+		attrValues[ph] = av
+		attrNames[nm] = "is_featured"
+		i++
+	}
+
+	if v, ok := filter["brand"].(string); ok {
+		ph := fmt.Sprintf(":v%d", i)
+		nm := fmt.Sprintf("#f%d", i)
+		expressions = append(expressions, fmt.Sprintf("%s = %s", nm, ph))
+		av, _ := attributevalue.Marshal(v)
+		attrValues[ph] = av
+		attrNames[nm] = "brand"
+		i++
+	}
+
+	if v, ok := filter["min_price"]; ok {
+		ph := fmt.Sprintf(":v%d", i)
+		nm := fmt.Sprintf("#f%d", i)
+		expressions = append(expressions, fmt.Sprintf("%s >= %s", nm, ph))
+		av, _ := attributevalue.Marshal(v)
+		attrValues[ph] = av
+		attrNames[nm] = "price"
+		i++
+	}
+
+	if v, ok := filter["max_price"]; ok {
+		ph := fmt.Sprintf(":v%d", i)
+		nm := fmt.Sprintf("#f%d", i)
+		expressions = append(expressions, fmt.Sprintf("%s <= %s", nm, ph))
+		av, _ := attributevalue.Marshal(v)
+		attrValues[ph] = av
+		attrNames[nm] = "price"
+		i++
+	}
+
+	if v, ok := filter["category_ids"].([]string); ok && len(v) > 0 {
+		var catExprs []string
+		nm := fmt.Sprintf("#f%d", i)
+		attrNames[nm] = "category_ids"
+		for j, catID := range v {
+			ph := fmt.Sprintf(":cat%d", j)
+			catExprs = append(catExprs, fmt.Sprintf("contains(%s, %s)", nm, ph))
+			av, _ := attributevalue.Marshal(catID)
+			attrValues[ph] = av
+		}
+		expressions = append(expressions, "("+strings.Join(catExprs, " OR ")+")")
+		i++
+	}
+
+	if v, ok := filter["in_stock"].(bool); ok {
+		nm := fmt.Sprintf("#f%d", i)
+		attrNames[nm] = "quantity"
+		if v {
+			expressions = append(expressions, fmt.Sprintf("%s > :zero", nm))
+		} else {
+			expressions = append(expressions, fmt.Sprintf("%s <= :zero", nm))
+		}
+		if _, exists := attrValues[":zero"]; !exists {
+			av, _ := attributevalue.Marshal(0)
+			attrValues[":zero"] = av
+		}
+		i++
+	}
+
+	if len(expressions) == 0 {
+		return nil, nil, nil
+	}
+
+	joined := strings.Join(expressions, " AND ")
+	return &joined, attrValues, attrNames
+}
+
+// Find performs a Scan with pagination and optional FilterExpression.
 func (d *DynamoAdapter) Find(ctx context.Context, filter map[string]interface{}, limit, skip int) ([]*models.Product, error) {
-	// Simple implementation: Scan table and apply skip/limit
-	input := &dynamodb.ScanInput{TableName: &d.table}
+	filterExpr, attrValues, attrNames := d.buildFilterExpression(filter)
+
+	input := &dynamodb.ScanInput{
+		TableName:                 &d.table,
+		FilterExpression:          filterExpr,
+		ExpressionAttributeValues: attrValues,
+		ExpressionAttributeNames:  attrNames,
+	}
+
 	var results []*models.Product
 	paginator := dynamodb.NewScanPaginator(d.client, input)
-	seen := 0
+	seenMatches := 0
+
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("scan page failed: %w", err)
 		}
 		for _, it := range page.Items {
-			if skip > 0 && seen < skip {
-				seen++
+			if skip > 0 && seenMatches < skip {
+				seenMatches++
 				continue
 			}
+
 			var dp ddbProduct
 			if err := attributevalue.UnmarshalMap(it, &dp); err != nil {
 				return nil, fmt.Errorf("unmarshal item: %w", err)
 			}
+
 			p := &models.Product{}
 			p.ID, _ = uuid.Parse(dp.ProductID)
 			p.Name = dp.Name
@@ -192,11 +291,20 @@ func (d *DynamoAdapter) Find(ctx context.Context, filter map[string]interface{},
 	return results, nil
 }
 
-// Count returns the item count (full table scan Count)
+// Count returns the item count using FilterExpression if provided
 func (d *DynamoAdapter) Count(ctx context.Context, filter map[string]interface{}) (int64, error) {
-	input := &dynamodb.ScanInput{TableName: &d.table, Select: types.SelectCount}
-	paginator := dynamodb.NewScanPaginator(d.client, input)
+	filterExpr, attrValues, attrNames := d.buildFilterExpression(filter)
+
+	input := &dynamodb.ScanInput{
+		TableName:                 &d.table,
+		FilterExpression:          filterExpr,
+		ExpressionAttributeValues: attrValues,
+		ExpressionAttributeNames:  attrNames,
+		Select:                    types.SelectCount,
+	}
+
 	var total int64
+	paginator := dynamodb.NewScanPaginator(d.client, input)
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
@@ -245,8 +353,29 @@ func (d *DynamoAdapter) CreateMany(ctx context.Context, products []models.Produc
 			writeReqs = append(writeReqs, types.WriteRequest{PutRequest: &types.PutRequest{Item: item}})
 		}
 		req := &dynamodb.BatchWriteItemInput{RequestItems: map[string][]types.WriteRequest{d.table: writeReqs}}
-		if _, err := d.client.BatchWriteItem(ctx, req); err != nil {
-			return fmt.Errorf("batch write failed: %w", err)
+		// Retry unprocessed items with exponential backoff (simple strategy)
+		attempts := 0
+		for {
+			out, err := d.client.BatchWriteItem(ctx, req)
+			if err != nil {
+				return fmt.Errorf("batch write failed: %w", err)
+			}
+			// If there are no unprocessed items, we're done for this chunk
+			if len(out.UnprocessedItems) == 0 {
+				break
+			}
+			// Prepare to retry only the unprocessed items for this table
+			if unp, ok := out.UnprocessedItems[d.table]; ok && len(unp) > 0 {
+				req.RequestItems[d.table] = unp
+			} else {
+				break
+			}
+			attempts++
+			if attempts >= 3 {
+				return fmt.Errorf("batch write had unprocessed items after retries")
+			}
+			// simple backoff
+			time.Sleep(time.Duration(attempts*300) * time.Millisecond)
 		}
 	}
 	return nil
@@ -273,7 +402,7 @@ func (d *DynamoAdapter) Update(ctx context.Context, id uuid.UUID, updates map[st
 		exprVals[ph] = av
 		i++
 	}
-	key, err := attributevalue.MarshalMap(map[string]string{"product_id": id.String()})
+	key, err := attributevalue.MarshalMap(map[string]string{"id": id.String()})
 	if err != nil {
 		return fmt.Errorf("marshal key: %w", err)
 	}
@@ -290,13 +419,55 @@ func (d *DynamoAdapter) Update(ctx context.Context, id uuid.UUID, updates map[st
 }
 
 func (d *DynamoAdapter) Delete(ctx context.Context, id uuid.UUID) error {
-	key, err := attributevalue.MarshalMap(map[string]string{"product_id": id.String()})
+	key, err := attributevalue.MarshalMap(map[string]string{"id": id.String()})
 	if err != nil {
 		return fmt.Errorf("marshal key: %w", err)
 	}
 	_, err = d.client.DeleteItem(ctx, &dynamodb.DeleteItemInput{TableName: &d.table, Key: key})
 	if err != nil {
 		return fmt.Errorf("delete item failed: %w", err)
+	}
+	return nil
+}
+
+// DeleteMany deletes multiple products using BatchWriteItem (chunks of 25)
+func (d *DynamoAdapter) DeleteMany(ctx context.Context, ids []uuid.UUID) error {
+	const chunkSize = 25
+	for i := 0; i < len(ids); i += chunkSize {
+		end := i + chunkSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		writeReqs := make([]types.WriteRequest, 0, end-i)
+		for _, id := range ids[i:end] {
+			key, err := attributevalue.MarshalMap(map[string]string{"id": id.String()})
+			if err != nil {
+				return fmt.Errorf("marshal delete key: %w", err)
+			}
+			writeReqs = append(writeReqs, types.WriteRequest{DeleteRequest: &types.DeleteRequest{Key: key}})
+		}
+
+		req := &dynamodb.BatchWriteItemInput{RequestItems: map[string][]types.WriteRequest{d.table: writeReqs}}
+		attempts := 0
+		for {
+			out, err := d.client.BatchWriteItem(ctx, req)
+			if err != nil {
+				return fmt.Errorf("batch delete failed: %w", err)
+			}
+			if len(out.UnprocessedItems) == 0 {
+				break
+			}
+			if unp, ok := out.UnprocessedItems[d.table]; ok && len(unp) > 0 {
+				req.RequestItems[d.table] = unp
+			} else {
+				break
+			}
+			attempts++
+			if attempts >= 3 {
+				return fmt.Errorf("batch delete had unprocessed items after retries")
+			}
+			time.Sleep(time.Duration(attempts*200) * time.Millisecond)
+		}
 	}
 	return nil
 }
@@ -322,53 +493,56 @@ func (d *DynamoAdapter) FindBySKUs(ctx context.Context, skus []string) ([]models
 	}
 	filterExpr := fmt.Sprintf("sku IN (%s)", expr)
 	input := &dynamodb.ScanInput{TableName: &d.table, FilterExpression: &filterExpr, ExpressionAttributeValues: values}
-	out, err := d.client.Scan(ctx, input)
-	if err != nil {
-		return nil, fmt.Errorf("scan for skus failed: %w", err)
-	}
+	paginator := dynamodb.NewScanPaginator(d.client, input)
 	var res []models.Product
-	for _, it := range out.Items {
-		var dp ddbProduct
-		if err := attributevalue.UnmarshalMap(it, &dp); err != nil {
-			return nil, fmt.Errorf("unmarshal item: %w", err)
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("scan for skus failed: %w", err)
 		}
-		p := models.Product{}
-		p.ID, _ = uuid.Parse(dp.ProductID)
-		p.Name = dp.Name
-		p.Price = dp.Price
-		p.Quantity = dp.Quantity
-		if dp.Description != nil {
-			p.Description = *dp.Description
-		}
-		p.Images = dp.Images
-		if dp.Brand != nil {
-			p.Brand = *dp.Brand
-		}
-		p.SKU = dp.SKU
-		for _, s := range dp.CategoryIDs {
-			if u, err := uuid.Parse(s); err == nil {
-				p.CategoryIDs = append(p.CategoryIDs, u)
+		for _, it := range page.Items {
+			var dp ddbProduct
+			if err := attributevalue.UnmarshalMap(it, &dp); err != nil {
+				return nil, fmt.Errorf("unmarshal item: %w", err)
 			}
-		}
-		p.CategoryPath = dp.CategoryPath
-		p.IsFeatured = dp.IsFeatured
-		if t, err := time.Parse(time.RFC3339, dp.CreatedAt); err == nil {
-			p.CreatedAt = t
-		}
-		if t, err := time.Parse(time.RFC3339, dp.UpdatedAt); err == nil {
-			p.UpdatedAt = t
-		}
-		if dp.DeletedAt != nil {
-			if t, err := time.Parse(time.RFC3339, *dp.DeletedAt); err == nil {
-				p.DeletedAt = &t
+			p := models.Product{}
+			p.ID, _ = uuid.Parse(dp.ProductID)
+			p.Name = dp.Name
+			p.Price = dp.Price
+			p.Quantity = dp.Quantity
+			if dp.Description != nil {
+				p.Description = *dp.Description
 			}
+			p.Images = dp.Images
+			if dp.Brand != nil {
+				p.Brand = *dp.Brand
+			}
+			p.SKU = dp.SKU
+			for _, s := range dp.CategoryIDs {
+				if u, err := uuid.Parse(s); err == nil {
+					p.CategoryIDs = append(p.CategoryIDs, u)
+				}
+			}
+			p.CategoryPath = dp.CategoryPath
+			p.IsFeatured = dp.IsFeatured
+			if t, err := time.Parse(time.RFC3339, dp.CreatedAt); err == nil {
+				p.CreatedAt = t
+			}
+			if t, err := time.Parse(time.RFC3339, dp.UpdatedAt); err == nil {
+				p.UpdatedAt = t
+			}
+			if dp.DeletedAt != nil {
+				if t, err := time.Parse(time.RFC3339, *dp.DeletedAt); err == nil {
+					p.DeletedAt = &t
+				}
+			}
+			res = append(res, p)
 		}
-		res = append(res, p)
 	}
 	return res, nil
 }
 
 func (d *DynamoAdapter) EnsureIndexes(ctx context.Context) error {
-	// Dynamo table / GSI creation should be handled by infra (LocalStack init or IaC).
+	// Dynamo table / GSI creation should be handled by infrastructure init or IaC.
 	return nil
 }

@@ -19,4 +19,5 @@ func RegisterOrderRoutes(r *gin.Engine, controllers *controllers.OrderController
 	adminRoutes := orderRoutes.Group("/admin")
 	adminRoutes.Use(middleware.AdminOnly())
 	adminRoutes.GET("/", controllers.GetAllOrders)
+	adminRoutes.GET("/stats", controllers.GetRevenueStats)
 }

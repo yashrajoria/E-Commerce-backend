@@ -15,6 +15,7 @@ type User struct {
 	Name              string    `gorm:"not null"`
 	Role              string    `gorm:"type:varchar(50);default:'user'"`
 	PhoneNumber       *string   `gorm:"unique"`
+	StoreName         string    `gorm:"type:varchar(100)"`
 	BillingAddressID  *uuid.UUID
 	ShippingAddressID *uuid.UUID
 	BillingAddress    Address        `gorm:"foreignKey:BillingAddressID"`

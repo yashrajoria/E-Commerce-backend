@@ -10,13 +10,14 @@ type PaymentEvent struct {
 	Status      string    `json:"status"`     // "PROCESSING", "COMPLETED", "FAILED"
 	PaymentID   string    `json:"payment_id"` // UUID from Payment Service DB
 	Amount      int       `json:"amount"`     // smallest currency unit
-	Currency    string    `json:"currency"`   // "usd", "inr"
+	Currency    string    `json:"currency"`   // ISO 4217 code, e.g. "usd"
 	Timestamp   time.Time `json:"timestamp"`  // UTC event time
 }
 
 type PaymentRequest struct {
-	OrderID  string `json:"order_id"`
-	UserID   string `json:"user_id"`
-	Amount   int    `json:"amount"`
-	Currency string `json:"currency"`
+	OrderID        string `json:"order_id"`
+	UserID         string `json:"user_id"`
+	Amount         int    `json:"amount"`
+	Currency       string `json:"currency"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
 }

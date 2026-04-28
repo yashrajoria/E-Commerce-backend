@@ -1,17 +1,15 @@
 package middlewares
 
 import (
+	"api-gateway/logger"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"strings"
 
-	"api-gateway/logger"
-
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
-	"github.com/joho/godotenv"
+	"go.uber.org/zap"
 )
 
 var (
@@ -20,33 +18,20 @@ var (
 	cookieDomain string
 )
 
-func init() {
-	_ = godotenv.Load()
+func InitJWTConfig() error {
+	isProduction = os.Getenv("ENV") == "production"
 	secret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
 	if secret == "" {
-		logger.Log.Fatal("JWT_SECRET is not set in env")
+		return fmt.Errorf("JWT_SECRET is not set in env")
 	}
 	secretKey = []byte(secret)
-	isProduction = os.Getenv("ENV") == "production"
 	cookieDomain = os.Getenv("COOKIE_DOMAIN")
+	return nil
 }
 
 // JWTMiddleware validates JWT access token and refreshes when needed
 func JWTMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Log incoming cookies and headers for debugging
-		if v, err := c.Cookie("__session"); err == nil {
-			log.Printf("[GATEWAY][JWT] cookie __session=%s", v)
-		} else {
-			log.Printf("[GATEWAY][JWT] cookie __session not present: %v", err)
-		}
-		if v, err := c.Cookie("token"); err == nil {
-			log.Printf("[GATEWAY][JWT] cookie token=%s", v)
-		}
-		if auth := c.GetHeader("Authorization"); auth != "" {
-			log.Printf("[GATEWAY][JWT] Authorization header=%s", auth)
-		}
-
 		// Accept either __session (set by auth service) or token cookie
 		tokenString, err := c.Cookie("__session")
 		if err != nil || tokenString == "" {
@@ -61,7 +46,7 @@ func JWTMiddleware() gin.HandlerFunc {
 		// validate final access token
 		claims, err := parseToken(tokenString, "access")
 		if err != nil {
-			log.Printf("[GATEWAY][JWT] token parse error: %v", err)
+			logger.Log.Warn("token parse error", zap.Error(err))
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
 			c.Abort()
 			return
@@ -72,15 +57,14 @@ func JWTMiddleware() gin.HandlerFunc {
 		role, _ := claims["role"].(string)
 
 		// log claims for debugging
-		log.Printf("[GATEWAY][JWT] token claims: %+v", claims)
+		logger.Log.Debug("jwt claims parsed",
+			zap.String("user_id", userID),
+			zap.String("role", role),
+		)
 
 		c.Set("user_id", userID)
 		c.Set("email", email)
 		c.Set("role", role)
-
-		c.Request.Header.Set("X-User-ID", userID)
-		c.Request.Header.Set("X-User-Email", email)
-		c.Request.Header.Set("X-User-Role", role)
 
 		c.Next()
 	}
@@ -89,8 +73,9 @@ func JWTMiddleware() gin.HandlerFunc {
 // AdminRoleMiddleware restricts access to users with role admin
 func AdminRoleMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		role, exists := c.Get("role")
-		if !exists || role != "admin" {
+		roleVal, exists := c.Get("role")
+		roleStr, ok := roleVal.(string)
+		if !exists || !ok || roleStr != "admin" {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Admin role required"})
 			c.Abort()
 			return
@@ -101,6 +86,10 @@ func AdminRoleMiddleware() gin.HandlerFunc {
 
 // parseToken validates and extracts claims
 func parseToken(tokenStr, expectedType string) (jwt.MapClaims, error) {
+	if len(secretKey) == 0 {
+		return nil, fmt.Errorf("JWT config not initialized")
+	}
+
 	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])

@@ -9,12 +9,17 @@ import (
 	"syscall"
 	"time"
 
+	"user-service/controllers"
 	"user-service/database"
 	"user-service/middleware"
 	"user-service/models"
+	"user-service/repository"
 	"user-service/routes"
+	"user-service/services"
 
 	"github.com/gin-gonic/gin"
+	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	commonmw "github.com/yashrajoria/common/middleware"
 	"go.uber.org/zap"
 )
 
@@ -42,6 +47,26 @@ func main() {
 	r := gin.New()
 	r.Use(gin.Recovery())
 
+	// --- CloudWatch (Logs + Metrics) ---
+	cwLogsClient, err := awspkg.NewCloudWatchLogsClient(context.Background(), "user-service")
+	if err != nil {
+		logger.Warn("CloudWatch logs client init failed (non-fatal)", zap.Error(err))
+	}
+	_ = cwLogsClient
+
+	metricsClient, err := awspkg.NewMetricsClient(context.Background())
+	if err != nil {
+		logger.Warn("CloudWatch metrics client init failed (non-fatal)", zap.Error(err))
+	}
+
+	// CloudWatch HTTP metrics middleware
+	if metricsClient != nil {
+		r.Use(commonmw.MetricsMiddleware(metricsClient, "user-service"))
+	}
+
+	// Structured HTTP request logging → CloudWatch via Zap writer
+	r.Use(commonmw.RequestLogger(logger))
+
 	// Add request timeout middleware
 	r.Use(func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
@@ -57,10 +82,20 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "OK"})
 	})
 
+	// Initialize Repository, Service and Controller
+	userRepo := repository.NewGormUserRepository(database.DB)
+	userService := services.NewUserService(userRepo)
+	userController := controllers.NewUserController(userService)
+
 	// User routes with authentication middleware
 	userRoutes := r.Group("/users")
 	userRoutes.Use(middleware.AuthMiddleware())
-	routes.RegisterUserRoutes(userRoutes)
+	routes.RegisterUserRoutes(userRoutes, userController)
+
+	// Admin user routes — requires auth + admin role
+	adminUserRoutes := r.Group("/users")
+	adminUserRoutes.Use(middleware.AuthMiddleware(), middleware.AdminOnly())
+	routes.RegisterAdminRoutes(adminUserRoutes, userController)
 
 	port := cfg.Port
 	if port == "" {

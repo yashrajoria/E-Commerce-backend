@@ -26,7 +26,7 @@ func NewDynamoCategoryAdapter(client *dynamodb.Client, table, productTable strin
 }
 
 type ddbCategory struct {
-	CategoryID string   `dynamodbav:"category_id"`
+	CategoryID string   `dynamodbav:"id"`
 	Name       string   `dynamodbav:"name"`
 	ParentIDs  []string `dynamodbav:"parent_ids,omitempty"`
 	Image      string   `dynamodbav:"image,omitempty"`
@@ -100,7 +100,7 @@ func (d *DynamoCategoryAdapter) toDDB(cat *models.Category) *ddbCategory {
 }
 
 func (d *DynamoCategoryAdapter) FindByID(ctx context.Context, id uuid.UUID) (*models.Category, error) {
-	key, err := attributevalue.MarshalMap(map[string]string{"category_id": id.String()})
+	key, err := attributevalue.MarshalMap(map[string]string{"id": id.String()})
 	if err != nil {
 		return nil, fmt.Errorf("marshal key: %w", err)
 	}
@@ -134,18 +134,21 @@ func (d *DynamoCategoryAdapter) FindByName(ctx context.Context, name string) (*m
 		ExpressionAttributeNames:  exprNames,
 		ExpressionAttributeValues: exprVals,
 	}
-	out, err := d.client.Scan(ctx, input)
-	if err != nil {
-		return nil, fmt.Errorf("scan failed: %w", err)
+	paginator := dynamodb.NewScanPaginator(d.client, input)
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("scan failed: %w", err)
+		}
+		for _, item := range page.Items {
+			var dc ddbCategory
+			if err := attributevalue.UnmarshalMap(item, &dc); err != nil {
+				continue
+			}
+			return d.toModel(&dc), nil
+		}
 	}
-	if len(out.Items) == 0 {
-		return nil, errors.New("record not found")
-	}
-	var dc ddbCategory
-	if err := attributevalue.UnmarshalMap(out.Items[0], &dc); err != nil {
-		return nil, fmt.Errorf("unmarshal item: %w", err)
-	}
-	return d.toModel(&dc), nil
+	return nil, errors.New("record not found")
 }
 
 func (d *DynamoCategoryAdapter) FindByNames(ctx context.Context, names []string) ([]models.Category, error) {
@@ -172,18 +175,20 @@ func (d *DynamoCategoryAdapter) FindByNames(ctx context.Context, names []string)
 		ExpressionAttributeValues: exprVals,
 	}
 
-	out, err := d.client.Scan(ctx, input)
-	if err != nil {
-		return nil, fmt.Errorf("scan failed: %w", err)
-	}
-
+	paginator := dynamodb.NewScanPaginator(d.client, input)
 	var results []models.Category
-	for _, item := range out.Items {
-		var dc ddbCategory
-		if err := attributevalue.UnmarshalMap(item, &dc); err != nil {
-			continue
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("scan failed: %w", err)
 		}
-		results = append(results, *d.toModel(&dc))
+		for _, item := range page.Items {
+			var dc ddbCategory
+			if err := attributevalue.UnmarshalMap(item, &dc); err != nil {
+				continue
+			}
+			results = append(results, *d.toModel(&dc))
+		}
 	}
 	return results, nil
 }
@@ -251,7 +256,7 @@ func (d *DynamoCategoryAdapter) Update(ctx context.Context, id uuid.UUID, update
 		i++
 	}
 
-	key, err := attributevalue.MarshalMap(map[string]string{"category_id": id.String()})
+	key, err := attributevalue.MarshalMap(map[string]string{"id": id.String()})
 	if err != nil {
 		return fmt.Errorf("marshal key: %w", err)
 	}
@@ -291,11 +296,17 @@ func (d *DynamoCategoryAdapter) HasProducts(ctx context.Context, categoryID uuid
 		Limit:                     ptrInt32(1), // We only need to know if at least one exists
 	}
 
-	out, err := d.client.Scan(ctx, input)
-	if err != nil {
-		return false, fmt.Errorf("scan products failed: %w", err)
+	paginator := dynamodb.NewScanPaginator(d.client, input)
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return false, fmt.Errorf("scan products failed: %w", err)
+		}
+		if len(page.Items) > 0 {
+			return true, nil
+		}
 	}
-	return len(out.Items) > 0, nil
+	return false, nil
 }
 
 func ptrInt32(v int32) *int32 {

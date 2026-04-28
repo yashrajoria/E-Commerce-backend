@@ -3,9 +3,11 @@ package models
 import "time"
 
 type CheckoutEvent struct {
-	Event     string     `json:"event"` // e.g. "checkout.requested"
-	UserID    string     `json:"user_id"`
-	Items     []CartItem `json:"items"`
-	Timestamp time.Time  `json:"timestamp"`
-	OrderID   string     `json:"order_id"`
+	Event          string     `json:"event"` // e.g. "checkout.requested"
+	UserID         string     `json:"user_id"`
+	IdempotencyKey string     `json:"idempotency_key,omitempty"`
+	Items          []CartItem `json:"items"`
+	Timestamp      time.Time  `json:"timestamp"`
+	OrderID        string     `json:"order_id"`
+	CouponCode     string     `json:"coupon_code,omitempty"`
 }

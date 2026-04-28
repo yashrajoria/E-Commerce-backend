@@ -8,9 +8,9 @@ import (
 
 var Log *zap.Logger
 
-func InitLogger() {
+func InitLogger() error {
 	if Log != nil {
-		return
+		return nil
 	}
 
 	env := os.Getenv("APP_ENV")
@@ -21,8 +21,10 @@ func InitLogger() {
 		Log, err = zap.NewDevelopment()
 	}
 	if err != nil {
-		panic("Failed to initialize logger: " + err.Error())
+		return err
 	}
+
+	return nil
 }
 
 func Sync() {

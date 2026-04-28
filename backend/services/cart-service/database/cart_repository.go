@@ -61,3 +61,23 @@ func (r *CartRepository) DeleteCart(ctx context.Context, userID string) error {
 	key := r.getKey(userID)
 	return r.client.Del(ctx, key).Err()
 }
+
+// Idempotency helpers
+func (r *CartRepository) getIdemKey(key string) string {
+	return "idem:cart:" + key
+}
+
+func (r *CartRepository) GetIdempotency(ctx context.Context, key string) (string, error) {
+	val, err := r.client.Get(ctx, r.getIdemKey(key)).Result()
+	if err == redis.Nil {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return val, nil
+}
+
+func (r *CartRepository) SetIdempotency(ctx context.Context, key, orderID string, ttl time.Duration) error {
+	return r.client.Set(ctx, r.getIdemKey(key), orderID, ttl).Err()
+}

@@ -1,9 +1,17 @@
 .env
-Dockerfile
+# Dockerfile
 # Environment files
 .env
-.env.*
-!.env.example
+# .env.*
+*__pycache__/
+
+# Local env for local development (do NOT commit real secrets)
+.env.local
+
+# Terraform local vars and state
+infrastructure/aws/terraform/terraform.tfvars
+infrastructure/aws/terraform/terraform.tfstate*
+infrastructure/aws/terraform/.terraform/
 
 # Docker
 docker-compose.override.yml
@@ -21,15 +29,11 @@ docker-compose.override.yml
 /bin/
 /build/
 /dist/
-/pkg/
+
 
 # Go dependency directories
 /vendor/
 Godeps/
-
-# Go workspace
-go.work
-go.work.sum
 
 # Logs
 logs/
@@ -51,18 +55,32 @@ Thumbs.db
 
 # Test output
 /test_output/
-
+*.csv
+*.pdf
 # Misc
 node_modules/
 
 # Ignore local Dockerfile overrides in service folders
 **/Dockerfile.local
 
-Dockerfile
-Dockerfile.prod
-docker-compose.yml
+# Allow service-level Dockerfiles and dockerignore files (we commit these)
+!services/*/Dockerfile
+!services/*/.dockerignore
+
+# Dockerfile
+# Dockerfile.prod
+# docker-compose.yml
 .dockerignore
 *.toml
 docker-compose.prod.yml
 .air.toml
 /tmp/
+# .env.example
+*.tmp
+*.temp
+tmp/
+tmp-*/
+*.swx
+*.bak
+*.md
+*.mmd

@@ -16,6 +16,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	commonmw "github.com/yashrajoria/common/middleware"
 	"go.uber.org/zap"
 )
 
@@ -41,7 +43,11 @@ func main() {
 	if err := models.Migrate(database.DB); err != nil {
 		zap.L().Fatal("DB migration failed", zap.Error(err))
 	}
-
+	snsPublisher, err := services.NewSNSPublisher(context.Background())
+	if err != nil {
+		logger.Warn("SNS publisher unavailable, email notifications disabled", zap.Error(err))
+		snsPublisher = nil
+	}
 	// --- 2. Dependency Injection (Wiring the layers) ---
 
 	// Initialize Repositories
@@ -50,15 +56,35 @@ func main() {
 	// Initialize Services
 	tokenService := services.NewTokenService()
 	// emailService := services.NewEmailService()
-	authService := services.NewAuthService(userRepo, tokenService, database.DB)
+	authService := services.NewAuthService(userRepo, tokenService, snsPublisher, database.DB)
 
 	// Initialize Controllers
 	authController := controllers.NewAuthController(authService)
 
 	// --- 3. HTTP Server & Middleware ---
 
+	// --- CloudWatch (Logs + Metrics) ---
+	cwLogsClient, err := awspkg.NewCloudWatchLogsClient(context.Background(), "auth-service")
+	if err != nil {
+		zap.L().Warn("CloudWatch logs client init failed (non-fatal)", zap.Error(err))
+	}
+	_ = cwLogsClient
+
+	metricsClient, err := awspkg.NewMetricsClient(context.Background())
+	if err != nil {
+		zap.L().Warn("CloudWatch metrics client init failed (non-fatal)", zap.Error(err))
+	}
+
 	r := gin.New()
 	r.Use(gin.Recovery()) // Panic protection
+
+	// CloudWatch HTTP metrics middleware
+	if metricsClient != nil {
+		r.Use(commonmw.MetricsMiddleware(metricsClient, "auth-service"))
+	}
+
+	// Structured HTTP request logging → CloudWatch via Zap writer
+	r.Use(commonmw.RequestLogger(logger))
 
 	// Add request timeout middleware
 	r.Use(func(c *gin.Context) {
