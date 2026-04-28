@@ -28,6 +28,7 @@ func main() {
 		panic("failed to initialize logger: " + err.Error())
 	}
 	defer logger.Sync()
+	zap.ReplaceGlobals(logger)
 
 	cfg, err := LoadConfig()
 	if err != nil {

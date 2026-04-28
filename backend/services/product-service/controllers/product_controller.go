@@ -262,6 +262,12 @@ func (ctrl *ProductController) BulkDeleteProducts(c *gin.Context) {
 		return
 	}
 
+	// Validate input: require at least one selector if not deleting all
+	if !req.DeleteAll && len(req.IDs) == 0 && len(req.CategoryIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No IDs or category_ids provided and delete_all is false"})
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(c.Request.Context(), ctrl.config.ContextTimeout)
 	defer cancel()
 
