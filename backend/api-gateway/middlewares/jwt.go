@@ -32,12 +32,29 @@ func InitJWTConfig() error {
 // JWTMiddleware validates JWT access token and refreshes when needed
 func JWTMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Accept either __session (set by auth service) or token cookie
-		tokenString, err := c.Cookie("__session")
-		if err != nil || tokenString == "" {
-			tokenString, _ = c.Cookie("token")
+		var tokenString string
+
+		// 1. Try Authorization header (Bearer token)
+		authHeader := c.GetHeader("Authorization")
+		if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
+			tokenString = strings.TrimPrefix(authHeader, "Bearer ")
 		}
+
+		// 2. Fallback to cookies if header is missing
 		if tokenString == "" {
+			if cookie, err := c.Cookie("__session"); err == nil && cookie != "" {
+				tokenString = cookie
+			} else if cookie, err := c.Cookie("token"); err == nil && cookie != "" {
+				tokenString = cookie
+			}
+		}
+
+		if tokenString == "" {
+			logger.Log.Warn("authentication failed: missing token",
+				zap.String("path", c.Request.URL.Path),
+				zap.String("method", c.Request.Method),
+				zap.String("ip", c.ClientIP()),
+			)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing authentication token"})
 			c.Abort()
 			return
@@ -46,7 +63,12 @@ func JWTMiddleware() gin.HandlerFunc {
 		// validate final access token
 		claims, err := parseToken(tokenString, "access")
 		if err != nil {
-			logger.Log.Warn("token parse error", zap.Error(err))
+			logger.Log.Warn("authentication failed: invalid or expired token",
+				zap.Error(err),
+				zap.String("path", c.Request.URL.Path),
+				zap.String("method", c.Request.Method),
+				zap.String("ip", c.ClientIP()),
+			)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
 			c.Abort()
 			return

@@ -90,7 +90,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*Token
 }
 
 func (s *AuthService) Register(ctx context.Context, name, email, password, role string) error {
-	if role == "" || role != "user" {
+	if role == "" {
 		role = "user"
 	}
 

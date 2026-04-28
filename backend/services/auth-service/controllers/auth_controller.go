@@ -266,3 +266,31 @@ func (ctrl *AuthController) ResendVerificationEmail(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Verification email sent successfully"})
 }
+
+func (ctrl *AuthController) AdminCreateUser(c *gin.Context) {
+	var req struct {
+		Name     string `json:"name" binding:"required"`
+		Email    string `json:"email" binding:"required,email"`
+		Password string `json:"password" binding:"required,min=8"`
+		Role     string `json:"role" binding:"required,oneof=admin user"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body", "details": err.Error()})
+		return
+	}
+
+	// Normalize email
+	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
+
+	err := ctrl.service.Register(c.Request.Context(), req.Name, req.Email, req.Password, req.Role)
+	if err != nil {
+		if strings.Contains(err.Error(), "already exists") {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"message": "User created successfully", "email": req.Email, "role": req.Role})
+}
