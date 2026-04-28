@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -272,31 +273,56 @@ func (b *BFFController) Checkout(c *gin.Context) {
 	}
 	cacheKey := "idem:bff:" + userID + ":" + idemKey
 
-	// Redis cache hit → return cached response immediately
 	if b.redisClient != nil {
-		if val, err := b.redisClient.Get(ctx, cacheKey).Result(); err == nil && val != "" {
-			c.Data(http.StatusOK, "application/json", []byte(val))
-			return
+		// FIX: Use SetNX as an atomic lock from the very start.
+		// This prevents a race condition where two concurrent requests with the same
+		// idempotency key both read a missing cache entry and both proceed to create
+		// duplicate orders. SetNX guarantees only the first request acquires the lock.
+		//
+		// Sentinel value "pending" signals that a checkout is in-flight.
+		// Once complete, the sentinel is replaced with the full JSON response.
+		acquired, err := b.redisClient.SetNX(ctx, cacheKey, "pending", 15*time.Minute).Result()
+		if err == nil && !acquired {
+			// Key already exists — check if it holds a completed response or is still pending.
+			val, getErr := b.redisClient.Get(ctx, cacheKey).Result()
+			if getErr == nil {
+				if val != "pending" {
+					// A previous request already completed — return the cached result.
+					c.Data(http.StatusOK, "application/json", []byte(val))
+					return
+				}
+				// Still pending: another request is in-flight. Ask the client to retry.
+				c.JSON(http.StatusConflict, gin.H{
+					"error":   "checkout is already in progress for this idempotency key",
+					"message": "please retry in a few seconds",
+				})
+				return
+			}
 		}
+		// If Redis is unavailable (err != nil) we fall through and allow the request.
 	}
 
 	// 1) Validate cart is non-empty
 	cartRespCheck, err := b.gateway.Do(ctx, http.MethodGet, "/cart", nil, c.Request.Header, nil)
 	if err != nil {
+		b.releasePendingKey(ctx, cacheKey)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch cart"})
 		return
 	}
 	var cartCheck map[string]interface{}
 	if err := clients.DecodeJSON(cartRespCheck, &cartCheck); err != nil {
+		b.releasePendingKey(ctx, cacheKey)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to decode cart"})
 		return
 	}
 	items, exists := cartCheck["items"]
 	if !exists || items == nil {
+		b.releasePendingKey(ctx, cacheKey)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "cart is empty"})
 		return
 	}
 	if arr, ok := items.([]interface{}); ok && len(arr) == 0 {
+		b.releasePendingKey(ctx, cacheKey)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "cart is empty"})
 		return
 	}
@@ -306,6 +332,7 @@ func (b *BFFController) Checkout(c *gin.Context) {
 	//    the order-service and payment-service SQS consumers.
 	checkoutResp, err := b.gateway.Do(ctx, http.MethodPost, "/cart/checkout", nil, c.Request.Header, nil)
 	if err != nil {
+		b.releasePendingKey(ctx, cacheKey)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to create order"})
 		return
 	}
@@ -314,6 +341,7 @@ func (b *BFFController) Checkout(c *gin.Context) {
 		Status  string `json:"status"`
 	}
 	if err := clients.DecodeJSON(checkoutResp, &cartResp); err != nil || cartResp.OrderID == "" {
+		b.releasePendingKey(ctx, cacheKey)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to decode order response"})
 		return
 	}
@@ -341,6 +369,7 @@ func (b *BFFController) Checkout(c *gin.Context) {
 		}
 		select {
 		case <-ctx.Done():
+			b.releasePendingKey(ctx, cacheKey)
 			c.JSON(http.StatusGatewayTimeout, gin.H{"error": "request cancelled"})
 			return
 		case <-time.After(checkoutPollInterval):
@@ -365,15 +394,15 @@ func (b *BFFController) Checkout(c *gin.Context) {
 					"session_id":   createResult.SessionID,
 					"checkout_url": createResult.CheckoutURL,
 				})
-				if b.redisClient != nil {
-					_ = b.redisClient.SetNX(ctx, cacheKey, out, 15*time.Minute).Err()
-				}
+				b.cacheCheckoutResult(ctx, cacheKey, out)
 				c.Data(http.StatusOK, "application/json", out)
 				return
 			}
 		}
 
-		// All attempts exhausted — return accepted so frontend can poll
+		// All attempts exhausted — release the pending lock so the client can retry,
+		// and return 202 so the frontend can poll for the payment status.
+		b.releasePendingKey(ctx, cacheKey)
 		c.JSON(http.StatusAccepted, gin.H{
 			"order_id":     cartResp.OrderID,
 			"status":       "PENDING_PAYMENT",
@@ -394,12 +423,36 @@ func (b *BFFController) Checkout(c *gin.Context) {
 		"checkout_url": *finalStatus.CheckoutURL,
 	})
 
-	// Cache in Redis so repeated calls with same Idempotency-Key return immediately
-	if b.redisClient != nil {
-		_ = b.redisClient.SetNX(ctx, cacheKey, out, 15*time.Minute).Err()
-	}
+	// Replace the "pending" sentinel with the final response so future duplicate
+	// requests return the cached result immediately.
+	b.cacheCheckoutResult(ctx, cacheKey, out)
 
 	c.Data(http.StatusOK, "application/json", out)
+}
+
+// releasePendingKey deletes the idempotency "pending" sentinel from Redis on error
+// paths so the client can safely retry the checkout without getting a 409.
+// It is a no-op when Redis is unavailable or the key was never set.
+func (b *BFFController) releasePendingKey(ctx context.Context, cacheKey string) {
+	if b.redisClient == nil {
+		return
+	}
+	// Only delete if still "pending" — don't accidentally wipe a completed entry
+	// set by a concurrent request that succeeded slightly ahead of us.
+	val, err := b.redisClient.Get(ctx, cacheKey).Result()
+	if err == nil && val == "pending" {
+		b.redisClient.Del(ctx, cacheKey)
+	}
+}
+
+// cacheCheckoutResult overwrites the "pending" sentinel with the final JSON payload.
+// Uses Set (not SetNX) so we always replace the sentinel even if it has expired and
+// been re-acquired by a concurrent request.
+func (b *BFFController) cacheCheckoutResult(ctx context.Context, cacheKey string, data []byte) {
+	if b.redisClient == nil {
+		return
+	}
+	_ = b.redisClient.Set(ctx, cacheKey, data, 15*time.Minute).Err()
 }
 
 func errorString(err error) string {

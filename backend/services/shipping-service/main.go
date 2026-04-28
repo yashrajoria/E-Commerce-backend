@@ -29,10 +29,8 @@ func main() {
 		logger.Fatal("Failed to load config", zap.Error(err))
 	}
 
-	shippingProvider, err := providers.NewStaticRateProvider(cfg.ShippingRatesFile)
-	if err != nil {
-		logger.Fatal("Failed to load shipping rates", zap.Error(err))
-	}
+	logger.Info("Using Internal Dynamic shipping provider")
+	shippingProvider := providers.NewInternalDynamicProvider()
 
 	shippingService := servicepkg.NewShippingService(
 		shippingProvider,

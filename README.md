@@ -39,25 +39,25 @@ The entry point for all client requests, responsible for:
 - Centralized logging and monitoring
 
 ### **Core Services**
-- **Auth Service:** Manages user authentication, registration, and session tokens
-- **User Service:** Handles user profile management and account settings
-- **Product Service:** Manages product catalog, categories, and inventory data
-- **Order Service:** Handles order placement, tracking, and history
-- **Inventory Service:** Real-time stock management and updates
-- **Common:** Shared libraries, utilities, and middleware used across all services
+- **BFF (Backend-for-Frontend):** Optimized aggregation layer with Redis-backed idempotency.
+- **Auth Service:** Manages user authentication, registration, and session tokens.
+- **Promotion Service:** Distributed coupon management with usage limit enforcement.
+- **Shipping Service:** Dynamic zone-based rate calculation (Local & Cloud ready).
+- **Cart Service:** Manages shopping cart state and validation.
+- **Product Service:** Manages product catalog, categories, and inventory data.
+- **Order Service:** Handles order placement, tracking, and history.
+- **Common:** Shared libraries, utilities, and middleware.
 
 ---
 
 ## ✨ Key Features
 
-- **Distributed System:** Independent services that can be scaled and deployed separately
-- **API Gateway Routing:** Centralized entry point with optimized request handling
-- **Polyglot Persistence Support:** Architecture designed for PostgreSQL and MongoDB
-- **High Performance:** Leverages Go's efficient runtime and concurrency primitives
-- **Security:** Integrated authentication and authorization flows across services
-- **Scalability:** Container-ready architecture for orchestrated deployments
-- **Robust Error Handling:** Comprehensive error management and logging
-- **Middleware Integration:** Centralized security and logging middleware
+- **Distributed System:** Independent services that can be scaled and deployed separately.
+- **Idempotent Checkout:** Atomic Redis-backed logic to prevent duplicate orders.
+- **Dynamic Shipping:** Intelligent zone-based rate calculation without external costs.
+- **Atomic Promotions:** Safe coupon usage tracking across distributed systems.
+- **API Gateway Routing:** Centralized entry point with optimized request handling.
+- **High Performance:** Leverages Go's efficient runtime and concurrency primitives.
 
 ---
 

@@ -3,7 +3,9 @@ package consumer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
+	"promotion-service/repository"
 	"promotion-service/services"
 
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
@@ -65,6 +67,10 @@ func (c *OrderCreatedConsumer) handleMessage(ctx context.Context, body string) e
 	log.Printf("📥 [PromotionService] Processing coupon usage for code=%s order_id=%v", couponCode, evt.Data["order_id"])
 
 	if err := c.couponService.IncrementCouponUsage(ctx, couponCode); err != nil {
+		if errors.Is(err, repository.ErrUsageLimitReached) {
+			log.Printf("⚠️ [PromotionService] OVER-REDEMPTION: Coupon usage limit reached for code=%s. Order %v already paid, acknowledging message.", couponCode, evt.Data["order_id"])
+			return nil // Swallowing the error to prevent infinite retries
+		}
 		log.Printf("❌ [PromotionService] Failed to increment usage for code=%s: %v", couponCode, err)
 		return err // Retry on DB failures
 	}

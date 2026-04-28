@@ -2,10 +2,15 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"promotion-service/models"
 	"strings"
 
 	"gorm.io/gorm"
+)
+
+var (
+	ErrUsageLimitReached = errors.New("coupon usage limit reached")
 )
 
 // CouponRepository defines the interface for coupon data access.
@@ -44,13 +49,22 @@ func (r *GormCouponRepository) FindByCode(ctx context.Context, code string) (*mo
 	return &coupon, nil
 }
 
-// IncrementUsedCount atomically increments the used_count of a coupon.
+// IncrementUsedCount atomically increments the used_count of a coupon if the limit hasn't been reached.
 func (r *GormCouponRepository) IncrementUsedCount(ctx context.Context, code string) error {
-	return r.db.WithContext(ctx).
+	result := r.db.WithContext(ctx).
 		Model(&models.Coupon{}).
-		Where("LOWER(code) = ?", strings.ToLower(code)).
-		UpdateColumn("used_count", gorm.Expr("used_count + 1")).
-		Error
+		Where("LOWER(code) = ? AND (usage_limit = 0 OR used_count < usage_limit)", strings.ToLower(code)).
+		UpdateColumn("used_count", gorm.Expr("used_count + 1"))
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		return ErrUsageLimitReached
+	}
+
+	return nil
 }
 
 // Deactivate soft-deactivates a coupon by setting active = false.
