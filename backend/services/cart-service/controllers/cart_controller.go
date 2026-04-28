@@ -372,8 +372,5 @@ func (cc *CartController) Checkout(c *gin.Context) {
 		}
 	}
 
-	// Clear cart after sending
-	_ = cc.Repo.DeleteCart(ctx, userID)
-
 	c.JSON(http.StatusOK, gin.H{"order_id": orderID, "status": "PENDING"})
 }

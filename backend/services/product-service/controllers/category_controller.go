@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ type CategoryServiceAPI interface {
 	UpdateCategory(ctx context.Context, id uuid.UUID, req services.CategoryCreateRequest) (int64, error)
 	DeleteCategory(ctx context.Context, id uuid.UUID) error
 	GetCategory(ctx context.Context, id uuid.UUID) (*models.Category, error)
+	CreateBulkCategories(ctx context.Context, req services.BulkCategoryCreateRequest) ([]*models.Category, error)
 }
 
 type CategoryController struct {
@@ -166,6 +168,34 @@ func (ctrl *CategoryController) DeleteCategory(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Category deleted successfully"})
+}
+
+// CreateBulkCategories creates multiple categories at once
+func (ctrl *CategoryController) CreateBulkCategories(c *gin.Context) {
+	var req services.BulkCategoryCreateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body", "details": err.Error()})
+		return
+	}
+
+	if err := ctrl.validator.validate.Struct(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": err.Error()})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), ctrl.timeout*5) // Longer timeout for bulk
+	defer cancel()
+
+	categories, err := ctrl.service.CreateBulkCategories(ctx, req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message":    fmt.Sprintf("Successfully created %d categories", len(categories)),
+		"categories": categories,
+	})
 }
 
 // Helper functions for error handling

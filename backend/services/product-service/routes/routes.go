@@ -86,6 +86,7 @@ func registerCategoryRoutes(
 		categories.POST("/", categoryCtrl.CreateCategory)      // Create category
 		categories.PUT("/:id", categoryCtrl.UpdateCategory)    // Update category
 		categories.DELETE("/:id", categoryCtrl.DeleteCategory) // Delete category
+		categories.POST("/bulk", categoryCtrl.CreateBulkCategories)
 	}
 }
 

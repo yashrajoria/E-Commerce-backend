@@ -22,9 +22,9 @@ type InventoryRepository interface {
 	Get(ctx context.Context, productID string) (*models.Inventory, error)
 	Set(ctx context.Context, inv *models.Inventory) error
 	Update(ctx context.Context, productID string, updates map[string]interface{}) error
-	Reserve(ctx context.Context, productID string, quantity int) error
-	Release(ctx context.Context, productID string, quantity int) error
-	Confirm(ctx context.Context, productID string, quantity int) error
+	ReserveAll(ctx context.Context, orderID string, items []models.ReserveItem) error
+	ReleaseAll(ctx context.Context, orderID string, items []models.ReserveItem) error
+	ConfirmAll(ctx context.Context, orderID string, items []models.ReserveItem) error
 	CheckStock(ctx context.Context, productID string, quantity int) (*models.StockCheckResult, error)
 	ListAll(ctx context.Context, limit int32, exclusiveStartKey map[string]types.AttributeValue) ([]models.Inventory, map[string]types.AttributeValue, error)
 }
@@ -41,11 +41,12 @@ func NewDynamoInventoryRepository(client *dynamodb.Client, table string) *Dynamo
 }
 
 type ddbInventory struct {
-	ProductID string `dynamodbav:"id"`
-	Available int    `dynamodbav:"available"`
-	Reserved  int    `dynamodbav:"reserved"`
-	Threshold int    `dynamodbav:"threshold"`
-	UpdatedAt string `dynamodbav:"updated_at"`
+	ProductID         string         `dynamodbav:"id"`
+	Available         int            `dynamodbav:"available"`
+	Reserved          int            `dynamodbav:"reserved"`
+	Threshold         int            `dynamodbav:"threshold"`
+	OrderReservations map[string]int `dynamodbav:"order_reservations,omitempty"`
+	UpdatedAt         string         `dynamodbav:"updated_at"`
 }
 
 func (r *DynamoInventoryRepository) Get(ctx context.Context, productID string) (*models.Inventory, error) {
@@ -71,10 +72,11 @@ func (r *DynamoInventoryRepository) Get(ctx context.Context, productID string) (
 	}
 
 	inv := &models.Inventory{
-		ProductID: di.ProductID,
-		Available: di.Available,
-		Reserved:  di.Reserved,
-		Threshold: di.Threshold,
+		ProductID:         di.ProductID,
+		Available:         di.Available,
+		Reserved:          di.Reserved,
+		Threshold:         di.Threshold,
+		OrderReservations: di.OrderReservations,
 	}
 	if t, err := time.Parse(time.RFC3339, di.UpdatedAt); err == nil {
 		inv.UpdatedAt = t
@@ -84,11 +86,12 @@ func (r *DynamoInventoryRepository) Get(ctx context.Context, productID string) (
 
 func (r *DynamoInventoryRepository) Set(ctx context.Context, inv *models.Inventory) error {
 	di := ddbInventory{
-		ProductID: inv.ProductID,
-		Available: inv.Available,
-		Reserved:  inv.Reserved,
-		Threshold: inv.Threshold,
-		UpdatedAt: inv.UpdatedAt.Format(time.RFC3339),
+		ProductID:         inv.ProductID,
+		Available:         inv.Available,
+		Reserved:          inv.Reserved,
+		Threshold:         inv.Threshold,
+		OrderReservations: inv.OrderReservations,
+		UpdatedAt:         inv.UpdatedAt.Format(time.RFC3339),
 	}
 
 	item, err := attributevalue.MarshalMap(di)
@@ -149,112 +152,138 @@ func (r *DynamoInventoryRepository) Update(ctx context.Context, productID string
 	return nil
 }
 
-// Reserve atomically decrements available and increments reserved
-func (r *DynamoInventoryRepository) Reserve(ctx context.Context, productID string, quantity int) error {
-	key, err := attributevalue.MarshalMap(map[string]string{"id": productID})
-	if err != nil {
-		return fmt.Errorf("marshal key: %w", err)
+// ReserveAll atomically and idempotently reserves stock for multiple items in a transaction.
+func (r *DynamoInventoryRepository) ReserveAll(ctx context.Context, orderID string, items []models.ReserveItem) error {
+	transactItems := make([]types.TransactWriteItem, 0, len(items))
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	for _, item := range items {
+		key, _ := attributevalue.MarshalMap(map[string]string{"id": item.ProductID})
+		qtyAV, _ := attributevalue.Marshal(item.Quantity)
+		nowAV, _ := attributevalue.Marshal(now)
+
+		// Update available, reserved, and track the reservation by orderID for idempotency
+		expr := "SET #avail = #avail - :qty, #resv = #resv + :qty, #order_resv.#orderID = :qty, updated_at = :now"
+		cond := "#avail >= :qty AND attribute_not_exists(#order_resv.#orderID)"
+
+		transactItems = append(transactItems, types.TransactWriteItem{
+			Update: &types.Update{
+				TableName:           &r.table,
+				Key:                 key,
+				UpdateExpression:    &expr,
+				ConditionExpression: &cond,
+				ExpressionAttributeNames: map[string]string{
+					"#avail":      "available",
+					"#resv":       "reserved",
+					"#order_resv": "order_reservations",
+					"#orderID":    orderID,
+				},
+				ExpressionAttributeValues: map[string]types.AttributeValue{
+					":qty": qtyAV,
+					":now": nowAV,
+				},
+			},
+		})
 	}
 
-	expr := "SET #avail = #avail - :qty, #resv = #resv + :qty, updated_at = :now"
-	condExpr := "#avail >= :qty"
-
-	qtyAV, _ := attributevalue.Marshal(quantity)
-	nowAV, _ := attributevalue.Marshal(time.Now().UTC().Format(time.RFC3339))
-
-	_, err = r.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
-		TableName:           &r.table,
-		Key:                 key,
-		UpdateExpression:    &expr,
-		ConditionExpression: &condExpr,
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":qty": qtyAV,
-			":now": nowAV,
-		},
-		ExpressionAttributeNames: map[string]string{
-			"#avail": "available",
-			"#resv":  "reserved",
-		},
+	_, err := r.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
+		TransactItems: transactItems,
 	})
 	if err != nil {
-		var ccf *types.ConditionalCheckFailedException
+		var ccf *types.TransactionCanceledException
 		if errors.As(err, &ccf) {
-			return ErrInsufficientStock
+			for _, reason := range ccf.CancellationReasons {
+				if reason.Code != nil && *reason.Code == "ConditionalCheckFailed" {
+					return fmt.Errorf("insufficient stock or duplicate reservation for order=%s", orderID)
+				}
+			}
 		}
-		return fmt.Errorf("reserve failed: %w", err)
+		return fmt.Errorf("transact reserve failed: %w", err)
 	}
 	return nil
 }
 
-// Release atomically increments available and decrements reserved
-func (r *DynamoInventoryRepository) Release(ctx context.Context, productID string, quantity int) error {
-	key, err := attributevalue.MarshalMap(map[string]string{"id": productID})
-	if err != nil {
-		return fmt.Errorf("marshal key: %w", err)
+// ReleaseAll atomically releases reservations for multiple items in a transaction.
+func (r *DynamoInventoryRepository) ReleaseAll(ctx context.Context, orderID string, items []models.ReserveItem) error {
+	transactItems := make([]types.TransactWriteItem, 0, len(items))
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	for _, item := range items {
+		key, _ := attributevalue.MarshalMap(map[string]string{"id": item.ProductID})
+		qtyAV, _ := attributevalue.Marshal(item.Quantity)
+		nowAV, _ := attributevalue.Marshal(now)
+
+		// Add back to available, remove from reserved and the order tracking map
+		expr := "SET #avail = #avail + :qty, #resv = #resv - :qty, updated_at = :now REMOVE #order_resv.#orderID"
+		cond := "attribute_exists(#order_resv.#orderID)"
+
+		transactItems = append(transactItems, types.TransactWriteItem{
+			Update: &types.Update{
+				TableName:           &r.table,
+				Key:                 key,
+				UpdateExpression:    &expr,
+				ConditionExpression: &cond,
+				ExpressionAttributeNames: map[string]string{
+					"#avail":      "available",
+					"#resv":       "reserved",
+					"#order_resv": "order_reservations",
+					"#orderID":    orderID,
+				},
+				ExpressionAttributeValues: map[string]types.AttributeValue{
+					":qty": qtyAV,
+					":now": nowAV,
+				},
+			},
+		})
 	}
 
-	expr := "SET #avail = #avail + :qty, #resv = #resv - :qty, updated_at = :now"
-	condExpr := "#resv >= :qty"
-
-	qtyAV, _ := attributevalue.Marshal(quantity)
-	nowAV, _ := attributevalue.Marshal(time.Now().UTC().Format(time.RFC3339))
-
-	_, err = r.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
-		TableName:           &r.table,
-		Key:                 key,
-		UpdateExpression:    &expr,
-		ConditionExpression: &condExpr,
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":qty": qtyAV,
-			":now": nowAV,
-		},
-		ExpressionAttributeNames: map[string]string{
-			"#avail": "available",
-			"#resv":  "reserved",
-		},
+	_, err := r.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
+		TransactItems: transactItems,
 	})
 	if err != nil {
-		var ccf *types.ConditionalCheckFailedException
-		if errors.As(err, &ccf) {
-			return fmt.Errorf("cannot release more than reserved")
-		}
-		return fmt.Errorf("release failed: %w", err)
+		return fmt.Errorf("transact release failed: %w", err)
 	}
 	return nil
 }
 
-// Confirm permanently deducts reserved stock (payment succeeded)
-func (r *DynamoInventoryRepository) Confirm(ctx context.Context, productID string, quantity int) error {
-	key, err := attributevalue.MarshalMap(map[string]string{"id": productID})
-	if err != nil {
-		return fmt.Errorf("marshal key: %w", err)
+// ConfirmAll permanently deducts reserved stock for multiple items in a transaction.
+func (r *DynamoInventoryRepository) ConfirmAll(ctx context.Context, orderID string, items []models.ReserveItem) error {
+	transactItems := make([]types.TransactWriteItem, 0, len(items))
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	for _, item := range items {
+		key, _ := attributevalue.MarshalMap(map[string]string{"id": item.ProductID})
+		qtyAV, _ := attributevalue.Marshal(item.Quantity)
+		nowAV, _ := attributevalue.Marshal(now)
+
+		// Just remove from reserved and the order tracking map (stock already decremented from available during reserve)
+		expr := "SET #resv = #resv - :qty, updated_at = :now REMOVE #order_resv.#orderID"
+		cond := "attribute_exists(#order_resv.#orderID)"
+
+		transactItems = append(transactItems, types.TransactWriteItem{
+			Update: &types.Update{
+				TableName:           &r.table,
+				Key:                 key,
+				UpdateExpression:    &expr,
+				ConditionExpression: &cond,
+				ExpressionAttributeNames: map[string]string{
+					"#resv":       "reserved",
+					"#order_resv": "order_reservations",
+					"#orderID":    orderID,
+				},
+				ExpressionAttributeValues: map[string]types.AttributeValue{
+					":qty": qtyAV,
+					":now": nowAV,
+				},
+			},
+		})
 	}
 
-	expr := "SET #resv = #resv - :qty, updated_at = :now"
-	condExpr := "#resv >= :qty"
-
-	qtyAV, _ := attributevalue.Marshal(quantity)
-	nowAV, _ := attributevalue.Marshal(time.Now().UTC().Format(time.RFC3339))
-
-	_, err = r.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
-		TableName:           &r.table,
-		Key:                 key,
-		UpdateExpression:    &expr,
-		ConditionExpression: &condExpr,
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":qty": qtyAV,
-			":now": nowAV,
-		},
-		ExpressionAttributeNames: map[string]string{
-			"#resv": "reserved",
-		},
+	_, err := r.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
+		TransactItems: transactItems,
 	})
 	if err != nil {
-		var ccf *types.ConditionalCheckFailedException
-		if errors.As(err, &ccf) {
-			return fmt.Errorf("cannot confirm more than reserved")
-		}
-		return fmt.Errorf("confirm failed: %w", err)
+		return fmt.Errorf("transact confirm failed: %w", err)
 	}
 	return nil
 }

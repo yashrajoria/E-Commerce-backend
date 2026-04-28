@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -288,6 +289,34 @@ func (s *CategoryServiceDDB) DeleteCategory(ctx context.Context, id uuid.UUID) e
 // GetCategory returns a single category by ID
 func (s *CategoryServiceDDB) GetCategory(ctx context.Context, id uuid.UUID) (*models.Category, error) {
 	return s.repo.FindByID(ctx, id)
+}
+
+// CreateBulkCategories creates multiple categories in a single call.
+func (s *CategoryServiceDDB) CreateBulkCategories(ctx context.Context, req BulkCategoryCreateRequest) ([]*models.Category, error) {
+	// Sort by level to ensure parents are created before children
+	sort.Slice(req.Items, func(i, j int) bool {
+		return req.Items[i].Level < req.Items[j].Level
+	})
+
+	results := make([]*models.Category, 0, len(req.Items))
+	
+	// Note: We iterate and call CreateCategory for each item.
+	// This ensures consistency and proper ancestry resolution, though it's less efficient
+	// than a batch write. For category import (infrequent), this is acceptable.
+	for _, item := range req.Items {
+		cat, err := s.CreateCategory(ctx, item)
+		if err != nil {
+			// If it's a duplicate, we might want to skip or return error.
+			// For bulk, let's collect successes and return the first major error.
+			if strings.Contains(err.Error(), "already exists") {
+				continue
+			}
+			return results, fmt.Errorf("failed at category '%s': %w", item.Name, err)
+		}
+		results = append(results, cat)
+	}
+	
+	return results, nil
 }
 
 // FindByNames returns categories by their names

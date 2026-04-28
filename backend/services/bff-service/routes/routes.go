@@ -57,5 +57,20 @@ func RegisterRoutes(r *gin.Engine, ctrl *controllers.BFFController) {
 		// Payments
 		protected.GET("/payment/status/by-order/:order_id", ctrl.PaymentStatusByOrderID)
 		protected.POST("/payment/verify-payment", ctrl.Proxy("POST", "/payment/verify-payment"))
+
+		// Promotions / Coupons
+		protected.POST("/promotions/validate", ctrl.Proxy("POST", "/coupons/validate"))
+		protected.GET("/promotions/:code", ctrl.Proxy("GET", "/coupons/:code"))
+	}
+
+	// Admin-only proxy routes
+	admin := r.Group("/bff/admin")
+	admin.Use(middleware.AuthMiddleware(), middleware.AdminAuthMiddleware())
+	{
+		admin.GET("/promotions", ctrl.Proxy("GET", "/coupons"))
+		admin.POST("/promotions", ctrl.Proxy("POST", "/coupons"))
+		admin.DELETE("/promotions/:code", ctrl.Proxy("DELETE", "/coupons/:code"))
+
+		admin.POST("/categories/bulk", ctrl.Proxy("POST", "/categories/bulk"))
 	}
 }
