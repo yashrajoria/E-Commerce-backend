@@ -856,6 +856,37 @@ paths:
         "502":
           $ref: "#/components/responses/BadGateway"
 
+  /bff/promotions/validate:
+    post:
+      tags:
+        - BFF
+      summary: Validate a promotion coupon
+      description: |
+        Checks if a coupon code is valid for the given cart total. Returns the calculated
+        discount amount and coupon details if valid. Requires authentication.
+      operationId: bffValidatePromotion
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ValidateCouponRequest"
+      responses:
+        "200":
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidateCouponResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
   /bff/payment/verify-payment:
     post:
       tags:
@@ -1102,6 +1133,84 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/AdminSuccessResponse" }
         "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+
+  /bff/admin/categories/bulk:
+    post:
+      tags: [Admin]
+      summary: Bulk create categories (admin)
+      description: |
+        Creates multiple categories at once from a JSON payload. Handles ancestry resolution.
+        Duplicate names are skipped.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkCategoryCreateRequest"
+      responses:
+        "201": { $ref: "#/components/responses/AdminCreatedResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+
+  /bff/admin/promotions:
+    get:
+      tags: [Admin]
+      summary: List coupons (admin)
+      description: Returns a paginated list of all coupons.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: "#/components/parameters/AdminPageParam"
+        - $ref: "#/components/parameters/AdminPageSizeParam"
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+    post:
+      tags: [Admin]
+      summary: Create coupon (admin)
+      description: Creates a new promotional coupon.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCouponRequest"
+      responses:
+        "201": { $ref: "#/components/responses/AdminCreatedResponse" }
+        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
+        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
+        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+
+  /bff/admin/promotions/{code}:
+    delete:
+      tags: [Admin]
+      summary: Deactivate coupon (admin)
+      description: Marks a coupon as inactive by its code.
+      parameters:
+        - $ref: "#/components/parameters/AdminAuthorizationHeader"
+        - $ref: "#/components/parameters/AdminUserIDHeader"
+        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
         "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
         "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
         "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
@@ -4628,6 +4737,17 @@ components:
           - 8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1
         category_ids: []
         delete_all: false
+
+    BulkCategoryCreateRequest:
+      type: object
+      description: Payload for bulk category creation.
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CreateCategoryRequest"
 
     # ── Inventory ──────────────────────────────────────────────────────────────
 
