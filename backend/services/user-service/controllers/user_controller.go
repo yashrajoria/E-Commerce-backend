@@ -8,7 +8,9 @@ import (
 	"user-service/middleware"
 	"user-service/services"
 
+	"github.com/yashrajoria/common/logger"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
@@ -25,6 +27,7 @@ func NewUserController(us *services.UserService) *UserController {
 func (ctrl *UserController) GetProfile(c *gin.Context) {
 	userID, err := middleware.GetUserID(c)
 	if err != nil {
+		logger.Warn(c.Request.Context(), "Unauthorized profile access attempt")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -32,8 +35,10 @@ func (ctrl *UserController) GetProfile(c *gin.Context) {
 	user, err := ctrl.userService.GetUserProfile(c.Request.Context(), userID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			logger.Warn(c.Request.Context(), "User profile not found", zap.String("user_id", userID))
 			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		} else {
+			logger.Error(c.Request.Context(), "Database error while fetching profile", err, zap.String("user_id", userID))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 		}
 		return
@@ -52,6 +57,7 @@ func (ctrl *UserController) GetProfile(c *gin.Context) {
 func (ctrl *UserController) UpdateProfile(c *gin.Context) {
 	userID, err := middleware.GetUserID(c)
 	if err != nil {
+		logger.Warn(c.Request.Context(), "Unauthorized update profile attempt")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -62,6 +68,7 @@ func (ctrl *UserController) UpdateProfile(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Warn(c.Request.Context(), "Invalid profile update payload", zap.Error(err), zap.String("user_id", userID))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid payload", "details": err.Error()})
 		return
 	}
@@ -69,8 +76,10 @@ func (ctrl *UserController) UpdateProfile(c *gin.Context) {
 	user, err := ctrl.userService.UpdateUserProfile(c.Request.Context(), userID, req.Name, req.PhoneNumber)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			logger.Warn(c.Request.Context(), "User not found for update", zap.String("user_id", userID))
 			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		} else {
+			logger.Error(c.Request.Context(), "Failed to update profile", err, zap.String("user_id", userID))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user"})
 		}
 		return
@@ -89,6 +98,7 @@ func (ctrl *UserController) UpdateProfile(c *gin.Context) {
 func (ctrl *UserController) ChangePassword(c *gin.Context) {
 	userID, err := middleware.GetUserID(c)
 	if err != nil {
+		logger.Warn(c.Request.Context(), "Unauthorized password change attempt")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -98,34 +108,40 @@ func (ctrl *UserController) ChangePassword(c *gin.Context) {
 		NewPassword string `json:"new_password" binding:"required,min=8"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Warn(c.Request.Context(), "Invalid password change request", zap.Error(err), zap.String("user_id", userID))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request", "details": err.Error()})
 		return
 	}
 
 	user, err := ctrl.userService.GetUserProfile(c.Request.Context(), userID)
 	if err != nil {
+		logger.Warn(c.Request.Context(), "User not found for password change", zap.String("user_id", userID))
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.OldPassword)); err != nil {
+		logger.Warn(c.Request.Context(), "Old password incorrect", zap.String("user_id", userID))
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Old password incorrect"})
 		return
 	}
 
 	validator := services.NewPasswordValidator()
 	if err := validator.ValidatePassword(req.NewPassword); err != nil {
+		logger.Warn(c.Request.Context(), "Weak password provided", zap.Error(err), zap.String("user_id", userID))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Weak password", "details": err.Error()})
 		return
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
+		logger.Error(c.Request.Context(), "Failed to hash new password", err, zap.String("user_id", userID))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash new password"})
 		return
 	}
 
 	if err := ctrl.userService.ChangeUserPassword(c.Request.Context(), userID, string(hashedPassword)); err != nil {
+		logger.Error(c.Request.Context(), "Failed to update password in DB", err, zap.String("user_id", userID))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update password"})
 		return
 	}
@@ -150,6 +166,7 @@ func (ctrl *UserController) GetAllUsers(c *gin.Context) {
 
 	users, total, err := ctrl.userService.ListUsers(c.Request.Context(), page, pageSize)
 	if err != nil {
+		logger.Error(c.Request.Context(), "Failed to fetch users list", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch users"})
 		return
 	}

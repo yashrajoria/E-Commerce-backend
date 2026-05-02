@@ -19,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	commonlog "github.com/yashrajoria/common/logger"
 	commonmw "github.com/yashrajoria/common/middleware"
 	"go.uber.org/zap"
 )
@@ -26,6 +27,9 @@ import (
 func main() {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
+
+	// Initialize common logger to avoid nil pointer panics in sub-packages
+	commonlog.Log = logger
 
 	log.Println("Starting User Service...")
 
