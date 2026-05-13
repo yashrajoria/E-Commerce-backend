@@ -20,7 +20,7 @@ info:
     - **Shipping Service** (`:8091`) — Static shipping rate lookup based on a configured JSON catalog.
 
     ## Authentication
-    All protected endpoints require a valid JWT `access_token` cookie issued by the Auth Service. The gateway rejects missing or expired tokens with `401 Unauthorized`. Refresh the token via `POST /auth/refresh` before it expires.
+    All protected endpoints require a valid JWT `__session` cookie issued by the Auth Service. The gateway rejects missing or expired tokens with `401 Unauthorized`. Refresh the token via `POST /auth/refresh` before it expires.
 
     ## Role-Based Access Control
     | Role    | Description                                          |

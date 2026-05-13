@@ -17,6 +17,13 @@ type ForwardOptions struct {
 	StripPrefix string
 }
 
+var forwardHTTPClient = &http.Client{
+	Timeout: 30 * time.Second,
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
+
 func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 	// Build the path suffix to append to TargetBase.
 	// 1. Try the wildcard param (*any) used by most routes.
@@ -101,13 +108,7 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 		}
 	}
 
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-	resp, err := client.Do(req)
+	resp, err := forwardHTTPClient.Do(req)
 	if err != nil {
 		logger.Log.Error("❌ Failed to forward request", zap.Error(err))
 		c.JSON(http.StatusBadGateway, gin.H{"error": "service unreachable"})

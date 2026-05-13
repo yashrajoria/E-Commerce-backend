@@ -171,13 +171,14 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		finalTotal = 0
 	}
 
-	// Reserve inventory via inventory service (non-fatal: proceed even on failure)
+	// Reserve inventory via inventory service before creating the order/payment request
 	if c.inventoryClient != nil {
 		if err := c.inventoryClient.ReserveStock(ctx, orderIDUUID.String(), inventoryItems); err != nil {
-			// Log as a warning but do NOT abort order creation.
-			// Inventory can be reconciled later; blocking checkout on inventory failures
-			// causes silent order drops which break the entire checkout_url flow.
-			log.Printf("⚠️  [CHECKOUT] Inventory reservation failed for order=%s (proceeding anyway): %v", orderIDUUID.String(), err)
+			// Do not create an order or request payment unless stock is actually reserved.
+			// Returning an error lets SQS retry transient inventory failures instead of
+			// producing paid orders that cannot be fulfilled.
+			log.Printf("❌ [CHECKOUT] Inventory reservation failed for order=%s: %v", orderIDUUID.String(), err)
+			return err
 		} else {
 			log.Printf("✅ [CHECKOUT] Inventory reserved for order=%s items=%d", orderIDUUID.String(), len(inventoryItems))
 		}
