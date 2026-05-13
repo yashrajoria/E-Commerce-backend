@@ -282,24 +282,29 @@ func (b *BFFController) Checkout(c *gin.Context) {
 		// Sentinel value "pending" signals that a checkout is in-flight.
 		// Once complete, the sentinel is replaced with the full JSON response.
 		acquired, err := b.redisClient.SetNX(ctx, cacheKey, "pending", 15*time.Minute).Result()
-		if err == nil && !acquired {
+		if err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "checkout idempotency store unavailable"})
+			return
+		}
+		if !acquired {
 			// Key already exists — check if it holds a completed response or is still pending.
 			val, getErr := b.redisClient.Get(ctx, cacheKey).Result()
-			if getErr == nil {
-				if val != "pending" {
-					// A previous request already completed — return the cached result.
-					c.Data(http.StatusOK, "application/json", []byte(val))
-					return
-				}
-				// Still pending: another request is in-flight. Ask the client to retry.
-				c.JSON(http.StatusConflict, gin.H{
-					"error":   "checkout is already in progress for this idempotency key",
-					"message": "please retry in a few seconds",
-				})
+			if getErr != nil {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "checkout idempotency state unavailable"})
 				return
 			}
+			if val != "pending" {
+				// A previous request already completed — return the cached result.
+				c.Data(http.StatusOK, "application/json", []byte(val))
+				return
+			}
+			// Still pending: another request is in-flight. Ask the client to retry.
+			c.JSON(http.StatusConflict, gin.H{
+				"error":   "checkout is already in progress for this idempotency key",
+				"message": "please retry in a few seconds",
+			})
+			return
 		}
-		// If Redis is unavailable (err != nil) we fall through and allow the request.
 	}
 
 	// 1) Validate cart is non-empty

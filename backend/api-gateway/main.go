@@ -34,7 +34,9 @@ func CORSMiddleware() gin.HandlerFunc {
 	}
 
 	if allowed == "*" {
-		config.AllowAllOrigins = true
+		// Do not combine wildcard CORS with credentialed cookies. Fall back to
+		// explicit trusted origins so browser-enforced auth cookies remain safe.
+		config.AllowOrigins = []string{"http://localhost:3000", "http://localhost:3001", "https://shopswift-storefront.vercel.app", "https://shopswift-admin.vercel.app"}
 	} else if allowed != "" {
 		var origins []string
 		for _, o := range strings.Split(allowed, ",") {
