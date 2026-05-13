@@ -1,6 +1,7 @@
 go 1.25.6
 
 use (
+	.
 	./api-gateway
 	./pkg/aws
 	./services/auth-service
@@ -15,4 +16,5 @@ use (
 	./services/promotion-service
 	./services/shipping-service
 	./services/user-service
+	./services/agent-service
 )

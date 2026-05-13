@@ -132,15 +132,21 @@ func (d *DynamoAdapter) Create(ctx context.Context, product *models.Product) err
 	return nil
 }
 
-// buildFilterExpression constructs DynamoDB filter expressions from the map
+// buildFilterExpression constructs DynamoDB filter expressions from the map.
+// Product reads exclude soft-deleted records by default.
 func (d *DynamoAdapter) buildFilterExpression(filter map[string]interface{}) (filterExpr *string, attrValues map[string]types.AttributeValue, attrNames map[string]string) {
-	if filter == nil || len(filter) == 0 {
-		return nil, nil, nil
-	}
-
 	var expressions []string
 	attrValues = make(map[string]types.AttributeValue)
 	attrNames = make(map[string]string)
+
+	attrNames["#deleted_at"] = "deleted_at"
+	expressions = append(expressions, "attribute_not_exists(#deleted_at)")
+
+	if filter == nil {
+		joined := strings.Join(expressions, " AND ")
+		return &joined, nil, attrNames
+	}
+
 	i := 0
 
 	if v, ok := filter["is_featured"].(bool); ok {
@@ -212,11 +218,10 @@ func (d *DynamoAdapter) buildFilterExpression(filter map[string]interface{}) (fi
 		i++
 	}
 
-	if len(expressions) == 0 {
-		return nil, nil, nil
-	}
-
 	joined := strings.Join(expressions, " AND ")
+	if len(attrValues) == 0 {
+		attrValues = nil
+	}
 	return &joined, attrValues, attrNames
 }
 
@@ -381,20 +386,34 @@ func (d *DynamoAdapter) CreateMany(ctx context.Context, products []models.Produc
 	return nil
 }
 
-// Update performs UpdateItem by setting provided attributes
+// Update performs UpdateItem by setting whitelisted attributes and refusing to
+// create missing/deleted records implicitly.
 func (d *DynamoAdapter) Update(ctx context.Context, id uuid.UUID, updates map[string]interface{}) error {
 	if len(updates) == 0 {
 		return nil
 	}
+
+	allowed := map[string]bool{
+		"name": true, "price": true, "quantity": true, "description": true,
+		"images": true, "brand": true, "sku": true, "category_ids": true,
+		"category_path": true, "is_featured": true,
+	}
+
 	expr := "SET "
 	exprVals := make(map[string]types.AttributeValue)
+	exprNames := make(map[string]string)
 	i := 0
 	for k, v := range updates {
+		if !allowed[k] {
+			continue
+		}
 		ph := fmt.Sprintf(":v%d", i)
+		namePh := fmt.Sprintf("#f%d", i)
 		if i > 0 {
 			expr += ", "
 		}
-		expr += fmt.Sprintf("%s = %s", k, ph)
+		expr += fmt.Sprintf("%s = %s", namePh, ph)
+		exprNames[namePh] = k
 		av, err := attributevalue.Marshal(v)
 		if err != nil {
 			return fmt.Errorf("marshal update value: %w", err)
@@ -402,16 +421,32 @@ func (d *DynamoAdapter) Update(ctx context.Context, id uuid.UUID, updates map[st
 		exprVals[ph] = av
 		i++
 	}
+	if i == 0 {
+		return nil
+	}
+
+	updatedAtAV, err := attributevalue.Marshal(time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return fmt.Errorf("marshal updated_at: %w", err)
+	}
+	expr += ", #updated_at = :updated_at"
+	exprNames["#updated_at"] = "updated_at"
+	exprNames["#deleted_at"] = "deleted_at"
+	exprVals[":updated_at"] = updatedAtAV
+
 	key, err := attributevalue.MarshalMap(map[string]string{"id": id.String()})
 	if err != nil {
 		return fmt.Errorf("marshal key: %w", err)
 	}
-	// convert exprVals to map[string]types.AttributeValue
-	avMap := make(map[string]types.AttributeValue)
-	for k, v := range exprVals {
-		avMap[k] = v
-	}
-	_, err = d.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{TableName: &d.table, Key: key, UpdateExpression: &expr, ExpressionAttributeValues: avMap})
+	cond := "attribute_exists(id) AND attribute_not_exists(#deleted_at)"
+	_, err = d.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName:                 &d.table,
+		Key:                       key,
+		UpdateExpression:          &expr,
+		ExpressionAttributeValues: exprVals,
+		ExpressionAttributeNames:  exprNames,
+		ConditionExpression:       &cond,
+	})
 	if err != nil {
 		return fmt.Errorf("update item failed: %w", err)
 	}
@@ -423,50 +458,35 @@ func (d *DynamoAdapter) Delete(ctx context.Context, id uuid.UUID) error {
 	if err != nil {
 		return fmt.Errorf("marshal key: %w", err)
 	}
-	_, err = d.client.DeleteItem(ctx, &dynamodb.DeleteItemInput{TableName: &d.table, Key: key})
+	now := time.Now().UTC().Format(time.RFC3339)
+	deletedAtAV, err := attributevalue.Marshal(now)
 	if err != nil {
-		return fmt.Errorf("delete item failed: %w", err)
+		return fmt.Errorf("marshal deleted_at: %w", err)
+	}
+	expr := "SET #deleted_at = :deleted_at, #updated_at = :deleted_at"
+	cond := "attribute_exists(id) AND attribute_not_exists(#deleted_at)"
+	_, err = d.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName:                 &d.table,
+		Key:                       key,
+		UpdateExpression:          &expr,
+		ExpressionAttributeValues: map[string]types.AttributeValue{":deleted_at": deletedAtAV},
+		ExpressionAttributeNames: map[string]string{
+			"#deleted_at": "deleted_at",
+			"#updated_at": "updated_at",
+		},
+		ConditionExpression: &cond,
+	})
+	if err != nil {
+		return fmt.Errorf("soft delete item failed: %w", err)
 	}
 	return nil
 }
 
-// DeleteMany deletes multiple products using BatchWriteItem (chunks of 25)
+// DeleteMany soft-deletes multiple products.
 func (d *DynamoAdapter) DeleteMany(ctx context.Context, ids []uuid.UUID) error {
-	const chunkSize = 25
-	for i := 0; i < len(ids); i += chunkSize {
-		end := i + chunkSize
-		if end > len(ids) {
-			end = len(ids)
-		}
-		writeReqs := make([]types.WriteRequest, 0, end-i)
-		for _, id := range ids[i:end] {
-			key, err := attributevalue.MarshalMap(map[string]string{"id": id.String()})
-			if err != nil {
-				return fmt.Errorf("marshal delete key: %w", err)
-			}
-			writeReqs = append(writeReqs, types.WriteRequest{DeleteRequest: &types.DeleteRequest{Key: key}})
-		}
-
-		req := &dynamodb.BatchWriteItemInput{RequestItems: map[string][]types.WriteRequest{d.table: writeReqs}}
-		attempts := 0
-		for {
-			out, err := d.client.BatchWriteItem(ctx, req)
-			if err != nil {
-				return fmt.Errorf("batch delete failed: %w", err)
-			}
-			if len(out.UnprocessedItems) == 0 {
-				break
-			}
-			if unp, ok := out.UnprocessedItems[d.table]; ok && len(unp) > 0 {
-				req.RequestItems[d.table] = unp
-			} else {
-				break
-			}
-			attempts++
-			if attempts >= 3 {
-				return fmt.Errorf("batch delete had unprocessed items after retries")
-			}
-			time.Sleep(time.Duration(attempts*200) * time.Millisecond)
+	for _, id := range ids {
+		if err := d.Delete(ctx, id); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -491,8 +511,13 @@ func (d *DynamoAdapter) FindBySKUs(ctx context.Context, skus []string) ([]models
 		}
 		values[ph] = av
 	}
-	filterExpr := fmt.Sprintf("sku IN (%s)", expr)
-	input := &dynamodb.ScanInput{TableName: &d.table, FilterExpression: &filterExpr, ExpressionAttributeValues: values}
+	filterExpr := fmt.Sprintf("sku IN (%s) AND attribute_not_exists(#deleted_at)", expr)
+	input := &dynamodb.ScanInput{
+		TableName:                 &d.table,
+		FilterExpression:          &filterExpr,
+		ExpressionAttributeValues: values,
+		ExpressionAttributeNames:  map[string]string{"#deleted_at": "deleted_at"},
+	}
 	paginator := dynamodb.NewScanPaginator(d.client, input)
 	var res []models.Product
 	for paginator.HasMorePages() {
