@@ -1,4 +1,10 @@
--- +migrate Up
+-- Historical reference script (not run by golang-migrate).
+-- Idempotent: safe to re-apply manually against an existing DB.
+-- Prefer migrations/000001_baseline.up.sql for new environments
+-- (baseline shipments shape is slimmer / future-facing).
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 CREATE TABLE IF NOT EXISTS shipments (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     order_id         VARCHAR(255) NOT NULL,
@@ -18,8 +24,8 @@ CREATE TABLE IF NOT EXISTS shipments (
     deleted_at       TIMESTAMP WITH TIME ZONE
 );
 
-CREATE INDEX IF NOT EXISTS idx_shipments_order_id ON shipments(order_id);
-CREATE INDEX IF NOT EXISTS idx_shipments_tracking_code ON shipments(tracking_code);
-CREATE INDEX IF NOT EXISTS idx_shipments_user_id ON shipments(user_id);
-CREATE INDEX IF NOT EXISTS idx_shipments_status ON shipments(status);
-CREATE INDEX IF NOT EXISTS idx_shipments_deleted_at ON shipments(deleted_at);
+CREATE INDEX IF NOT EXISTS idx_shipments_order_id ON shipments (order_id);
+CREATE INDEX IF NOT EXISTS idx_shipments_tracking_code ON shipments (tracking_code);
+CREATE INDEX IF NOT EXISTS idx_shipments_user_id ON shipments (user_id);
+CREATE INDEX IF NOT EXISTS idx_shipments_status ON shipments (status);
+CREATE INDEX IF NOT EXISTS idx_shipments_deleted_at ON shipments (deleted_at);

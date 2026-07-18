@@ -77,6 +77,11 @@ func main() {
 		ddbTable = "Products"
 	}
 	productRepo := repository.NewDynamoAdapter(ddbClient, ddbTable)
+	ddbProductCategories := os.Getenv("DDB_TABLE_PRODUCT_CATEGORIES")
+	if ddbProductCategories == "" {
+		ddbProductCategories = "ProductCategories"
+	}
+	productRepo.WithCategoryLinksTable(ddbProductCategories)
 	if err := productRepo.EnsureIndexes(context.Background()); err != nil {
 		zap.L().Warn("Failed to ensure product indexes", zap.Error(err))
 	}
@@ -86,7 +91,8 @@ func main() {
 	if ddbCategoryTable == "" {
 		ddbCategoryTable = "Categories"
 	}
-	categoryRepo := repository.NewDynamoCategoryAdapter(ddbClient, ddbCategoryTable, ddbTable)
+	categoryRepo := repository.NewDynamoCategoryAdapter(ddbClient, ddbCategoryTable, ddbTable).
+		WithProductLinks(productRepo)
 
 	// Inventory client for syncing stock on product creation
 	inventoryURL := os.Getenv("INVENTORY_SERVICE_URL")
@@ -114,7 +120,7 @@ func main() {
 
 	// Initialize Controllers, injecting services
 	productController := controllers.NewProductController(productService, ProductRedis)
-	categoryController := controllers.NewCategoryController(categoryService)
+	categoryController := controllers.NewCategoryController(categoryService, ProductRedis)
 
 	// Start bulk import worker (consumes persisted files from storage and processes them)
 	storageDir := os.Getenv("BULK_STORAGE_DIR")
@@ -161,9 +167,9 @@ func main() {
 	// Register all application routes, passing in the controllers
 	routes.RegisterRoutesLegacy(r, productController, categoryController)
 
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "OK"})
-	})
+	r.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	r.GET("/health/live", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	r.GET("/health/ready", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ready"}) })
 
 	// --- 5. Graceful Shutdown ---
 

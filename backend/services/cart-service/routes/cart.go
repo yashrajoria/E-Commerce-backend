@@ -4,6 +4,7 @@ import (
 	"cart-service/config"
 	"cart-service/controllers"
 	"cart-service/database"
+	"cart-service/middleware"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -19,9 +20,9 @@ func RegisterCartRoutes(
 	repo := database.NewCartRepository(redisClient, cfg.CartTTL)
 	controller := controllers.NewCartController(repo, snsClient, cfg)
 
-	// Protected cart routes (require authentication)
+	// Protected cart routes — gateway JWT + service-side X-User-ID gate
 	api := r.Group("/cart")
-	// TODO: Add authentication middleware when implemented
+	api.Use(middleware.RequireUser())
 	{
 		api.GET("/", controller.GetCart)
 		api.POST("/add", controller.AddItems)

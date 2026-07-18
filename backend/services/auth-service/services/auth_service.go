@@ -3,6 +3,8 @@ package services
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"auth-service/models"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
@@ -22,6 +25,7 @@ type IUserRepository interface {
 	CreateRefreshToken(ctx context.Context, rt *models.RefreshToken) error
 	GetRefreshTokenByTokenID(ctx context.Context, tokenID string) (*models.RefreshToken, error)
 	RevokeRefreshTokenByTokenID(ctx context.Context, tokenID string) error
+	CountByRole(ctx context.Context, role string) (int64, error)
 }
 
 type ITokenService interface {
@@ -90,6 +94,29 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*Token
 }
 
 func (s *AuthService) Register(ctx context.Context, name, email, password, role string) error {
+	return s.ProvisionUser(ctx, ProvisionUserInput{
+		Name:          name,
+		Email:         email,
+		Password:      password,
+		Role:          role,
+		EmailVerified: false,
+		Notify:        true,
+	})
+}
+
+// ProvisionUserInput configures account creation for public signup, admin invite, or bootstrap.
+type ProvisionUserInput struct {
+	Name          string
+	Email         string
+	Password      string
+	Role          string
+	EmailVerified bool
+	Notify        bool
+}
+
+// ProvisionUser creates a user with explicit verification/notification behavior.
+func (s *AuthService) ProvisionUser(ctx context.Context, in ProvisionUserInput) error {
+	role := in.Role
 	if role == "" {
 		role = "user"
 	}
@@ -97,7 +124,7 @@ func (s *AuthService) Register(ctx context.Context, name, email, password, role 
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		txRepo := repository.NewUserRepository(tx)
 
-		_, err := txRepo.FindByEmail(ctx, email)
+		_, err := txRepo.FindByEmail(ctx, in.Email)
 		if err == nil {
 			return fmt.Errorf("email already exists")
 		}
@@ -105,20 +132,24 @@ func (s *AuthService) Register(ctx context.Context, name, email, password, role 
 			return err
 		}
 
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(in.Password), bcrypt.DefaultCost)
 		if err != nil {
 			return fmt.Errorf("failed to hash password")
 		}
 
-		verificationCode := GenerateRandomCode(6)
+		verificationCode := ""
+		if !in.EmailVerified {
+			verificationCode = GenerateRandomCode(6)
+		}
+
 		newUser := &models.User{
 			ID:               uuid.New(),
-			Email:            email,
-			Name:             name,
+			Email:            in.Email,
+			Name:             in.Name,
 			Password:         string(hashedPassword),
 			Role:             role,
 			StoreName:        "",
-			EmailVerified:    false,
+			EmailVerified:    in.EmailVerified,
 			VerificationCode: verificationCode,
 		}
 
@@ -126,22 +157,62 @@ func (s *AuthService) Register(ctx context.Context, name, email, password, role 
 			return fmt.Errorf("failed to create account: %w", err)
 		}
 
-		// Publish verification event; notification-service handles the email send.
-		if s.eventPublisher != nil {
+		if in.Notify && !in.EmailVerified && s.eventPublisher != nil {
 			if err := s.eventPublisher.Publish(ctx, "user_registered", map[string]interface{}{
 				"email":             newUser.Email,
 				"name":              newUser.Name,
 				"verification_code": newUser.VerificationCode,
 			}); err != nil {
-				// Non-fatal — user is created, email can be resent.
 				fmt.Printf("failed to publish user_registered event: %v\n", err)
 			}
-		} else {
-			fmt.Printf("event publisher unavailable; skipping user_registered event for %s\n", newUser.Email)
 		}
 
 		return nil
 	})
+}
+
+// BootstrapAdminFromEnv creates the first admin when none exist.
+// Requires ADMIN_EMAIL and ADMIN_PASSWORD. Idempotent and safe for restarts.
+// Returns nil when skipped (env unset or admin already present).
+func (s *AuthService) BootstrapAdminFromEnv(ctx context.Context) error {
+	email := strings.TrimSpace(strings.ToLower(os.Getenv("ADMIN_EMAIL")))
+	password := os.Getenv("ADMIN_PASSWORD")
+	name := strings.TrimSpace(os.Getenv("ADMIN_NAME"))
+	if name == "" {
+		name = "Administrator"
+	}
+
+	if email == "" || password == "" {
+		zap.L().Info("Admin bootstrap skipped (set ADMIN_EMAIL and ADMIN_PASSWORD to enable)")
+		return nil
+	}
+
+	count, err := s.userRepo.CountByRole(ctx, "admin")
+	if err != nil {
+		return fmt.Errorf("count admins: %w", err)
+	}
+	if count > 0 {
+		zap.L().Info("Admin bootstrap skipped (admin already exists)", zap.Int64("admin_count", count))
+		return nil
+	}
+
+	if err := NewPasswordValidator().ValidatePassword(password); err != nil {
+		return fmt.Errorf("ADMIN_PASSWORD does not meet policy: %w", err)
+	}
+
+	if err := s.ProvisionUser(ctx, ProvisionUserInput{
+		Name:          name,
+		Email:         email,
+		Password:      password,
+		Role:          "admin",
+		EmailVerified: true,
+		Notify:        false,
+	}); err != nil {
+		return fmt.Errorf("bootstrap admin: %w", err)
+	}
+
+	zap.L().Info("Bootstrapped initial admin user", zap.String("email", email))
+	return nil
 }
 
 func (s *AuthService) VerifyEmail(ctx context.Context, email, code string) error {
@@ -190,34 +261,25 @@ func (s *AuthService) RefreshTokens(ctx context.Context, refreshToken string) (*
 		return nil, fmt.Errorf("invalid token: user ID (sub) is not a valid UUID")
 	}
 
-	_, err = s.userRepo.FindByID(ctx, userID)
+	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("user not found")
 	}
 
-	email, ok := claims["email"].(string)
-	if !ok {
-		return nil, fmt.Errorf("invalid token: email claim is missing or not a string")
-	}
-	role, ok := claims["role"].(string)
-	if !ok {
-		return nil, fmt.Errorf("invalid token: role claim is missing or not a string")
-	}
-
-	jti, ok := claims["jti"].(string)
-	if !ok || jti == "" {
-		return nil, fmt.Errorf("invalid refresh token: jti missing")
+	// Always re-read role from DB so promotions/demotions apply on refresh.
+	role := user.Role
+	email := user.Email
+	if email == "" {
+		if e, ok := claims["email"].(string); ok {
+			email = e
+		}
 	}
 
-	stored, err := s.userRepo.GetRefreshTokenByTokenID(ctx, jti)
-	if err != nil {
-		return nil, fmt.Errorf("invalid refresh token: %w", err)
-	}
-	if stored.Revoked || stored.ExpiresAt.Before(time.Now()) {
+	if existingToken.ExpiresAt.Before(time.Now()) {
 		return nil, fmt.Errorf("refresh token revoked or expired")
 	}
 
-	if err := s.userRepo.RevokeRefreshTokenByTokenID(ctx, jti); err != nil {
+	if err := s.userRepo.RevokeRefreshTokenByTokenID(ctx, tokenIDStr); err != nil {
 		return nil, fmt.Errorf("failed to revoke old refresh token: %w", err)
 	}
 
@@ -281,4 +343,13 @@ func (s *AuthService) ResendVerificationEmail(ctx context.Context, email string)
 	}
 
 	return nil
+}
+
+// GetUserByID returns the user for status / RBAC checks.
+func (s *AuthService) GetUserByID(ctx context.Context, userID string) (*models.User, error) {
+	id, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid user id")
+	}
+	return s.userRepo.FindByID(ctx, id)
 }

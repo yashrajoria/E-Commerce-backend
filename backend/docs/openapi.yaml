@@ -63,6 +63,10 @@ servers:
   - url: http://localhost:8091
     description: Shipping Service
 
+  - url: http://localhost:8084
+    description: Inventory Service
+  - url: http://localhost:8092
+    description: Notification Service
 tags:
   - name: Gateway
     description: |
@@ -125,6 +129,8 @@ tags:
       AI agent endpoints used for natural language ecommerce analytics. These endpoints run
       intent mapping, tool execution, formatting, and response synthesis.
 
+  - name: Notification Service
+    description: Notification delivery and admin notification log (port 8092).
 paths:
   # ── Agent Service ───────────────────────────────────────────────────────────
 
@@ -150,7 +156,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/AgentQueryRequest"
+              $ref: '#/components/schemas/AgentQueryRequest'
             examples:
               orders15d:
                 summary: Order count in the last 15 days
@@ -161,25 +167,25 @@ paths:
                 summary: Executive snapshot prompt
                 value:
                   session_id: demo-exec-snapshot
-                  prompt: "Give me a 30-day executive summary: revenue, orders, top products, low stock."
+                  prompt: 'Give me a 30-day executive summary: revenue, orders, top products, low stock.'
               lowStock:
                 summary: Inventory alert prompt
                 value:
                   session_id: demo-low-stock
                   prompt: Show low stock items below threshold 10.
       responses:
-        "200":
+        '200':
           description: Agent response with synthesized answer and tool traces
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AgentResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
+                $ref: '#/components/schemas/AgentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /agent/session/{session_id}:
     get:
@@ -195,12 +201,12 @@ paths:
           schema:
             type: string
       responses:
-        "200":
+        '200':
           description: Session content
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AgentSessionInspectResponse"
+                $ref: '#/components/schemas/AgentSessionInspectResponse'
     delete:
       tags:
         - Agent Service
@@ -214,7 +220,7 @@ paths:
           schema:
             type: string
       responses:
-        "200":
+        '200':
           description: Session cleared response
           content:
             application/json:
@@ -236,12 +242,12 @@ paths:
       description: Returns the tool registry used by intent mapping and planner fallback.
       operationId: agentListTools
       responses:
-        "200":
+        '200':
           description: Tool registry
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ToolRegistryResponse"
+                $ref: '#/components/schemas/ToolRegistryResponse'
 
   # ── Gateway ─────────────────────────────────────────────────────────────────
 
@@ -257,12 +263,12 @@ paths:
       operationId: healthCheck
       security: []
       responses:
-        "200":
+        '200':
           description: Gateway is healthy
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HealthResponse"
+                $ref: '#/components/schemas/HealthResponse'
               example:
                 status: ok
                 message: API Gateway is running
@@ -281,14 +287,14 @@ paths:
       operationId: bffGetHome
       security: []
       responses:
-        "200":
+        '200':
           description: Aggregated home page data
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BFFHomeResponse"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+                $ref: '#/components/schemas/BFFHomeResponse'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   /bff/profile:
     get:
@@ -303,16 +309,16 @@ paths:
       security:
         - cookieAuth: []
       responses:
-        "200":
+        '200':
           description: Aggregated profile page data
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BFFProfileResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+                $ref: '#/components/schemas/BFFProfileResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   /bff/auth/register:
     post:
@@ -327,21 +333,21 @@ paths:
         Returns `409 Conflict` if the email is already registered.
 
         > **Admin Panel Signup:** To register an admin account directly from the Admin Panel UI, include the `X-Admin-Signup-Secret` header with the secret defined in the backend environment. This bypasses the email verification requirement.
-        
+
         > **Standard Admin Creation:** Alternatively, use `POST /bff/admin/users` with an existing admin JWT cookie.
       operationId: bffRegister
       security: []
       requestBody:
-        $ref: "#/components/requestBodies/RegisterRequest"
+        $ref: '#/components/requestBodies/RegisterRequest'
       responses:
-        "201":
-          $ref: "#/components/responses/MessageResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "409":
-          $ref: "#/components/responses/Conflict"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+        '201':
+          $ref: '#/components/responses/MessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   /bff/auth/login:
     post:
@@ -360,20 +366,27 @@ paths:
       operationId: bffLogin
       security: []
       requestBody:
-        $ref: "#/components/requestBodies/LoginRequest"
+        $ref: '#/components/requestBodies/LoginRequest'
       responses:
-        "200":
-          $ref: "#/components/responses/MessageResponse"
+        '200':
+          description: Generic success message
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Operation completed successfully.
+
           headers:
             Set-Cookie: &authCookieHeader
               description: HttpOnly auth cookies set on successful authentication.
               schema:
                 type: string
-              example: "__session=eyJ...; HttpOnly; Secure; SameSite=None; Path=/"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+              example: __session=eyJ...; HttpOnly; Secure; SameSite=None; Path=/
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   /bff/auth/logout:
     post:
@@ -386,10 +399,10 @@ paths:
       operationId: bffLogout
       security: []
       responses:
-        "200":
-          $ref: "#/components/responses/MessageResponse"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+        '200':
+          $ref: '#/components/responses/MessageResponse'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   /bff/auth/refresh:
     post:
@@ -403,14 +416,21 @@ paths:
       operationId: bffRefreshToken
       security: []
       responses:
-        "200":
-          $ref: "#/components/responses/MessageResponse"
+        '200':
+          description: Generic success message
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Operation completed successfully.
+
           headers:
             Set-Cookie: *authCookieHeader
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   /bff/auth/status:
     get:
@@ -425,16 +445,16 @@ paths:
       security:
         - cookieAuth: []
       responses:
-        "200":
+        '200':
           description: Current authentication status
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AuthStatusResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+                $ref: '#/components/schemas/AuthStatusResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   /bff/auth/verify-email:
     post:
@@ -448,16 +468,16 @@ paths:
       operationId: bffVerifyEmail
       security: []
       requestBody:
-        $ref: "#/components/requestBodies/VerifyEmailRequest"
+        $ref: '#/components/requestBodies/VerifyEmailRequest'
       responses:
-        "200":
-          $ref: "#/components/responses/MessageResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+        '200':
+          $ref: '#/components/responses/MessageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   /bff/auth/resend-verification:
     post:
@@ -484,14 +504,14 @@ paths:
                   format: email
                   example: user@example.com
       responses:
-        "200":
-          $ref: "#/components/responses/MessageResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+        '200':
+          $ref: '#/components/responses/MessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   /bff/products:
     get:
@@ -505,22 +525,22 @@ paths:
       operationId: bffListProducts
       security: []
       parameters:
-        - $ref: "#/components/parameters/PageParam"
-        - $ref: "#/components/parameters/PerPageParam"
-        - $ref: "#/components/parameters/IsFeaturedParam"
-        - $ref: "#/components/parameters/CategoryIDsParam"
-        - $ref: "#/components/parameters/MinPriceParam"
-        - $ref: "#/components/parameters/MaxPriceParam"
-        - $ref: "#/components/parameters/SortParam"
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PerPageParam'
+        - $ref: '#/components/parameters/IsFeaturedParam'
+        - $ref: '#/components/parameters/CategoryIDsParam'
+        - $ref: '#/components/parameters/MinPriceParam'
+        - $ref: '#/components/parameters/MaxPriceParam'
+        - $ref: '#/components/parameters/SortParam'
       responses:
-        "200":
+        '200':
           description: Paginated product list
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ProductListResponse"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+                $ref: '#/components/schemas/ProductListResponse'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   /bff/products/{id}:
     get:
@@ -533,18 +553,18 @@ paths:
       operationId: bffGetProduct
       security: []
       parameters:
-        - $ref: "#/components/parameters/ProductID"
+        - $ref: '#/components/parameters/ProductID'
       responses:
-        "200":
+        '200':
           description: Product details
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Product"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+                $ref: '#/components/schemas/Product'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   /bff/categories:
     get:
@@ -557,14 +577,14 @@ paths:
       operationId: bffListCategories
       security: []
       responses:
-        "200":
+        '200':
           description: Nested category tree
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CategoryListResponse"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+                $ref: '#/components/schemas/CategoryListResponse'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   /bff/cart:
     get:
@@ -578,16 +598,16 @@ paths:
       security:
         - cookieAuth: []
       responses:
-        "200":
+        '200':
           description: Current cart
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Cart"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+                $ref: '#/components/schemas/Cart'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   /bff/cart/add:
     post:
@@ -603,22 +623,22 @@ paths:
       security:
         - cookieAuth: []
       parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
-        $ref: "#/components/requestBodies/AddItemsRequest"
+        $ref: '#/components/requestBodies/AddItemsRequest'
       responses:
-        "200":
+        '200':
           description: Updated cart after adding items
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Cart"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+                $ref: '#/components/schemas/Cart'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   /bff/cart/remove/{product_id}:
     delete:
@@ -632,20 +652,20 @@ paths:
       security:
         - cookieAuth: []
       parameters:
-        - $ref: "#/components/parameters/ProductIDString"
+        - $ref: '#/components/parameters/ProductIDString'
       responses:
-        "200":
+        '200':
           description: Updated cart after removing item
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Cart"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+                $ref: '#/components/schemas/Cart'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   /bff/cart/clear:
     delete:
@@ -657,12 +677,12 @@ paths:
       security:
         - cookieAuth: []
       responses:
-        "200":
-          $ref: "#/components/responses/MessageResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+        '200':
+          $ref: '#/components/responses/MessageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   /bff/cart/checkout:
     post:
@@ -682,26 +702,26 @@ paths:
       security:
         - cookieAuth: []
       parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
-        "200":
+        '200':
           description: Checkout initiated — order created and payment session ready
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CheckoutResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+                $ref: '#/components/schemas/CheckoutResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   /bff/checkout:
     post:
       tags:
         - BFF
-      summary: "(Deprecated) Initiate checkout — alias for POST /bff/cart/checkout"
+      summary: (Deprecated) Initiate checkout — alias for POST /bff/cart/checkout
       description: |
         Convenience alias for `POST /bff/cart/checkout`. Both routes invoke the same checkout
         logic. **Deprecated** — prefer `/bff/cart/checkout` for consistency.
@@ -710,20 +730,20 @@ paths:
       security:
         - cookieAuth: []
       parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
-        "200":
+        '200':
           description: Checkout initiated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CheckoutResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+                $ref: '#/components/schemas/CheckoutResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   /bff/orders:
     get:
@@ -737,19 +757,19 @@ paths:
       security:
         - cookieAuth: []
       parameters:
-        - $ref: "#/components/parameters/PageParam"
-        - $ref: "#/components/parameters/LimitParam"
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
       responses:
-        "200":
+        '200':
           description: Paginated order list
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/OrderListResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+                $ref: '#/components/schemas/OrderListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   /bff/orders/{id}:
     get:
@@ -764,20 +784,20 @@ paths:
       security:
         - cookieAuth: []
       parameters:
-        - $ref: "#/components/parameters/OrderID"
+        - $ref: '#/components/parameters/OrderID'
       responses:
-        "200":
+        '200':
           description: Full order detail
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/OrderDetailResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+                $ref: '#/components/schemas/OrderDetailResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   /bff/users/profile:
     put:
@@ -791,18 +811,18 @@ paths:
       security:
         - cookieAuth: []
       requestBody:
-        $ref: "#/components/requestBodies/UpdateProfileRequest"
+        $ref: '#/components/requestBodies/UpdateProfileRequest'
       responses:
-        "200":
+        '200':
           description: Profile updated successfully
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/UpdateProfileResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+                $ref: '#/components/schemas/UpdateProfileResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   /bff/users/change-password:
     post:
@@ -817,16 +837,16 @@ paths:
       security:
         - cookieAuth: []
       requestBody:
-        $ref: "#/components/requestBodies/ChangePasswordRequest"
+        $ref: '#/components/requestBodies/ChangePasswordRequest'
       responses:
-        "200":
-          $ref: "#/components/responses/MessageResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+        '200':
+          $ref: '#/components/responses/MessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   /bff/payment/status/by-order/{order_id}:
     get:
@@ -841,20 +861,20 @@ paths:
       security:
         - cookieAuth: []
       parameters:
-        - $ref: "#/components/parameters/OrderIDInPath"
+        - $ref: '#/components/parameters/OrderIDInPath'
       responses:
-        "200":
+        '200':
           description: Payment status
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PaymentStatusResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+                $ref: '#/components/schemas/PaymentStatusResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   /bff/promotions/validate:
     post:
@@ -872,20 +892,20 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ValidateCouponRequest"
+              $ref: '#/components/schemas/ValidateCouponRequest'
       responses:
-        "200":
+        '200':
           description: Validation result
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ValidateCouponResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+                $ref: '#/components/schemas/ValidateCouponResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   /bff/payment/verify-payment:
     post:
@@ -900,70 +920,73 @@ paths:
       security:
         - cookieAuth: []
       requestBody:
-        $ref: "#/components/requestBodies/VerifyPaymentRequest"
+        $ref: '#/components/requestBodies/VerifyPaymentRequest'
       responses:
-        "200":
+        '200':
           description: Verification result
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/VerifyPaymentResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "502":
-          $ref: "#/components/responses/BadGateway"
+                $ref: '#/components/schemas/VerifyPaymentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/BadGateway'
 
   # ── BFF Admin ───────────────────────────────────────────────────────────────
 
   /bff/admin/products:
     get:
+      operationId: getBffAdminProducts
       tags: [Admin]
       summary: List products (admin)
       description: Returns a paginated product list from product-service.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
-        - $ref: "#/components/parameters/AdminPageParam"
-        - $ref: "#/components/parameters/AdminPageSizeParam"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
+        - $ref: '#/components/parameters/AdminPageParam'
+        - $ref: '#/components/parameters/AdminPageSizeParam'
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
     post:
+      operationId: postBffAdminProducts
       tags: [Admin]
       summary: Create product (admin)
       description: Creates a product in product-service.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateProductJSONRequest"
+              $ref: '#/components/schemas/CreateProductJSONRequest'
       responses:
-        "201": { $ref: "#/components/responses/AdminCreatedResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '201': {$ref: '#/components/responses/AdminCreatedResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
 
   /bff/admin/products/presign:
     get:
+      operationId: getBffAdminProductsPresign
       tags: [Admin]
       summary: Get product image presign URL (admin)
       description: |
         Proxies the product-service presign endpoint for new-product image uploads. Use the
         returned `public_url` as the stable URL to persist later on the product record.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
         - name: sku
           in: query
           required: true
@@ -983,54 +1006,53 @@ paths:
             type: string
           example: image/jpeg
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
 
   /bff/admin/products/{id}:
     put:
+      operationId: putBffAdminProductsById
       tags: [Admin]
       summary: Update product (admin)
       description: |
         Updates a product by id in product-service. To attach uploaded images, send the stable
         `public_url` values in the `images` array.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
-        - $ref: "#/components/parameters/ProductID"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
+        - $ref: '#/components/parameters/ProductID'
       requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UpdateProductRequest"
+        $ref: '#/components/requestBodies/UpdateProductRequest'
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
     delete:
+      operationId: deleteBffAdminProductsById
       tags: [Admin]
       summary: Delete product (admin)
       description: Deletes a product by id in product-service.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
-        - $ref: "#/components/parameters/ProductID"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
+        - $ref: '#/components/parameters/ProductID'
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
 
   /bff/admin/products/{id}/images/presign:
     post:
+      operationId: postBffAdminProductsByIdImagesPresign
       tags: [Admin]
       summary: Get existing product image presign URL (admin)
       description: |
@@ -1038,10 +1060,10 @@ paths:
         persist the returned `public_url` with `PUT /bff/admin/products/{id}` by updating the
         `images` array.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
-        - $ref: "#/components/parameters/ProductID"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
+        - $ref: '#/components/parameters/ProductID'
         - name: filename
           in: query
           required: false
@@ -1055,165 +1077,173 @@ paths:
             type: string
           example: image/jpeg
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
 
   /bff/admin/categories:
     get:
+      operationId: getBffAdminCategories
       tags: [Admin]
       summary: List categories (admin)
       description: Returns categories from product-service.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
-        - $ref: "#/components/parameters/AdminPageParam"
-        - $ref: "#/components/parameters/AdminPageSizeParam"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
+        - $ref: '#/components/parameters/AdminPageParam'
+        - $ref: '#/components/parameters/AdminPageSizeParam'
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
     post:
+      operationId: postBffAdminCategories
       tags: [Admin]
       summary: Create category (admin)
       description: Creates category in product-service.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateCategoryRequest"
+              $ref: '#/components/schemas/CreateCategoryRequest'
       responses:
-        "201": { $ref: "#/components/responses/AdminCreatedResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '201': {$ref: '#/components/responses/AdminCreatedResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
 
   /bff/admin/categories/{id}:
     put:
+      operationId: putBffAdminCategoriesById
       tags: [Admin]
       summary: Update category (admin)
       description: Updates category by id in product-service.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
-        - $ref: "#/components/parameters/CategoryID"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
+        - $ref: '#/components/parameters/CategoryID'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateCategoryRequest"
+              $ref: '#/components/schemas/CreateCategoryRequest'
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
     delete:
+      operationId: deleteBffAdminCategoriesById
       tags: [Admin]
       summary: Delete category (admin)
       description: Deletes category by id in product-service.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
-        - $ref: "#/components/parameters/CategoryID"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
+        - $ref: '#/components/parameters/CategoryID'
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
 
   /bff/admin/categories/bulk:
     post:
+      operationId: postBffAdminCategoriesBulk
       tags: [Admin]
       summary: Bulk create categories (admin)
       description: |
         Creates multiple categories at once from a JSON payload. Handles ancestry resolution.
         Duplicate names are skipped.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/BulkCategoryCreateRequest"
+              $ref: '#/components/schemas/BulkCategoryCreateRequest'
       responses:
-        "201": { $ref: "#/components/responses/AdminCreatedResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '201': {$ref: '#/components/responses/AdminCreatedResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
 
   /bff/admin/promotions:
     get:
+      operationId: getBffAdminPromotions
       tags: [Admin]
       summary: List coupons (admin)
       description: Returns a paginated list of all coupons.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
-        - $ref: "#/components/parameters/AdminPageParam"
-        - $ref: "#/components/parameters/AdminPageSizeParam"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
+        - $ref: '#/components/parameters/AdminPageParam'
+        - $ref: '#/components/parameters/AdminPageSizeParam'
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
     post:
+      operationId: postBffAdminPromotions
       tags: [Admin]
       summary: Create coupon (admin)
       description: Creates a new promotional coupon.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateCouponRequest"
+              $ref: '#/components/schemas/CreateCouponRequest'
       responses:
-        "201": { $ref: "#/components/responses/AdminCreatedResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '201': {$ref: '#/components/responses/AdminCreatedResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
 
   /bff/admin/promotions/{code}:
     delete:
+      operationId: deleteBffAdminPromotionsByCode
       tags: [Admin]
       summary: Deactivate coupon (admin)
       description: Marks a coupon as inactive by its code.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
         - name: code
           in: path
           required: true
           schema:
             type: string
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
 
   /bff/admin/users:
     get:
@@ -1225,13 +1255,13 @@ paths:
         Passwords are never included in the response. Results are sorted by
         creation date descending (newest first). Requires admin role.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
-        - $ref: "#/components/parameters/AdminPageParam"
-        - $ref: "#/components/parameters/AdminPageSizeParam"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
+        - $ref: '#/components/parameters/AdminPageParam'
+        - $ref: '#/components/parameters/AdminPageSizeParam'
       responses:
-        "200":
+        '200':
           description: Paginated user list
           content:
             application/json:
@@ -1283,20 +1313,19 @@ paths:
                 success: true
                 data:
                   users:
-                    - id: "e3bc8bbb-aee3-445c-b51a-0b3edee3b613"
-                      email: "admin@example.com"
-                      name: "Admin User"
-                      role: "admin"
-                      phone_number: null
-                      created_at: "2026-03-10T01:46:38Z"
+                    - id: e3bc8bbb-aee3-445c-b51a-0b3edee3b613
+                      email: admin@example.com
+                      name: Admin User
+                      role: admin
+                      created_at: '2026-03-10T01:46:38Z'
                   meta:
                     page: 1
                     page_size: 20
                     total: 23
                     total_pages: 2
-                error: ""
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+                error: ''
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
     post:
       tags: [Admin]
       summary: Create user (admin)
@@ -1305,9 +1334,9 @@ paths:
         Creates a user through the auth-service admin flow.
         Requires admin role and supports creating either `user` or `admin` accounts.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
       requestBody:
         required: true
         content:
@@ -1329,27 +1358,28 @@ paths:
                   type: string
                   enum: [admin, user]
             example:
-              name: "Ops Admin"
-              email: "ops-admin@example.com"
-              password: "StrongPass#123"
-              role: "admin"
+              name: Ops Admin
+              email: ops-admin@example.com
+              password: StrongPass#123
+              role: admin
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
 
   /bff/admin/users/{id}/role:
     put:
+      operationId: putBffAdminUsersByIdRole
       tags: [Admin]
       summary: Update user role (admin)
       description: Updates user role through user-service.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
-        - $ref: "#/components/parameters/AdminIDParam"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
+        - $ref: '#/components/parameters/AdminIDParam'
       requestBody:
         required: true
         content:
@@ -1362,74 +1392,78 @@ paths:
                   type: string
                   enum: [admin, user]
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
 
   /bff/admin/users/{id}:
     delete:
+      operationId: deleteBffAdminUsersById
       tags: [Admin]
       summary: Delete user (admin)
       description: Deletes user by id through user-service.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
-        - $ref: "#/components/parameters/AdminIDParam"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
+        - $ref: '#/components/parameters/AdminIDParam'
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
 
   /bff/admin/orders:
     get:
+      operationId: getBffAdminOrders
       tags: [Admin]
       summary: List orders (admin)
       description: Returns paginated orders from order-service.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
-        - $ref: "#/components/parameters/AdminPageParam"
-        - $ref: "#/components/parameters/AdminPageSizeParam"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
+        - $ref: '#/components/parameters/AdminPageParam'
+        - $ref: '#/components/parameters/AdminPageSizeParam'
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
 
   /bff/admin/orders/{id}:
     get:
+      operationId: getBffAdminOrdersById
       tags: [Admin]
       summary: Get order by id (admin)
       description: Returns order details by id from order-service.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
-        - $ref: "#/components/parameters/OrderID"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
+        - $ref: '#/components/parameters/OrderID'
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
 
   /bff/admin/orders/{id}/status:
     put:
+      operationId: putBffAdminOrdersByIdStatus
       tags: [Admin]
       summary: Update order status (admin)
       description: Updates order status by id through order-service.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
-        - $ref: "#/components/parameters/OrderID"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
+        - $ref: '#/components/parameters/OrderID'
       requestBody:
         required: true
         content:
@@ -1441,11 +1475,11 @@ paths:
                 status:
                   type: string
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
 
   /bff/admin/inventory:
     get:
@@ -1457,13 +1491,13 @@ paths:
         Each record shows available stock, reserved count, and low-stock threshold.
         Requires admin role.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
-        - $ref: "#/components/parameters/AdminPageParam"
-        - $ref: "#/components/parameters/AdminPageSizeParam"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
+        - $ref: '#/components/parameters/AdminPageParam'
+        - $ref: '#/components/parameters/AdminPageSizeParam'
       responses:
-        "200":
+        '200':
           description: Paginated inventory list
           content:
             application/json:
@@ -1508,29 +1542,30 @@ paths:
                 success: true
                 data:
                   inventory:
-                    - product_id: "3979556c-2759-4aec-8bb0-5aa5ecde93dc"
+                    - product_id: 3979556c-2759-4aec-8bb0-5aa5ecde93dc
                       available: 150
                       reserved: 0
                       threshold: 0
-                      updated_at: "2026-03-11T00:12:29Z"
+                      updated_at: '2026-03-11T00:12:29Z'
                   meta:
                     page: 1
                     page_size: 20
                     count: 5
-                error: ""
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+                error: ''
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
 
   /bff/admin/inventory/{product_id}:
     put:
+      operationId: putBffAdminInventoryByProductId
       tags: [Admin]
       summary: Update inventory (admin)
       description: Updates inventory for a product in inventory-service.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
-        - $ref: "#/components/parameters/ProductIDString"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
+        - $ref: '#/components/parameters/ProductIDString'
       requestBody:
         required: true
         content:
@@ -1545,60 +1580,63 @@ paths:
                   type: integer
                   minimum: 0
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
 
   /bff/admin/coupons:
     get:
+      operationId: getBffAdminCoupons
       tags: [Admin]
       summary: List coupons (admin)
       description: Returns coupon list from promotion-service.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
-        - $ref: "#/components/parameters/AdminPageParam"
-        - $ref: "#/components/parameters/AdminPageSizeParam"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
+        - $ref: '#/components/parameters/AdminPageParam'
+        - $ref: '#/components/parameters/AdminPageSizeParam'
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
     post:
+      operationId: postBffAdminCoupons
       tags: [Admin]
       summary: Create coupon (admin)
       description: Creates a coupon in promotion-service.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateCouponRequest"
+              $ref: '#/components/schemas/CreateCouponRequest'
       responses:
-        "201": { $ref: "#/components/responses/AdminCreatedResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '201': {$ref: '#/components/responses/AdminCreatedResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
 
   /bff/admin/coupons/{id}:
     put:
+      operationId: putBffAdminCouponsById
       tags: [Admin]
       summary: Update coupon (admin)
       description: Updates coupon by id/code in promotion-service.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
-        - $ref: "#/components/parameters/AdminIDParam"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
+        - $ref: '#/components/parameters/AdminIDParam'
       requestBody:
         required: true
         content:
@@ -1607,108 +1645,114 @@ paths:
               type: object
               additionalProperties: true
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
     delete:
+      operationId: deleteBffAdminCouponsById
       tags: [Admin]
       summary: Delete coupon (admin)
       description: Deactivates/deletes coupon by id/code in promotion-service.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
-        - $ref: "#/components/parameters/AdminIDParam"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
+        - $ref: '#/components/parameters/AdminIDParam'
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
 
   /bff/admin/notifications:
     get:
-      tags: [Admin]
+      operationId: getBffAdminNotifications
+      tags: [Admin, Notification Service]
       summary: List notifications (admin)
       description: Returns notification entries from notification-service.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
-        - $ref: "#/components/parameters/AdminPageParam"
-        - $ref: "#/components/parameters/AdminPageSizeParam"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
+        - $ref: '#/components/parameters/AdminPageParam'
+        - $ref: '#/components/parameters/AdminPageSizeParam'
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
 
   /bff/admin/notifications/log:
     get:
-      tags: [Admin]
+      operationId: getBffAdminNotificationsLog
+      tags: [Admin, Notification Service]
       summary: Notification logs (admin)
       description: Returns notification dispatch logs from notification-service.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
 
   /bff/admin/reports/sales:
     get:
+      operationId: getBffAdminReportsSales
       tags: [Admin]
       summary: Sales analytics report (admin)
       description: Aggregates sales stats from order-service.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
 
   /bff/admin/reports/users:
     get:
+      operationId: getBffAdminReportsUsers
       tags: [Admin]
       summary: Users analytics report (admin)
       description: Aggregates user stats from user-service.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
 
   /bff/admin/reports/inventory:
     get:
+      operationId: getBffAdminReportsInventory
       tags: [Admin]
       summary: Inventory analytics report (admin)
       description: Aggregates inventory stats from inventory-service.
       parameters:
-        - $ref: "#/components/parameters/AdminAuthorizationHeader"
-        - $ref: "#/components/parameters/AdminUserIDHeader"
-        - $ref: "#/components/parameters/AdminUserRoleHeader"
+        - $ref: '#/components/parameters/AdminAuthorizationHeader'
+        - $ref: '#/components/parameters/AdminUserIDHeader'
+        - $ref: '#/components/parameters/AdminUserRoleHeader'
       responses:
-        "200": { $ref: "#/components/responses/AdminSuccessResponse" }
-        "400": { $ref: "#/components/responses/AdminBadRequestResponse" }
-        "403": { $ref: "#/components/responses/AdminForbiddenResponse" }
-        "404": { $ref: "#/components/responses/AdminNotFoundResponse" }
-        "500": { $ref: "#/components/responses/AdminInternalErrorResponse" }
+        '200': {$ref: '#/components/responses/AdminSuccessResponse'}
+        '400': {$ref: '#/components/responses/AdminBadRequestResponse'}
+        '403': {$ref: '#/components/responses/AdminForbiddenResponse'}
+        '404': {$ref: '#/components/responses/AdminNotFoundResponse'}
+        '500': {$ref: '#/components/responses/AdminInternalErrorResponse'}
 
   # ── Auth Service ─────────────────────────────────────────────────────────────
 
@@ -1725,14 +1769,14 @@ paths:
       operationId: authRegister
       security: []
       requestBody:
-        $ref: "#/components/requestBodies/RegisterRequest"
+        $ref: '#/components/requestBodies/RegisterRequest'
       responses:
-        "201":
-          $ref: "#/components/responses/MessageResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "409":
-          $ref: "#/components/responses/Conflict"
+        '201':
+          $ref: '#/components/responses/MessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /auth/login:
     post:
@@ -1746,14 +1790,21 @@ paths:
       operationId: authLogin
       security: []
       requestBody:
-        $ref: "#/components/requestBodies/LoginRequest"
+        $ref: '#/components/requestBodies/LoginRequest'
       responses:
-        "200":
-          $ref: "#/components/responses/MessageResponse"
+        '200':
+          description: Generic success message
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Operation completed successfully.
+
           headers:
             Set-Cookie: *authCookieHeader
-        "401":
-          $ref: "#/components/responses/Unauthorized"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /auth/logout:
     post:
@@ -1765,8 +1816,8 @@ paths:
       operationId: authLogout
       security: []
       responses:
-        "200":
-          $ref: "#/components/responses/MessageResponse"
+        '200':
+          $ref: '#/components/responses/MessageResponse'
 
   /auth/refresh:
     post:
@@ -1780,12 +1831,19 @@ paths:
       operationId: authRefreshToken
       security: []
       responses:
-        "200":
-          $ref: "#/components/responses/MessageResponse"
+        '200':
+          description: Generic success message
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Operation completed successfully.
+
           headers:
             Set-Cookie: *authCookieHeader
-        "401":
-          $ref: "#/components/responses/Unauthorized"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /auth/status:
     get:
@@ -1800,14 +1858,14 @@ paths:
       security:
         - cookieAuth: []
       responses:
-        "200":
+        '200':
           description: Authentication status
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AuthStatusResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
+                $ref: '#/components/schemas/AuthStatusResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /auth/verify-email:
     post:
@@ -1819,14 +1877,14 @@ paths:
       operationId: authVerifyEmail
       security: []
       requestBody:
-        $ref: "#/components/requestBodies/VerifyEmailRequest"
+        $ref: '#/components/requestBodies/VerifyEmailRequest'
       responses:
-        "200":
-          $ref: "#/components/responses/MessageResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
+        '200':
+          $ref: '#/components/responses/MessageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   # ── User Service ─────────────────────────────────────────────────────────────
 
@@ -1843,14 +1901,14 @@ paths:
       security:
         - cookieAuth: []
       responses:
-        "200":
+        '200':
           description: User profile
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/UserProfileResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
+                $ref: '#/components/schemas/UserProfileResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
     put:
       tags:
         - Gateway
@@ -1861,16 +1919,16 @@ paths:
       security:
         - cookieAuth: []
       requestBody:
-        $ref: "#/components/requestBodies/UpdateProfileRequest"
+        $ref: '#/components/requestBodies/UpdateProfileRequest'
       responses:
-        "200":
+        '200':
           description: Updated profile
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/UpdateProfileResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
+                $ref: '#/components/schemas/UpdateProfileResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /users/change-password:
     post:
@@ -1885,14 +1943,14 @@ paths:
       security:
         - cookieAuth: []
       requestBody:
-        $ref: "#/components/requestBodies/ChangePasswordRequest"
+        $ref: '#/components/requestBodies/ChangePasswordRequest'
       responses:
-        "200":
-          $ref: "#/components/responses/MessageResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
+        '200':
+          $ref: '#/components/responses/MessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   # ── Product Service ──────────────────────────────────────────────────────────
 
@@ -1906,20 +1964,20 @@ paths:
       operationId: listProducts
       security: []
       parameters:
-        - $ref: "#/components/parameters/PageParam"
-        - $ref: "#/components/parameters/PerPageParam"
-        - $ref: "#/components/parameters/IsFeaturedParam"
-        - $ref: "#/components/parameters/CategoryIDsParam"
-        - $ref: "#/components/parameters/MinPriceParam"
-        - $ref: "#/components/parameters/MaxPriceParam"
-        - $ref: "#/components/parameters/SortParam"
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PerPageParam'
+        - $ref: '#/components/parameters/IsFeaturedParam'
+        - $ref: '#/components/parameters/CategoryIDsParam'
+        - $ref: '#/components/parameters/MinPriceParam'
+        - $ref: '#/components/parameters/MaxPriceParam'
+        - $ref: '#/components/parameters/SortParam'
       responses:
-        "200":
+        '200':
           description: Paginated product list
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ProductListResponse"
+                $ref: '#/components/schemas/ProductListResponse'
     post:
       tags:
         - Gateway
@@ -1935,20 +1993,20 @@ paths:
         - cookieAuth:
             - admin
       requestBody:
-        $ref: "#/components/requestBodies/CreateProductJSONRequest"
+        $ref: '#/components/requestBodies/CreateProductJSONRequest'
       responses:
-        "201":
+        '201':
           description: Product created successfully
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Product"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
+                $ref: '#/components/schemas/Product'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /products/{id}:
     get:
@@ -1962,16 +2020,16 @@ paths:
       operationId: getProduct
       security: []
       parameters:
-        - $ref: "#/components/parameters/ProductID"
+        - $ref: '#/components/parameters/ProductID'
       responses:
-        "200":
+        '200':
           description: Product details
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Product"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/Product'
+        '404':
+          $ref: '#/components/responses/NotFound'
     put:
       tags:
         - Gateway
@@ -1986,18 +2044,18 @@ paths:
         - cookieAuth:
             - admin
       parameters:
-        - $ref: "#/components/parameters/ProductID"
+        - $ref: '#/components/parameters/ProductID'
       requestBody:
-        $ref: "#/components/requestBodies/UpdateProductRequest"
+        $ref: '#/components/requestBodies/UpdateProductRequest'
       responses:
-        "200":
-          $ref: "#/components/responses/MessageResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
+        '200':
+          $ref: '#/components/responses/MessageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
     delete:
       tags:
         - Gateway
@@ -2013,16 +2071,16 @@ paths:
         - cookieAuth:
             - admin
       parameters:
-        - $ref: "#/components/parameters/ProductID"
+        - $ref: '#/components/parameters/ProductID'
       responses:
-        "200":
-          $ref: "#/components/responses/MessageResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
+        '200':
+          $ref: '#/components/responses/MessageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /products/presign:
     get:
@@ -2050,7 +2108,7 @@ paths:
             type: string
           example: WIDGET-001
       responses:
-        "200":
+        '200':
           description: Presigned upload URL and form fields
           content:
             application/json:
@@ -2060,7 +2118,7 @@ paths:
                   upload_url:
                     type: string
                     description: The presigned S3 PUT URL.
-                    example: "https://s3.amazonaws.com/bucket/..."
+                    example: https://s3.amazonaws.com/bucket/...
                   method:
                     type: string
                     example: PUT
@@ -2070,14 +2128,14 @@ paths:
                   public_url:
                     type: string
                     description: Stable browser-facing URL to store on the product after upload.
-                    example: "http://localhost:4566/shopswift/products/product_img_WIDGET-001_9b5d0c2e.jpg"
+                    example: http://localhost:4566/shopswift/products/product_img_WIDGET-001_9b5d0c2e.jpg
                   expires_in:
                     type: integer
                     example: 900
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /products/{id}/images/presign:
     post:
@@ -2095,7 +2153,7 @@ paths:
         - cookieAuth:
             - admin
       parameters:
-        - $ref: "#/components/parameters/ProductID"
+        - $ref: '#/components/parameters/ProductID'
       requestBody:
         content:
           application/json:
@@ -2109,7 +2167,7 @@ paths:
                   description: Original filename (used to derive the S3 object key and content type).
                   example: front-view.jpg
       responses:
-        "200":
+        '200':
           description: Presigned upload URL
           content:
             application/json:
@@ -2118,7 +2176,7 @@ paths:
                 properties:
                   upload_url:
                     type: string
-                    example: "https://s3.amazonaws.com/bucket/products/..."
+                    example: https://s3.amazonaws.com/bucket/products/...
                   method:
                     type: string
                     example: PUT
@@ -2127,16 +2185,16 @@ paths:
                     example: products/product/7d8f0fdd-b124-4ad8-8f12-7caea5c2d441/front-view.jpg
                   public_url:
                     type: string
-                    example: "http://localhost:4566/shopswift/products/product/7d8f0fdd-b124-4ad8-8f12-7caea5c2d441/front-view.jpg"
+                    example: http://localhost:4566/shopswift/products/product/7d8f0fdd-b124-4ad8-8f12-7caea5c2d441/front-view.jpg
                   expires_in:
                     type: integer
                     example: 900
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /products/bulk/validate:
     post:
@@ -2155,20 +2213,20 @@ paths:
         - cookieAuth:
             - admin
       requestBody:
-        $ref: "#/components/requestBodies/BulkValidateRequest"
+        $ref: '#/components/requestBodies/BulkValidateRequest'
       responses:
-        "200":
+        '200':
           description: Dry-run validation results
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BulkImportValidation"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
+                $ref: '#/components/schemas/BulkImportValidation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /products/bulk:
     post:
@@ -2187,20 +2245,20 @@ paths:
         - cookieAuth:
             - admin
       requestBody:
-        $ref: "#/components/requestBodies/BulkImportRequest"
+        $ref: '#/components/requestBodies/BulkImportRequest'
       responses:
-        "202":
+        '202':
           description: Bulk import job queued — poll `GET /products/bulk/jobs/{id}` for status
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BulkImportResult"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
+                $ref: '#/components/schemas/BulkImportResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /products/bulk/jobs/{id}:
     get:
@@ -2224,18 +2282,18 @@ paths:
           schema:
             type: string
       responses:
-        "200":
+        '200':
           description: Bulk import job result
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BulkImportResult"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/BulkImportResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /products/bulk/delete:
     post:
@@ -2257,9 +2315,9 @@ paths:
         - cookieAuth:
             - admin
       requestBody:
-        $ref: "#/components/requestBodies/BulkDeleteRequest"
+        $ref: '#/components/requestBodies/BulkDeleteRequest'
       responses:
-        "200":
+        '200':
           description: Number of deleted products
           content:
             application/json:
@@ -2269,18 +2327,18 @@ paths:
                   deleted_count:
                     type: integer
                     example: 42
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /products/internal/{id}:
     get:
       tags:
         - Product Service
-      summary: "Internal — fetch product DTO by ID (service-to-service only)"
+      summary: Internal — fetch product DTO by ID (service-to-service only)
       description: |
         **Internal endpoint.** Used by other microservices (e.g. Cart, Order) for
         service-to-service product lookups. Not exposed through the public API Gateway. Do
@@ -2288,16 +2346,16 @@ paths:
         level (not via JWT).
       operationId: internalGetProduct
       parameters:
-        - $ref: "#/components/parameters/ProductID"
+        - $ref: '#/components/parameters/ProductID'
       responses:
-        "200":
+        '200':
           description: Product DTO
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Product"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/Product'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   # ── Categories ──────────────────────────────────────────────────────────────
 
@@ -2311,12 +2369,12 @@ paths:
       operationId: listCategories
       security: []
       responses:
-        "200":
+        '200':
           description: Nested category tree
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CategoryListResponse"
+                $ref: '#/components/schemas/CategoryListResponse'
     post:
       tags:
         - Gateway
@@ -2331,20 +2389,20 @@ paths:
         - cookieAuth:
             - admin
       requestBody:
-        $ref: "#/components/requestBodies/CreateCategoryRequest"
+        $ref: '#/components/requestBodies/CreateCategoryRequest'
       responses:
-        "201":
+        '201':
           description: Category created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Category"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
+                $ref: '#/components/schemas/Category'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /categories/{id}:
     put:
@@ -2361,18 +2419,18 @@ paths:
         - cookieAuth:
             - admin
       parameters:
-        - $ref: "#/components/parameters/CategoryID"
+        - $ref: '#/components/parameters/CategoryID'
       requestBody:
-        $ref: "#/components/requestBodies/CreateCategoryRequest"
+        $ref: '#/components/requestBodies/CreateCategoryRequest'
       responses:
-        "200":
-          $ref: "#/components/responses/MessageResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
+        '200':
+          $ref: '#/components/responses/MessageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
     delete:
       tags:
         - Gateway
@@ -2387,16 +2445,16 @@ paths:
         - cookieAuth:
             - admin
       parameters:
-        - $ref: "#/components/parameters/CategoryID"
+        - $ref: '#/components/parameters/CategoryID'
       responses:
-        "200":
-          $ref: "#/components/responses/MessageResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
+        '200':
+          $ref: '#/components/responses/MessageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   # ── Cart Service ─────────────────────────────────────────────────────────────
 
@@ -2411,14 +2469,14 @@ paths:
       security:
         - cookieAuth: []
       responses:
-        "200":
+        '200':
           description: Current cart
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Cart"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
+                $ref: '#/components/schemas/Cart'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /cart/add:
     post:
@@ -2433,20 +2491,20 @@ paths:
       security:
         - cookieAuth: []
       parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
-        $ref: "#/components/requestBodies/AddItemsRequest"
+        $ref: '#/components/requestBodies/AddItemsRequest'
       responses:
-        "200":
+        '200':
           description: Updated cart
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Cart"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
+                $ref: '#/components/schemas/Cart'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /cart/remove/{product_id}:
     delete:
@@ -2459,18 +2517,18 @@ paths:
       security:
         - cookieAuth: []
       parameters:
-        - $ref: "#/components/parameters/ProductIDString"
+        - $ref: '#/components/parameters/ProductIDString'
       responses:
-        "200":
+        '200':
           description: Updated cart
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Cart"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/Cart'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /cart/clear:
     delete:
@@ -2483,10 +2541,10 @@ paths:
       security:
         - cookieAuth: []
       responses:
-        "200":
-          $ref: "#/components/responses/MessageResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
+        '200':
+          $ref: '#/components/responses/MessageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /cart/checkout:
     post:
@@ -2503,18 +2561,18 @@ paths:
       security:
         - cookieAuth: []
       parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
-        "200":
+        '200':
           description: Checkout initiated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CheckoutResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/CheckoutResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   # ── Order Service ─────────────────────────────────────────────────────────────
 
@@ -2531,17 +2589,17 @@ paths:
       security:
         - cookieAuth: []
       parameters:
-        - $ref: "#/components/parameters/PageParam"
-        - $ref: "#/components/parameters/LimitParam"
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
       responses:
-        "200":
+        '200':
           description: Paginated order list
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/OrderListResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
+                $ref: '#/components/schemas/OrderListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
     post:
       tags:
         - Gateway
@@ -2554,12 +2612,12 @@ paths:
       security:
         - cookieAuth: []
       requestBody:
-        $ref: "#/components/requestBodies/CreateOrderRequest"
+        $ref: '#/components/requestBodies/CreateOrderRequest'
       responses:
-        "202":
-          $ref: "#/components/responses/AcceptedResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
+        '202':
+          $ref: '#/components/responses/AcceptedResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /orders/admin:
     get:
@@ -2579,19 +2637,19 @@ paths:
         - cookieAuth:
             - admin
       parameters:
-        - $ref: "#/components/parameters/PageParam"
-        - $ref: "#/components/parameters/LimitParam"
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
       responses:
-        "200":
+        '200':
           description: All orders (paginated)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/OrderListResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
+                $ref: '#/components/schemas/OrderListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /orders/{id}:
     get:
@@ -2607,18 +2665,18 @@ paths:
       security:
         - cookieAuth: []
       parameters:
-        - $ref: "#/components/parameters/OrderID"
+        - $ref: '#/components/parameters/OrderID'
       responses:
-        "200":
+        '200':
           description: Full order detail
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/OrderDetailResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/OrderDetailResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   # ── Payment Service ──────────────────────────────────────────────────────────
 
@@ -2636,18 +2694,18 @@ paths:
       security:
         - cookieAuth: []
       parameters:
-        - $ref: "#/components/parameters/OrderIDInPath"
+        - $ref: '#/components/parameters/OrderIDInPath'
       responses:
-        "200":
+        '200':
           description: Payment status
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PaymentStatusResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/PaymentStatusResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /payment/verify-payment:
     post:
@@ -2663,18 +2721,18 @@ paths:
       security:
         - cookieAuth: []
       requestBody:
-        $ref: "#/components/requestBodies/VerifyPaymentRequest"
+        $ref: '#/components/requestBodies/VerifyPaymentRequest'
       responses:
-        "200":
+        '200':
           description: Verification result
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/VerifyPaymentResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
+                $ref: '#/components/schemas/VerifyPaymentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /stripe/webhook:
     post:
@@ -2702,7 +2760,7 @@ paths:
             missing or invalid signature should be rejected with `400`.
           schema:
             type: string
-          example: "t=1714000000,v1=abc123..."
+          example: t=1714000000,v1=abc123...
       requestBody:
         description: Raw Stripe webhook event payload
         required: true
@@ -2712,10 +2770,10 @@ paths:
               type: object
               description: Stripe event object. See Stripe documentation for full schema.
       responses:
-        "200":
-          $ref: "#/components/responses/MessageResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
+        '200':
+          $ref: '#/components/responses/MessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
 
   # ── Inventory Service ────────────────────────────────────────────────────────
 
@@ -2742,18 +2800,18 @@ paths:
             type: string
             format: uuid
       responses:
-        "200":
+        '200':
           description: Current stock level
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/StockResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/StockResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
     put:
       tags:
         - Inventory Service
@@ -2779,18 +2837,18 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/StockRequest"
+              $ref: '#/components/schemas/StockRequest'
       responses:
-        "200":
-          $ref: "#/components/responses/MessageResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
+        '200':
+          $ref: '#/components/responses/MessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /inventory:
     post:
@@ -2810,16 +2868,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/StockRequest"
+              $ref: '#/components/schemas/StockRequest'
       responses:
-        "200":
-          $ref: "#/components/responses/MessageResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
+        '200':
+          $ref: '#/components/responses/MessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /inventory/check:
     post:
@@ -2837,16 +2895,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/InventoryCheckRequest"
+              $ref: '#/components/schemas/InventoryCheckRequest'
       responses:
-        "200":
+        '200':
           description: Per-item availability results
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/InventoryCheckResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
+                $ref: '#/components/schemas/InventoryCheckResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
 
   /inventory/reserve:
     post:
@@ -2870,14 +2928,19 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ReserveRequest"
+              $ref: '#/components/schemas/ReserveRequest'
+            example:
+              order_id: 564cdce0-22b9-4afc-b4f3-7babafd2c726
+              items:
+                - product_id: 00000000-0000-4000-8000-000000000001
+                  quantity: 1
       responses:
-        "200":
-          $ref: "#/components/responses/MessageResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "409":
-          $ref: "#/components/responses/Conflict"
+        '200':
+          $ref: '#/components/responses/MessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /inventory/release:
     post:
@@ -2897,14 +2960,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ReleaseRequest"
+              $ref: '#/components/schemas/ReleaseRequest'
       responses:
-        "200":
-          $ref: "#/components/responses/MessageResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "404":
-          $ref: "#/components/responses/NotFound"
+        '200':
+          $ref: '#/components/responses/MessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /inventory/confirm:
     post:
@@ -2925,14 +2988,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ConfirmRequest"
+              $ref: '#/components/schemas/ConfirmRequest'
       responses:
-        "200":
-          $ref: "#/components/responses/MessageResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "404":
-          $ref: "#/components/responses/NotFound"
+        '200':
+          $ref: '#/components/responses/MessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   # ── Promotion Service ────────────────────────────────────────────────────────
 
@@ -2942,7 +3005,7 @@ paths:
         - Promotion Service
         - Admin Only
       summary: 🔐 Create a coupon
-      description: "**Admin only.** Creates a new discount coupon."
+      description: '**Admin only.** Creates a new discount coupon.'
       operationId: createCoupon
       security:
         - cookieAuth:
@@ -2952,9 +3015,9 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateCouponRequest"
+              $ref: '#/components/schemas/CreateCouponRequest'
       responses:
-        "201":
+        '201':
           description: Coupon created
           content:
             application/json:
@@ -2962,25 +3025,25 @@ paths:
                 type: object
                 properties:
                   coupon:
-                    $ref: "#/components/schemas/Coupon"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "409":
+                    $ref: '#/components/schemas/Coupon'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
           description: Coupon code already exists
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: '#/components/schemas/ErrorResponse'
     get:
       tags:
         - Promotion Service
         - Admin Only
       summary: 🔐 List all coupons
-      description: "**Admin only.** Returns a paginated list of all coupons."
+      description: '**Admin only.** Returns a paginated list of all coupons.'
       operationId: listCoupons
       security:
         - cookieAuth:
@@ -2998,7 +3061,7 @@ paths:
             default: 10
             maximum: 100
       responses:
-        "200":
+        '200':
           description: Coupon list
           content:
             application/json:
@@ -3008,13 +3071,13 @@ paths:
                   coupons:
                     type: array
                     items:
-                      $ref: "#/components/schemas/Coupon"
+                      $ref: '#/components/schemas/Coupon'
                   meta:
-                    $ref: "#/components/schemas/PaginationMeta"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
+                    $ref: '#/components/schemas/PaginationMeta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /coupons/validate:
     post:
@@ -3033,18 +3096,18 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ValidateCouponRequest"
+              $ref: '#/components/schemas/ValidateCouponRequest'
       responses:
-        "200":
+        '200':
           description: Validation result (valid or invalid with reason)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ValidateCouponResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
+                $ref: '#/components/schemas/ValidateCouponResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /coupons/{code}:
     get:
@@ -3063,7 +3126,7 @@ paths:
             type: string
           example: SAVE10
       responses:
-        "200":
+        '200':
           description: Coupon details
           content:
             application/json:
@@ -3071,17 +3134,17 @@ paths:
                 type: object
                 properties:
                   coupon:
-                    $ref: "#/components/schemas/Coupon"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                    $ref: '#/components/schemas/Coupon'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
     delete:
       tags:
         - Promotion Service
         - Admin Only
       summary: 🔐 Deactivate a coupon
-      description: "**Admin only.** Soft-deactivates a coupon. The coupon record is retained for audit purposes."
+      description: '**Admin only.** Soft-deactivates a coupon. The coupon record is retained for audit purposes.'
       operationId: deactivateCoupon
       security:
         - cookieAuth:
@@ -3094,7 +3157,7 @@ paths:
             type: string
           example: SAVE10
       responses:
-        "200":
+        '200':
           description: Coupon deactivated
           content:
             application/json:
@@ -3104,12 +3167,12 @@ paths:
                   message:
                     type: string
                     example: Coupon deactivated
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   # ── Shipping Service ─────────────────────────────────────────────────────────
 
@@ -3131,9 +3194,9 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ShippingRatesRequest"
+              $ref: '#/components/schemas/ShippingRatesRequest'
       responses:
-        "200":
+        '200':
           description: List of available rates
           content:
             application/json:
@@ -3143,21 +3206,21 @@ paths:
                   rates:
                     type: array
                     items:
-                      $ref: "#/components/schemas/ShippingRate"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
+                      $ref: '#/components/schemas/ShippingRate'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
           description: No rates available
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "500":
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
           description: Shipping rate configuration error
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: '#/components/schemas/ErrorResponse'
 
 # ── Components ────────────────────────────────────────────────────────────────
 
@@ -3393,63 +3456,63 @@ components:
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/LoginRequest"
+            $ref: '#/components/schemas/LoginRequest'
 
     RegisterRequest:
       required: true
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/RegisterRequest"
+            $ref: '#/components/schemas/RegisterRequest'
 
     VerifyEmailRequest:
       required: true
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/VerifyEmailRequest"
+            $ref: '#/components/schemas/VerifyEmailRequest'
 
     UpdateProfileRequest:
       required: true
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/UpdateProfileRequest"
+            $ref: '#/components/schemas/UpdateProfileRequest'
 
     ChangePasswordRequest:
       required: true
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ChangePasswordRequest"
+            $ref: '#/components/schemas/ChangePasswordRequest'
 
     AddItemsRequest:
       required: true
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/AddItemsRequest"
+            $ref: '#/components/schemas/AddItemsRequest'
 
     CreateOrderRequest:
       required: true
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/CreateOrderRequest"
+            $ref: '#/components/schemas/CreateOrderRequest'
 
     VerifyPaymentRequest:
       required: true
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/VerifyPaymentRequest"
+            $ref: '#/components/schemas/VerifyPaymentRequest'
 
     CreateProductJSONRequest:
       required: true
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/CreateProductJSONRequest"
+            $ref: '#/components/schemas/CreateProductJSONRequest'
 
     UpdateProductRequest:
       required: true
@@ -3473,14 +3536,14 @@ components:
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/BulkDeleteRequest"
+            $ref: '#/components/schemas/BulkDeleteRequest'
 
     CreateCategoryRequest:
       required: true
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/CreateCategoryRequest"
+            $ref: '#/components/schemas/CreateCategoryRequest'
 
     BulkValidateRequest:
       required: true
@@ -3523,7 +3586,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/MessageResponse"
+            $ref: '#/components/schemas/MessageResponse'
           example:
             message: Operation completed successfully.
 
@@ -3532,20 +3595,21 @@ components:
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/MessageResponse"
+            $ref: '#/components/schemas/MessageResponse'
           example:
             message: Order accepted and is being processed.
 
     BadRequest:
-      description: "Bad request — the request body or parameters failed validation."
+      description: Bad request — the request body or parameters failed validation.
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorResponse"
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             error: Bad Request
-            details: "Field 'email' must be a valid email address."
+            details: Field 'email' must be a valid email address.
 
+      x-retryable: false
     Unauthorized:
       description: |
         Unauthorized — no valid `access_token` cookie present, or the token has expired.
@@ -3553,102 +3617,108 @@ components:
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorResponse"
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             error: Unauthorized
             details: Access token is missing or has expired.
 
+      x-retryable: false
     Forbidden:
-      description: "Forbidden — the authenticated user does not have the required role (`admin`) to access this endpoint."
+      description: Forbidden — the authenticated user does not have the required role (`admin`) to access this endpoint.
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorResponse"
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             error: Forbidden
             details: This endpoint requires the admin role.
 
+      x-retryable: false
     NotFound:
       description: Resource not found.
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorResponse"
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             error: Not Found
             details: The requested resource could not be found.
 
+      x-retryable: false
     Conflict:
-      description: "Conflict — the request could not be completed due to a conflict with the current state (e.g. duplicate email on registration)."
+      description: Conflict — the request could not be completed due to a conflict with the current state (e.g. duplicate email on registration).
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorResponse"
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             error: Conflict
             details: A user with this email address already exists.
 
+      x-retryable: true
     BadGateway:
-      description: "Bad Gateway — the BFF or Gateway received an invalid response from an upstream microservice. This typically indicates the downstream service is unavailable or returned an unexpected error."
+      description: Bad Gateway — the BFF or Gateway received an invalid response from an upstream microservice. This typically indicates the downstream service is unavailable or returned an unexpected error.
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorResponse"
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             error: Bad Gateway
             details: Upstream service is temporarily unavailable.
 
+      x-retryable: true
     InternalServerError:
       description: Internal server error.
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorResponse"
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             error: Internal Server Error
             details: Unexpected error while processing the request.
 
+      x-retryable: true
     AdminSuccessResponse:
       description: Standard successful admin response.
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/AdminStandardResponse"
+            $ref: '#/components/schemas/AdminStandardResponse'
 
     AdminCreatedResponse:
       description: Standard created admin response.
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/AdminStandardResponse"
+            $ref: '#/components/schemas/AdminStandardResponse'
 
     AdminBadRequestResponse:
       description: Standard admin bad request response.
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/AdminStandardResponse"
+            $ref: '#/components/schemas/AdminStandardResponse'
 
     AdminForbiddenResponse:
       description: Standard admin forbidden response.
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/AdminStandardResponse"
+            $ref: '#/components/schemas/AdminStandardResponse'
 
     AdminNotFoundResponse:
       description: Standard admin not found response.
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/AdminStandardResponse"
+            $ref: '#/components/schemas/AdminStandardResponse'
 
     AdminInternalErrorResponse:
       description: Standard admin internal error response.
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/AdminStandardResponse"
+            $ref: '#/components/schemas/AdminStandardResponse'
 
   schemas:
     # ── Shared / Common ────────────────────────────────────────────────────────
@@ -3741,14 +3811,14 @@ components:
         data:
           nullable: true
           description: Raw tool payload (shape varies by tool).
+          type: object
         error:
           type: string
           nullable: true
-          example: null
         summary:
           type: string
           nullable: true
-          example: "Total orders in the last 15 days: 6."
+          example: 'Total orders in the last 15 days: 6.'
 
     AgentResponse:
       type: object
@@ -3762,7 +3832,7 @@ components:
         tool_results:
           type: array
           items:
-            $ref: "#/components/schemas/AgentToolResult"
+            $ref: '#/components/schemas/AgentToolResult'
         tools_called:
           type: array
           items:
@@ -3778,7 +3848,6 @@ components:
         error:
           type: string
           nullable: true
-          example: null
 
     AgentSessionInspectResponse:
       type: object
@@ -3818,7 +3887,7 @@ components:
         tools:
           type: object
           additionalProperties:
-            $ref: "#/components/schemas/ToolRegistryItem"
+            $ref: '#/components/schemas/ToolRegistryItem'
 
     AdminMeta:
       type: object
@@ -3846,11 +3915,12 @@ components:
           example: true
         data:
           nullable: true
+          type: object
         error:
           type: string
-          example: ""
+          example: ''
         meta:
-          $ref: "#/components/schemas/AdminMeta"
+          $ref: '#/components/schemas/AdminMeta'
 
     # ── Auth ───────────────────────────────────────────────────────────────────
 
@@ -3913,7 +3983,7 @@ components:
         code:
           type: string
           description: One-time verification code sent to the user's email.
-          example: "847291"
+          example: '847291'
 
     AuthStatusResponse:
       type: object
@@ -3943,7 +4013,7 @@ components:
         timestamp:
           type: string
           format: date-time
-          example: "2026-02-25T10:00:00Z"
+          example: '2026-02-25T10:00:00Z'
 
     # ── User ───────────────────────────────────────────────────────────────────
 
@@ -3965,11 +4035,11 @@ components:
         phone_number:
           type: string
           nullable: true
-          example: "+447911123456"
+          example: '+447911123456'
         created_at:
           type: string
           format: date-time
-          example: "2025-01-15T08:30:00Z"
+          example: '2025-01-15T08:30:00Z'
         role:
           type: string
           enum:
@@ -3986,7 +4056,7 @@ components:
           example: Jane Smith
         phone_number:
           type: string
-          example: "+447911123456"
+          example: '+447911123456'
 
     UpdateProfileResponse:
       type: object
@@ -4007,7 +4077,7 @@ components:
             phone_number:
               type: string
               nullable: true
-              example: "+447911123456"
+              example: '+447911123456'
 
     ChangePasswordRequest:
       type: object
@@ -4025,7 +4095,7 @@ components:
           format: password
           minLength: 8
           description: The desired new password.
-          example: "N3wS3cur3P@ss!"
+          example: N3wS3cur3P@ss!
 
     # ── Product ────────────────────────────────────────────────────────────────
 
@@ -4081,7 +4151,7 @@ components:
             - 9c2a1c4b-8c5c-4a59-8f1b-1a2b3c4d5e6f
         category_path:
           type: array
-          description: 'Human-readable category breadcrumb (e.g. ["Electronics", "Peripherals"]).'
+          description: Human-readable category breadcrumb (e.g. ["Electronics", "Peripherals"]).
           items:
             type: string
           example:
@@ -4095,11 +4165,11 @@ components:
         created_at:
           type: string
           format: date-time
-          example: "2025-03-01T12:00:00Z"
+          example: '2025-03-01T12:00:00Z'
         updated_at:
           type: string
           format: date-time
-          example: "2026-01-10T09:15:00Z"
+          example: '2026-01-10T09:15:00Z'
 
     ProductListResponse:
       type: object
@@ -4108,7 +4178,7 @@ components:
         products:
           type: array
           items:
-            $ref: "#/components/schemas/Product"
+            $ref: '#/components/schemas/Product'
         meta:
           type: object
           description: Pagination metadata.
@@ -4226,22 +4296,22 @@ components:
         created_at:
           type: string
           format: date-time
-          example: "2025-01-01T00:00:00Z"
+          example: '2025-01-01T00:00:00Z'
         updated_at:
           type: string
           format: date-time
-          example: "2025-06-15T10:30:00Z"
+          example: '2025-06-15T10:30:00Z'
         children:
           type: array
           description: Direct child categories (nested tree structure).
           items:
-            $ref: "#/components/schemas/Category"
+            $ref: '#/components/schemas/Category'
 
     CategoryListResponse:
       type: array
       description: Array of root-level categories, each with nested `children`.
       items:
-        $ref: "#/components/schemas/Category"
+        $ref: '#/components/schemas/Category'
 
     CreateCategoryRequest:
       type: object
@@ -4316,18 +4386,18 @@ components:
           type: array
           description: Current items in the cart. Empty array if the cart is empty.
           items:
-            $ref: "#/components/schemas/CartItem"
+            $ref: '#/components/schemas/CartItem'
         updated_at:
           type: string
           format: date-time
           description: Timestamp of the last cart modification.
-          example: "2026-02-24T12:34:56Z"
+          example: '2026-02-24T12:34:56Z'
       example:
         user_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
         items:
           - product_id: 8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1
             quantity: 2
-        updated_at: "2026-02-24T12:34:56Z"
+        updated_at: '2026-02-24T12:34:56Z'
 
     AddItemsRequest:
       type: object
@@ -4339,7 +4409,7 @@ components:
           type: array
           minItems: 1
           items:
-            $ref: "#/components/schemas/CartItem"
+            $ref: '#/components/schemas/CartItem'
       example:
         items:
           - product_id: 8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1
@@ -4375,7 +4445,7 @@ components:
           description: |
             URL to Stripe's hosted checkout page. Redirect the user here to complete payment.
             May be `null` if the payment session is still being created asynchronously.
-          example: "https://checkout.stripe.com/pay/cs_test_XXXXXXXXXXXXXXXX"
+          example: https://checkout.stripe.com/pay/cs_test_XXXXXXXXXXXXXXXX
 
     CreateOrderRequest:
       type: object
@@ -4471,24 +4541,22 @@ components:
           type: string
           format: date-time
           nullable: true
-          example: null
         completed_at:
           type: string
           format: date-time
           nullable: true
-          example: null
         created_at:
           type: string
           format: date-time
-          example: "2026-02-25T10:00:00Z"
+          example: '2026-02-25T10:00:00Z'
         updated_at:
           type: string
           format: date-time
-          example: "2026-02-25T10:05:00Z"
+          example: '2026-02-25T10:05:00Z'
         order_items:
           type: array
           items:
-            $ref: "#/components/schemas/OrderItem"
+            $ref: '#/components/schemas/OrderItem'
 
     OrderListResponse:
       type: object
@@ -4497,7 +4565,7 @@ components:
         orders:
           type: array
           items:
-            $ref: "#/components/schemas/Order"
+            $ref: '#/components/schemas/Order'
         meta:
           type: object
           properties:
@@ -4522,7 +4590,7 @@ components:
       description: Wrapper containing a single order's full details.
       properties:
         order:
-          $ref: "#/components/schemas/Order"
+          $ref: '#/components/schemas/Order'
 
     # ── Payment ────────────────────────────────────────────────────────────────
 
@@ -4565,7 +4633,7 @@ components:
       properties:
         payment_id:
           type: string
-          description: "Stripe PaymentIntent ID (e.g. `pi_...`)."
+          description: Stripe PaymentIntent ID (e.g. `pi_...`).
           example: pi_3OqAbCDefGhIjKlM0NoPqRsT
         session_id:
           type: string
@@ -4601,27 +4669,27 @@ components:
         object (containing a `products` array and `meta`) — not a flat array.
       properties:
         products:
-          $ref: "#/components/schemas/ProductListResponse"
+          $ref: '#/components/schemas/ProductListResponse'
         categories:
-          $ref: "#/components/schemas/CategoryListResponse"
+          $ref: '#/components/schemas/CategoryListResponse'
         timestamp:
           type: string
           format: date-time
           description: Server-side timestamp when the response was assembled.
-          example: "2026-02-25T10:00:00Z"
+          example: '2026-02-25T10:00:00Z'
 
     BFFProfileResponse:
       type: object
       description: Aggregated profile page payload.
       properties:
         profile:
-          $ref: "#/components/schemas/UserProfileResponse"
+          $ref: '#/components/schemas/UserProfileResponse'
         orders:
-          $ref: "#/components/schemas/OrderListResponse"
+          $ref: '#/components/schemas/OrderListResponse'
         timestamp:
           type: string
           format: date-time
-          example: "2026-02-25T10:00:00Z"
+          example: '2026-02-25T10:00:00Z'
 
     # ── Bulk operations ────────────────────────────────────────────────────────
 
@@ -4703,7 +4771,7 @@ components:
         message:
           type: string
           description: Human-readable summary of the import result.
-          example: "Import complete: 115 inserted, 5 errors."
+          example: 'Import complete: 115 inserted, 5 errors.'
 
     BulkDeleteRequest:
       type: object
@@ -4747,7 +4815,7 @@ components:
         items:
           type: array
           items:
-            $ref: "#/components/schemas/CreateCategoryRequest"
+            $ref: '#/components/schemas/CreateCategoryRequest'
 
     # ── Inventory ──────────────────────────────────────────────────────────────
 
@@ -4941,7 +5009,7 @@ components:
         value:
           type: number
           format: double
-          description: "Discount value — percentage (0–100), flat amount in currency units, or 0 for freeshipping."
+          description: Discount value — percentage (0–100), flat amount in currency units, or 0 for freeshipping.
           example: 10
         min_order_value:
           type: number
@@ -4959,7 +5027,7 @@ components:
         expires_at:
           type: string
           format: date-time
-          example: "2026-12-31T23:59:59Z"
+          example: '2026-12-31T23:59:59Z'
         active:
           type: boolean
           example: true
@@ -5010,7 +5078,7 @@ components:
         expires_at:
           type: string
           format: date-time
-          example: "2026-12-31T23:59:59Z"
+          example: '2026-12-31T23:59:59Z'
 
     ValidateCouponRequest:
       type: object
@@ -5073,13 +5141,13 @@ components:
           example: NY
         postal_code:
           type: string
-          example: "10001"
+          example: '10001'
         country:
           type: string
           example: US
         phone:
           type: string
-          example: "+12125550100"
+          example: '+12125550100'
         email:
           type: string
           format: email
@@ -5119,4 +5187,4 @@ components:
           format: double
           example: 1.5
         destination:
-          $ref: "#/components/schemas/Address"
+          $ref: '#/components/schemas/Address'

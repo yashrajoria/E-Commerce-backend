@@ -9,6 +9,8 @@ import (
 
 func RegisterRoutes(r *gin.Engine, ctrl *controllers.BFFController) {
 	r.GET("/health", ctrl.Health)
+	r.GET("/health/live", ctrl.Health)
+	r.GET("/health/ready", ctrl.Health)
 
 	// Public routes - no auth required
 	public := r.Group("/bff")

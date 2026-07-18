@@ -24,3 +24,14 @@ type Payment struct {
 	UpdatedAt          time.Time      `gorm:"autoUpdateTime"`
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
 }
+
+// StripeProcessedEvent stores Stripe webhook event IDs for exactly-once processing.
+type StripeProcessedEvent struct {
+	EventID     string    `gorm:"column:event_id;primaryKey"`
+	EventType   string    `gorm:"column:event_type;not null"`
+	ProcessedAt time.Time `gorm:"column:processed_at;autoCreateTime"`
+}
+
+func (StripeProcessedEvent) TableName() string {
+	return "stripe_processed_events"
+}

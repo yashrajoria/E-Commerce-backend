@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"auth-service/models"
 	"auth-service/services"
 
 	"github.com/gin-gonic/gin"
@@ -15,10 +16,12 @@ import (
 type IAuthService interface {
 	Login(ctx context.Context, email, password string) (*services.TokenPair, error)
 	Register(ctx context.Context, name, email, password, role string) error
+	ProvisionUser(ctx context.Context, in services.ProvisionUserInput) error
 	VerifyEmail(ctx context.Context, email, code string) error
 	RefreshTokens(ctx context.Context, refreshToken string) (*services.TokenPair, error)
 	Logout(ctx context.Context, refreshToken string) error
 	ResendVerificationEmail(ctx context.Context, email string) error
+	GetUserByID(ctx context.Context, userID string) (*models.User, error)
 }
 
 type AuthController struct {
@@ -67,12 +70,18 @@ func (ctrl *AuthController) Login(c *gin.Context) {
 	c.SetSameSite(sameSite)
 	c.SetCookie("__session", tokenPair.AccessToken, 900, "/", domain, secure, true)
 	c.SetCookie("refresh_token", tokenPair.RefreshToken, 604800, "/", domain, secure, true)
+	// Identity cookies are HttpOnly — authorization must come from JWT via the gateway.
+	c.SetCookie("user_id", tokenPair.UserID, 604800, "/", domain, secure, true)
+	c.SetCookie("user_role", tokenPair.Role, 604800, "/", domain, secure, true)
 
-	// Set identifiers for Next.js frontend and BFF downstream services
-	c.SetCookie("user_id", tokenPair.UserID, 604800, "/", domain, secure, false)
-	c.SetCookie("user_role", tokenPair.Role, 604800, "/", domain, secure, false)
-
-	c.JSON(http.StatusOK, gin.H{"message": "Logged in successfully"})
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Logged in successfully",
+		"user": gin.H{
+			"id":    tokenPair.UserID,
+			"email": req.Email,
+			"role":  tokenPair.Role,
+		},
+	})
 }
 
 func (ctrl *AuthController) Register(c *gin.Context) {
@@ -181,37 +190,37 @@ func (ctrl *AuthController) Refresh(c *gin.Context) {
 	c.SetSameSite(sameSite)
 	c.SetCookie("__session", newTokenPair.AccessToken, 900, "/", domain, secure, true)
 	c.SetCookie("refresh_token", newTokenPair.RefreshToken, 604800, "/", domain, secure, true)
-	c.SetCookie("user_id", newTokenPair.UserID, 604800, "/", domain, secure, false)
-	c.SetCookie("user_role", newTokenPair.Role, 604800, "/", domain, secure, false)
+	c.SetCookie("user_id", newTokenPair.UserID, 604800, "/", domain, secure, true)
+	c.SetCookie("user_role", newTokenPair.Role, 604800, "/", domain, secure, true)
 
-	c.JSON(http.StatusOK, gin.H{"message": "Token refreshed successfully"})
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Token refreshed successfully",
+		"user": gin.H{
+			"id":   newTokenPair.UserID,
+			"role": newTokenPair.Role,
+		},
+	})
 }
 
 func (ctrl *AuthController) GetAuthStatus(c *gin.Context) {
-	u, exists := c.Get("user_id")
-	var userID string
-	if exists {
-		if s, ok := u.(string); ok {
-			userID = s
-		}
-	}
-	if userID == "" {
-		// If not in context, try headers (forwarded by API gateway)
-		userID = c.GetHeader("X-User-ID")
-		if userID == "" {
-			if v, err := c.Cookie("user_id"); err == nil && v != "" {
-				userID = v
-			}
-		}
-	}
-
+	userID := c.GetHeader("X-User-ID")
 	email := c.GetHeader("X-User-Email")
 	role := c.GetHeader("X-User-Role")
 
-	// Fallback to cookies if headers not present
-	if email == "" {
-		if v, err := c.Cookie("user_email"); err == nil && v != "" {
-			email = v
+	if userID == "" {
+		if v, err := c.Cookie("user_id"); err == nil && v != "" {
+			userID = v
+		}
+	}
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Not authenticated"})
+		return
+	}
+
+	if u, err := ctrl.service.GetUserByID(c.Request.Context(), userID); err == nil && u != nil {
+		role = u.Role
+		if email == "" {
+			email = u.Email
 		}
 	}
 	if role == "" {
@@ -219,10 +228,10 @@ func (ctrl *AuthController) GetAuthStatus(c *gin.Context) {
 			role = v
 		}
 	}
-
-	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Not authenticated"})
-		return
+	if email == "" {
+		if v, err := c.Cookie("user_email"); err == nil && v != "" {
+			email = v
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -279,10 +288,24 @@ func (ctrl *AuthController) AdminCreateUser(c *gin.Context) {
 		return
 	}
 
-	// Normalize email
 	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 
-	err := ctrl.service.Register(c.Request.Context(), req.Name, req.Email, req.Password, req.Role)
+	pwValidator := services.NewPasswordValidator()
+	if err := pwValidator.ValidatePassword(req.Password); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Admin-provisioned accounts are verified so invitees can sign in immediately.
+	// Public self-signup still requires email verification via Register.
+	err := ctrl.service.ProvisionUser(c.Request.Context(), services.ProvisionUserInput{
+		Name:          req.Name,
+		Email:         req.Email,
+		Password:      req.Password,
+		Role:          req.Role,
+		EmailVerified: true,
+		Notify:        false,
+	})
 	if err != nil {
 		if strings.Contains(err.Error(), "already exists") {
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})

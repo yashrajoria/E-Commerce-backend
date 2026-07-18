@@ -1,7 +1,7 @@
 # Promotion Service API
 
 Base URL: `http://localhost:8090` (Service Internal)
-Gateway Prefix: `/promotion` (Admin Only)
+Gateway Prefix: `/coupons` (Admin routes via API Gateway)
 
 ## Endpoints
 

@@ -52,6 +52,7 @@ Thumbs.db
 
 # Generated files
 *.gen.go
+graphify-out/
 
 # Test output
 /test_output/

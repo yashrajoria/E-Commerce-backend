@@ -12,9 +12,9 @@ import (
 )
 
 // ConnectPostgres connects to PostgreSQL using environment variables and returns a *gorm.DB instance.
-// Optionally, it can run AutoMigrate on provided models.
+// AutoMigrate runs only when AllowAutoMigrate() is true and models are provided.
 func ConnectPostgres(autoMigrateModels ...interface{}) (*gorm.DB, error) {
-	_ = godotenv.Load() // Only load if not already loaded
+	_ = godotenv.Load()
 
 	dbUser := os.Getenv("POSTGRES_USER")
 	dbPassword := os.Getenv("POSTGRES_PASSWORD")
@@ -48,10 +48,12 @@ func ConnectPostgres(autoMigrateModels ...interface{}) (*gorm.DB, error) {
 		db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 		if err == nil {
 			log.Println("✅ Connected to PostgreSQL successfully!")
-			if len(autoMigrateModels) > 0 {
+			if len(autoMigrateModels) > 0 && AllowAutoMigrate() {
 				if err := db.AutoMigrate(autoMigrateModels...); err != nil {
 					return nil, fmt.Errorf("AutoMigrate failed: %w", err)
 				}
+			} else if len(autoMigrateModels) > 0 {
+				log.Println("⏭️  Skipping AutoMigrate (ALLOW_AUTO_MIGRATE=false); use ./scripts/migrate.sh")
 			}
 			return db, nil
 		}

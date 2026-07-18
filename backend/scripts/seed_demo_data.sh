@@ -7,6 +7,8 @@ set -euo pipefail
 COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.localstack.yml)
 CATEGORIES_TABLE="${DDB_TABLE_CATEGORIES:-Categories}"
 PRODUCTS_TABLE="${DDB_TABLE_PRODUCTS:-Products}"
+INVENTORY_TABLE="${DDB_TABLE_INVENTORY:-Inventory}"
+PRODUCT_CATEGORIES_TABLE="${DDB_TABLE_PRODUCT_CATEGORIES:-ProductCategories}"
 S3_BUCKET="${AWS_S3_BUCKET:-shopswift}"
 S3_PREFIX="${AWS_S3_PREFIX:-products/}"
 
@@ -31,8 +33,10 @@ ensure_localstack_running() {
 ddb_put() {
   local table="$1"
   local item_json="$2"
+  # Redirect stdin so docker compose exec does not consume a caller's pipe
+  # (e.g. while-read over scan results).
   docker compose "${COMPOSE_FILES[@]}" exec -T localstack \
-    awslocal dynamodb put-item --table-name "$table" --item "$item_json" >/dev/null
+    awslocal dynamodb put-item --table-name "$table" --item "$item_json" </dev/null >/dev/null
 }
 
 reset_products() {
@@ -114,7 +118,14 @@ seed_product() {
   image_url_front="$(upload_demo_image_to_s3 "$sku" "$name" "front")"
   image_url_back="$(upload_demo_image_to_s3 "$sku" "$name" "back")"
 
-  ddb_put "$PRODUCTS_TABLE" "{\"id\":{\"S\":\"$id\"},\"name\":{\"S\":\"$name\"},\"price\":{\"N\":\"$price\"},\"quantity\":{\"N\":\"$quantity\"},\"description\":{\"S\":\"$description\"},\"images\":{\"L\":[{\"S\":\"$image_url_front\"},{\"S\":\"$image_url_back\"}]},\"brand\":{\"S\":\"$brand\"},\"sku\":{\"S\":\"$sku\"},\"category_ids\":{\"L\":[{\"S\":\"$cat1\"},{\"S\":\"$cat2\"}]},\"category_path\":{\"L\":[{\"S\":\"$path1\"},{\"S\":\"$path2\"}]},\"is_featured\":{\"BOOL\":$featured},\"created_at\":{\"S\":\"$now\"},\"updated_at\":{\"S\":\"$now\"}}"
+  ddb_put "$PRODUCTS_TABLE" "{\"id\":{\"S\":\"$id\"},\"name\":{\"S\":\"$name\"},\"price\":{\"N\":\"$price\"},\"quantity\":{\"N\":\"$quantity\"},\"description\":{\"S\":\"$description\"},\"images\":{\"L\":[{\"S\":\"$image_url_front\"},{\"S\":\"$image_url_back\"}]},\"brand\":{\"S\":\"$brand\"},\"sku\":{\"S\":\"$sku\"},\"category_ids\":{\"L\":[{\"S\":\"$cat1\"},{\"S\":\"$cat2\"}]},\"category_path\":{\"L\":[{\"S\":\"$path1\"},{\"S\":\"$path2\"}]},\"is_featured\":{\"S\":\"$featured\"},\"created_at\":{\"S\":\"$now\"},\"updated_at\":{\"S\":\"$now\"}}"
+
+  # Checkout reserves from Inventory (separate from product.quantity).
+  ddb_put "$INVENTORY_TABLE" "{\"id\":{\"S\":\"$id\"},\"available\":{\"N\":\"$quantity\"},\"reserved\":{\"N\":\"0\"},\"threshold\":{\"N\":\"5\"},\"order_reservations\":{\"M\":{}},\"updated_at\":{\"S\":\"$now\"}}"
+
+  # Category→product adjacency for Query (avoids contains() Scan).
+  ddb_put "$PRODUCT_CATEGORIES_TABLE" "{\"category_id\":{\"S\":\"$cat1\"},\"product_id\":{\"S\":\"$id\"},\"created_at\":{\"S\":\"$now\"},\"updated_at\":{\"S\":\"$now\"}}"
+  ddb_put "$PRODUCT_CATEGORIES_TABLE" "{\"category_id\":{\"S\":\"$cat2\"},\"product_id\":{\"S\":\"$id\"},\"created_at\":{\"S\":\"$now\"},\"updated_at\":{\"S\":\"$now\"}}"
 }
 
 seed_categories() {
@@ -248,16 +259,85 @@ seed_products() {
 }
 
 print_summary() {
-  local category_count product_count object_count
+  local category_count product_count inventory_count link_count object_count
   category_count="$(docker compose "${COMPOSE_FILES[@]}" exec -T localstack awslocal dynamodb scan --table-name "$CATEGORIES_TABLE" --select COUNT --query 'Count' --output text)"
   product_count="$(docker compose "${COMPOSE_FILES[@]}" exec -T localstack awslocal dynamodb scan --table-name "$PRODUCTS_TABLE" --select COUNT --query 'Count' --output text)"
+  inventory_count="$(docker compose "${COMPOSE_FILES[@]}" exec -T localstack awslocal dynamodb scan --table-name "$INVENTORY_TABLE" --select COUNT --query 'Count' --output text)"
+  link_count="$(docker compose "${COMPOSE_FILES[@]}" exec -T localstack awslocal dynamodb scan --table-name "$PRODUCT_CATEGORIES_TABLE" --select COUNT --query 'Count' --output text 2>/dev/null || echo 0)"
   object_count="$(docker compose "${COMPOSE_FILES[@]}" exec -T localstack awslocal s3api list-objects-v2 --bucket "$S3_BUCKET" --prefix "$(normalize_prefix "$S3_PREFIX")demo/" --query 'length(Contents)' --output text 2>/dev/null || echo 0)"
-  echo "Seed complete. Categories: $category_count, Products: $product_count, S3 demo images: $object_count"
+  echo "Seed complete. Categories: $category_count, Products: $product_count, Inventory: $inventory_count, ProductCategories: $link_count, S3 demo images: $object_count"
+}
+
+# Sync Inventory rows from existing Products (quantity → available).
+# Use when Products were seeded without Inventory (checkout would 409).
+sync_inventory_from_products() {
+  echo "Syncing $INVENTORY_TABLE from $PRODUCTS_TABLE quantities..."
+  local now
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  local items
+  items="$(docker compose "${COMPOSE_FILES[@]}" exec -T localstack awslocal dynamodb scan \
+    --table-name "$PRODUCTS_TABLE" \
+    --projection-expression 'id,#q' \
+    --expression-attribute-names '{"#q":"quantity"}' \
+    --output json </dev/null)"
+
+  local count=0
+  local id qty
+  while IFS=$'\t' read -r id qty; do
+    [[ -z "$id" ]] && continue
+    qty="${qty:-0}"
+    # order_reservations must exist so ReserveAll can SET map paths.
+    ddb_put "$INVENTORY_TABLE" "{\"id\":{\"S\":\"$id\"},\"available\":{\"N\":\"$qty\"},\"reserved\":{\"N\":\"0\"},\"threshold\":{\"N\":\"5\"},\"order_reservations\":{\"M\":{}},\"updated_at\":{\"S\":\"$now\"}}"
+    count=$((count + 1))
+  done < <(echo "$items" | jq -r '.Items[]? | [(.id.S // empty), (.quantity.N // "0")] | @tsv')
+
+  echo "Inventory sync complete ($count items)."
+}
+
+# Sync ProductCategories adjacency from product.category_ids.
+sync_product_categories_from_products() {
+  echo "Syncing $PRODUCT_CATEGORIES_TABLE from $PRODUCTS_TABLE category_ids..."
+  local now
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  local items
+  items="$(docker compose "${COMPOSE_FILES[@]}" exec -T localstack awslocal dynamodb scan \
+    --table-name "$PRODUCTS_TABLE" \
+    --projection-expression 'id,category_ids' \
+    --output json </dev/null)"
+
+  local count=0
+  echo "$items" | jq -c '.Items[]?' | while read -r item; do
+    local id
+    id="$(echo "$item" | jq -r '.id.S // empty')"
+    [[ -z "$id" ]] && continue
+    echo "$item" | jq -r '.category_ids.L[]?.S // empty' | while read -r cat; do
+      [[ -z "$cat" ]] && continue
+      ddb_put "$PRODUCT_CATEGORIES_TABLE" "{\"category_id\":{\"S\":\"$cat\"},\"product_id\":{\"S\":\"$id\"},\"created_at\":{\"S\":\"$now\"},\"updated_at\":{\"S\":\"$now\"}}"
+    done
+    count=$((count + 1))
+  done
+  # recount (subshell count is lost)
+  link_count="$(docker compose "${COMPOSE_FILES[@]}" exec -T localstack awslocal dynamodb scan --table-name "$PRODUCT_CATEGORIES_TABLE" --select COUNT --query 'Count' --output text </dev/null)"
+  echo "ProductCategories sync complete ($link_count links)."
 }
 
 main() {
   require_cmd docker
+  require_cmd jq
   ensure_localstack_running
+
+  if [[ "${1:-}" == "--sync-inventory-only" ]]; then
+    sync_inventory_from_products
+    print_summary
+    return 0
+  fi
+
+  if [[ "${1:-}" == "--sync-category-links-only" ]]; then
+    sync_product_categories_from_products
+    print_summary
+    return 0
+  fi
+
   reset_products
   seed_categories
   seed_products

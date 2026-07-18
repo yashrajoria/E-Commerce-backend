@@ -1,38 +1,51 @@
 # Backend Architecture
 
-This document describes the high-level architecture of the E-Commerce backend and how components interact.
+High-level architecture of the ShopSwift e-commerce backend and how components interact.
 
-## Overview diagram (Mermaid)
+Related: [data-and-messaging.md](./data-and-messaging.md) · [best-practices-and-gaps.md](./best-practices-and-gaps.md) · [api/README.md](./api/README.md)
+
+## Overview diagram
 
 ```mermaid
 flowchart LR
   subgraph Users
-    U[Frontend / Client]
+    U[Frontend_Client]
   end
 
   subgraph Edge
-    API[API Gateway]\n(http://localhost:8080)
+    API[API_Gateway_8080]
   end
 
   subgraph BFF_Service
-    BFF[BFF Service]\n(http://localhost:8088)
+    BFF[BFF_8088]
   end
 
   subgraph Services
-    AUTH[Auth Service]\n(USER)[User Service]\n    PROD[Product Service]\n    CART[Cart Service]\n    ORDER[Order Service]\n    PAYMENT[Payment Service]\n    INVENT[Inventory Service]\n    PROMO[Promotion Service]\n    SHIP[Shipping Service]
+    AUTH[Auth_8081]
+    USER[User_8085]
+    PROD[Product_8082]
+    CART[Cart_8086]
+    ORDER[Order_8083]
+    PAYMENT[Payment_8087]
+    INVENT[Inventory_8084]
+    PROMO[Promotion_8090]
+    SHIP[Shipping_8091]
+    NOTIF[Notification_8092]
+    AGENT[Agent_8089]
   end
 
   subgraph Infrastructure
     PG[(Postgres)]
     REDIS[(Redis)]
-    S3[(S3 / Localstack S3)]
-    SQS[(SQS / Localstack)]
-    DDB[(DynamoDB - optional)]
+    S3[(S3)]
+    SNS_SQS[SNS_SQS]
+    DDB[(DynamoDB)]
     CW[CloudWatch]
     STRIPE[(Stripe)]
   end
 
-  U -->|HTTP /cookies| API
+  U -->|HTTP_cookies| API
+  U -->|optional| BFF
   API -->|proxy| BFF
   API -->|proxy| AUTH
   API -->|proxy| USER
@@ -43,54 +56,53 @@ flowchart LR
   API -->|proxy| INVENT
   API -->|proxy| PROMO
   API -->|proxy| SHIP
+  API -->|proxy| NOTIF
+  API -->|proxy| AGENT
 
-  BFF -->|calls| PROD
-  BFF -->|calls| CART
-  BFF -->|calls| ORDER
-  BFF -->|calls| PAYMENT
-  BFF -->|calls| AUTH
-  BFF -->|calls| PROMO
-  BFF -->|calls| SHIP
-  BFF -->|idempotency/cache| REDIS
+  BFF -->|HTTP_via_gateway| API
+  BFF -->|idempotency| REDIS
 
-  CART -->|store| REDIS
-  CART -->|writes| PG
-  ORDER -->|writes/read| PG
-  AUTH -->|writes| PG
-  USER -->|writes| PG
-  PROMO -->|writes| PG
-  SHIP -->|writes| PG
+  CART --> REDIS
+  ORDER --> PG
+  AUTH --> PG
+  USER --> PG
+  PROMO --> PG
+  NOTIF --> PG
+  PAYMENT --> PG
 
-  PROD -->|media| S3
-  PROD -->|category lookup| DDB
+  PROD --> S3
+  PROD --> DDB
+  PROD --> REDIS
+  INVENT --> DDB
 
-  PAYMENT -->|publishes| SQS
-  PAYMENT -->|webhook| STRIPE
-  PAYMENT -->|stores| PG
-
-  PROMO -->|events| SQS
-  INVENT -->|events| SQS
+  CART -->|SNS_order_events| SNS_SQS
+  ORDER --> SNS_SQS
+  PAYMENT --> SNS_SQS
+  PAYMENT --> STRIPE
+  NOTIF -->|SQS_consume| SNS_SQS
   ORDER -->|reserve| INVENT
 
-  ALL_SERVICES([All services]) -->|logs/metrics| CW
-
-  click API "http://localhost:8080" "API Gateway"
-  click BFF "http://localhost:8088/docs" "BFF Docs"
+  AGENT -->|BFF_direct| BFF
 ```
+
+Source also maintained in [architecture.mmd](./architecture.mmd).
 
 ## Narrative
 
-- Clients (web/mobile) talk to the **API Gateway** at `http://localhost:8080`. The gateway forwards requests to backend services and preserves cookies and identity headers.
-- The **BFF** (`/bff`) aggregates frontend needs (home page, profile, checkout) by calling core services. It uses **Redis** for distributed locking (idempotency) during checkout to prevent race conditions.
-- **Auth**, **User**, **Order**, **Promotion**, **Shipping**, and **Cart** services persist user and transactional data in Postgres.
-- **Promotion Service** manages coupon validation and atomically tracks usage limits via DB constraints.
-- **Shipping Service** calculates dynamic shipping rates locally using a zone-based engine (zero external API dependency).
-- **Payment** integrates with Stripe and receives webhook events; it also publishes/consumes messages via SQS for async workflows.
-- **LocalStack** (in local dev) emulates SQS/SNS/DynamoDB/S3 where used.
+- Clients talk to the **API Gateway** (`:8080`). The gateway proxies many services **directly** and also fronts the **BFF** (`/bff`).
+- The **BFF** (`:8088`) aggregates home/profile/checkout. Checkout uses a Redis **SetNX** lock keyed by `Idempotency-Key`, then drives an **async** cart → SNS/SQS → order → payment flow and polls for a Stripe `checkout_url`.
+- **Postgres:** auth (identity + refresh tokens), user (profile + addresses), order, payment, promotion (coupons), notification logs.
+- **DynamoDB:** product catalog, categories, inventory (primary — not optional).
+- **Redis:** cart state, BFF checkout locks, gateway rate limiting, product cache.
+- **Shipping** computes rates only (zone/static JSON); it does **not** write Postgres at runtime.
+- **Cart** is Redis-only (no Postgres writes).
+- **Notification** consumes `notification-queue` (SNS `notification-events`) and sends email / logs.
+- **Agent** (Python) calls BFF directly to avoid gateway circularity; needs an LLM endpoint.
+- **LocalStack** emulates S3/SNS/SQS/DynamoDB locally — required for local AWS-dependent services.
 
 ## Sequence diagrams
 
-### Checkout sequence (Optimized)
+### Checkout (async SNS/SQS)
 
 ```mermaid
 sequenceDiagram
@@ -99,44 +111,58 @@ sequenceDiagram
   participant BFF
   participant Redis
   participant Cart
-  participant Promo
-  participant Ship
+  participant SNS
   participant Order
+  participant SQS
   participant Payment
-  
-  Client->>Gateway: POST /bff/checkout
-  Gateway->>BFF: forward POST /bff/checkout
-  
-  BFF->>Redis: SetNX (lock:order:user_id, "pending")
-  Note over BFF,Redis: Prevents duplicate checkouts
-  
-  BFF->>Cart: GET /cart
-  BFF->>Promo: POST /coupons/validate
-  BFF->>Ship: POST /shipping/rates
-  
-  BFF->>Order: POST /orders (create)
-  Order-->>BFF: order created
-  
-  BFF->>Payment: POST /payment (create session)
-  Payment-->>BFF: checkout_url
-  
-  BFF->>Redis: Update lock with order_id
-  
-  BFF-->>Gateway: return checkout_url
-  Gateway-->>Client: 200 {checkout_url}
+  participant Stripe
+
+  Client->>Gateway: POST /bff/checkout Idempotency-Key
+  Gateway->>BFF: forward
+  BFF->>Redis: SetNX checkout lock pending
+  BFF->>Cart: POST /cart/checkout
+  Cart->>SNS: publish checkout.requested order-events
+  Cart-->>BFF: order_id
+  SNS->>SQS: order-processing-queue
+  Order->>Order: create order reserve inventory
+  Order->>SQS: payment-request-queue
+  Payment->>Stripe: create Checkout Session
+  Payment->>SNS: payment-events
+  BFF->>Payment: poll status for checkout_url
+  BFF->>Redis: store order_id on lock
+  BFF-->>Client: checkout_url
 ```
 
-### Payment flow (webhook confirmation)
+### Payment webhook confirmation
 
 ```mermaid
 sequenceDiagram
   participant Stripe
   participant Gateway
   participant Payment
+  participant SNS
+  participant OrderSQS as order_payment_events_queue
   participant Order
-  Stripe->>Gateway: POST /stripe/webhook (event)
-  Gateway->>Payment: forward webhook
-  Payment->>Order: PATCH /orders/{id} (mark paid)
-  Order-->>Payment: updated
+  participant NotifQ as notification_queue
+  participant Notif as notification_service
+
+  Stripe->>Gateway: POST /stripe/webhook
+  Gateway->>Payment: forward
+  Payment->>Payment: dedupe by Stripe event.id
+  Payment->>SNS: payment-events paid
+  SNS->>OrderSQS: deliver
+  Order->>Order: mark paid confirm inventory
+  Payment->>SNS: notification-events
+  SNS->>NotifQ: deliver
+  Notif->>Notif: email and log
   Payment-->>Gateway: 200
 ```
+
+### Idempotency keys
+
+| Hop | Mechanism |
+|-----|-----------|
+| Client → BFF | Required `Idempotency-Key` header + Redis SetNX |
+| Cart → Order | Order `idempotency_key` unique; SQS consumer dedups |
+| Payment request | Payment `idempotency_key` unique |
+| Stripe webhook | Stored Stripe `event.id` (processed events) |

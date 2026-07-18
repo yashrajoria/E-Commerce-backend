@@ -47,9 +47,17 @@ services:
       - ./services/common:/common
     ports:
       - "8081:8081"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     env_file:
       - .env
     environment:
+      - GIN_MODE=${GIN_MODE:-release}
+      - ALLOW_AUTO_MIGRATE=${ALLOW_AUTO_MIGRATE:-true}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_REGION=${AWS_REGION}
@@ -61,6 +69,9 @@ services:
       - NOTIFICATION_SNS_TOPIC_ARN=${NOTIFICATION_SNS_TOPIC_ARN:-arn:aws:sns:us-east-1:000000000000:notification-events}
       - USE_LOCALSTACK=true
       - LOCALSTACK_ENDPOINT=http://localstack:4566
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - ADMIN_NAME=${ADMIN_NAME:-Administrator}
     depends_on:
       postgres:
         condition: service_healthy
@@ -81,6 +92,8 @@ services:
     env_file:
       - .env
     environment:
+      - GIN_MODE=${GIN_MODE:-release}
+      - ALLOW_AUTO_MIGRATE=${ALLOW_AUTO_MIGRATE:-true}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_REGION=${AWS_REGION}
@@ -108,9 +121,17 @@ services:
       - ./pkg/aws:/pkg/aws
     ports:
       - "8082:8082"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8082/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     env_file:
       - .env
     environment:
+      - GIN_MODE=${GIN_MODE:-release}
+      - ALLOW_AUTO_MIGRATE=${ALLOW_AUTO_MIGRATE:-true}
       - AWS_REGION=${AWS_REGION}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
@@ -123,6 +144,7 @@ services:
       - AWS_CLOUDFRONT_DOMAIN=${AWS_CLOUDFRONT_DOMAIN:-}
       - DDB_TABLE_PRODUCTS=${DDB_TABLE_PRODUCTS:-Products}
       - DDB_TABLE_CATEGORIES=${DDB_TABLE_CATEGORIES:-Categories}
+      - DDB_TABLE_PRODUCT_CATEGORIES=${DDB_TABLE_PRODUCT_CATEGORIES:-ProductCategories}
       - INVENTORY_SERVICE_URL=http://inventory-service:8084
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
@@ -145,6 +167,8 @@ services:
     env_file:
       - .env
     environment:
+      - GIN_MODE=${GIN_MODE:-release}
+      - ALLOW_AUTO_MIGRATE=${ALLOW_AUTO_MIGRATE:-true}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_REGION=${AWS_REGION}
@@ -177,6 +201,8 @@ services:
     env_file:
       - .env
     environment:
+      - GIN_MODE=${GIN_MODE:-release}
+      - ALLOW_AUTO_MIGRATE=${ALLOW_AUTO_MIGRATE:-true}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_REGION=${AWS_REGION}
@@ -201,9 +227,17 @@ services:
       - ./pkg/aws:/pkg/aws
     ports:
       - "8083:8083"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8083/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     env_file:
       - .env
     environment:
+      - GIN_MODE=${GIN_MODE:-release}
+      - ALLOW_AUTO_MIGRATE=${ALLOW_AUTO_MIGRATE:-true}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_REGION=${AWS_REGION}
@@ -234,9 +268,17 @@ services:
       - ./pkg/aws:/pkg/aws
     ports:
       - "8087:8087"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8087/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     env_file:
       - .env
     environment:
+      - GIN_MODE=${GIN_MODE:-release}
+      - ALLOW_AUTO_MIGRATE=${ALLOW_AUTO_MIGRATE:-true}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_REGION=${AWS_REGION}
@@ -249,6 +291,8 @@ services:
       - PAYMENT_SNS_TOPIC_ARN=${PAYMENT_SNS_TOPIC_ARN:-arn:aws:sns:us-east-1:000000000000:payment-events}
       - NOTIFICATION_SNS_TOPIC_ARN=${NOTIFICATION_SNS_TOPIC_ARN:-arn:aws:sns:us-east-1:000000000000:notification-events}
       - STORE_CURRENCY=${STORE_CURRENCY:-USD}
+      # Stripe success/cancel must hit the storefront (not admin on :3000).
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3001}
     depends_on:
       postgres:
         condition: service_healthy
@@ -269,6 +313,8 @@ services:
     env_file:
       - .env
     environment:
+      - GIN_MODE=${GIN_MODE:-release}
+      - ALLOW_AUTO_MIGRATE=${ALLOW_AUTO_MIGRATE:-true}
       - PORT=8090
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
@@ -299,6 +345,8 @@ services:
     env_file:
       - .env
     environment:
+      - GIN_MODE=${GIN_MODE:-release}
+      - ALLOW_AUTO_MIGRATE=${ALLOW_AUTO_MIGRATE:-true}
       - PORT=8091
     networks:
       - ecommerce-network
@@ -314,9 +362,17 @@ services:
       - ./pkg/aws:/pkg/aws
     ports:
       - "8092:8092"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8092/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     env_file:
       - .env
     environment:
+      - GIN_MODE=${GIN_MODE:-release}
+      - ALLOW_AUTO_MIGRATE=${ALLOW_AUTO_MIGRATE:-true}
       - PORT=8092
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
@@ -352,7 +408,7 @@ services:
     ports:
       - "8080:8080"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -364,6 +420,8 @@ services:
     env_file:
       - .env
     environment:
+      - GIN_MODE=${GIN_MODE:-release}
+      - ALLOW_AUTO_MIGRATE=${ALLOW_AUTO_MIGRATE:-true}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_REGION=${AWS_REGION}
@@ -416,9 +474,17 @@ services:
       - ./pkg/aws:/pkg/aws
     ports:
       - "8088:8088"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8088/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     env_file:
       - .env
     environment:
+      - GIN_MODE=${GIN_MODE:-release}
+      - ALLOW_AUTO_MIGRATE=${ALLOW_AUTO_MIGRATE:-true}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_REGION=${AWS_REGION}
@@ -429,9 +495,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - REQUEST_TIMEOUT=40s
       - API_GATEWAY_URL=http://api-gateway:8080
-      - ANALYTICS_SERVICE_URL=http://analytics-service:8093
       - NOTIFICATION_SERVICE_URL=http://notification-service:8092
-      - REVIEW_SERVICE_URL=http://review-service:8094
       - PROMOTION_SERVICE_URL=http://promotion-service:8090
       - SHIPPING_SERVICE_URL=http://shipping-service:8091
     depends_on:
@@ -454,6 +518,8 @@ services:
     env_file:
       - .env
     environment:
+      - GIN_MODE=${GIN_MODE:-release}
+      - ALLOW_AUTO_MIGRATE=${ALLOW_AUTO_MIGRATE:-true}
       - ENVIRONMENT=development
       - LOG_LEVEL=info
       - HOST=0.0.0.0

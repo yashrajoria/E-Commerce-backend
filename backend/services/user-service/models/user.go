@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	commondb "github.com/yashrajoria/common/db"
 	"gorm.io/gorm"
 )
 
@@ -39,7 +40,12 @@ type Address struct {
 	DeletedAt  gorm.DeletedAt `gorm:"index"`
 }
 
-// Migrate function, now migrates soft deletes too
+// Migrate owns addresses (and soft-delete profile columns on users via SQL migrations).
+// Auth-service owns identity columns on users; avoid dual AutoMigrate of full User here.
+// Prefer database.Connect AutoMigrate; this helper is gated by ALLOW_AUTO_MIGRATE.
 func Migrate(db *gorm.DB) error {
-	return db.AutoMigrate(&User{}, &Address{})
+	if !commondb.AllowAutoMigrate() {
+		return nil
+	}
+	return db.AutoMigrate(&Address{})
 }

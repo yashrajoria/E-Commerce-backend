@@ -2,8 +2,8 @@ package middleware
 
 import (
 	"errors"
-	"log"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -13,26 +13,8 @@ const UserContextKey = "userID"
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.GetHeader("X-User-ID")
-		log.Println(userID)
 		role := c.GetHeader("X-User-Role")
 		email := c.GetHeader("X-User-Email")
-
-		// Fallback to cookies (set by API gateway) if headers missing
-		if userID == "" {
-			if v, err := c.Cookie("user_id"); err == nil && v != "" {
-				userID = v
-			}
-		}
-		if role == "" {
-			if v, err := c.Cookie("user_role"); err == nil && v != "" {
-				role = v
-			}
-		}
-		if email == "" {
-			if v, err := c.Cookie("user_email"); err == nil && v != "" {
-				email = v
-			}
-		}
 
 		if userID == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
@@ -40,9 +22,8 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// Put them into Gin context
 		c.Set("userID", userID)
-		c.Set("role", role)
+		c.Set("role", strings.ToLower(strings.TrimSpace(role)))
 		c.Set("email", email)
 
 		c.Next()
@@ -67,8 +48,9 @@ func ConfigMiddleware(productServiceURL string) gin.HandlerFunc {
 }
 func AdminOnly() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		role, exists := c.Get("role")
-		if !exists || role != "admin" {
+		roleVal, exists := c.Get("role")
+		roleStr, _ := roleVal.(string)
+		if !exists || roleStr != "admin" {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Admin role required"})
 			c.Abort()
 			return

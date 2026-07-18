@@ -10,7 +10,7 @@ import (
 
 	"auth-service/controllers"
 	"auth-service/database"
-	"auth-service/models"
+	"auth-service/middleware"
 	"auth-service/repository"
 	"auth-service/services"
 
@@ -35,13 +35,9 @@ func main() {
 	// Load .env file
 	_ = godotenv.Load()
 
-	// Connect to the database
-	if err := database.Connect(); err != nil { // Assuming you have a Connect function
+	// Connect to the database (AutoMigrate for User/RefreshToken when ALLOW_AUTO_MIGRATE=true)
+	if err := database.Connect(); err != nil {
 		zap.L().Fatal("Database connection failed", zap.Error(err))
-	}
-	// Run migrations (auto-migrate models including refresh tokens)
-	if err := models.Migrate(database.DB); err != nil {
-		zap.L().Fatal("DB migration failed", zap.Error(err))
 	}
 	snsPublisher, err := services.NewSNSPublisher(context.Background())
 	if err != nil {
@@ -57,6 +53,10 @@ func main() {
 	tokenService := services.NewTokenService()
 	// emailService := services.NewEmailService()
 	authService := services.NewAuthService(userRepo, tokenService, snsPublisher, database.DB)
+
+	if err := authService.BootstrapAdminFromEnv(context.Background()); err != nil {
+		zap.L().Fatal("Admin bootstrap failed", zap.Error(err))
+	}
 
 	// Initialize Controllers
 	authController := controllers.NewAuthController(authService)
@@ -100,9 +100,9 @@ func main() {
 	// --- 4. Route Registration ---
 
 	// Health check
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "OK"})
-	})
+	r.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	r.GET("/health/live", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	r.GET("/health/ready", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ready"}) })
 
 	// Auth routes, now using the controller methods
 	authRoutes := r.Group("/auth")
@@ -114,8 +114,8 @@ func main() {
 		authRoutes.POST("/refresh", authController.Refresh)     // Added the refresh route
 		authRoutes.GET("/status", authController.GetAuthStatus) // Added the status route
 
-		// Admin routes
-		authRoutes.POST("/admin/users", authController.AdminCreateUser)
+		// Admin routes (defense-in-depth; gateway also requires admin JWT)
+		authRoutes.POST("/admin/users", middlewares.AdminOnly(), authController.AdminCreateUser)
 	}
 
 	// --- 5. Graceful Shutdown ---

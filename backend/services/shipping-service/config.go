@@ -6,15 +6,13 @@ import (
 
 // Config holds runtime configuration for the shipping service.
 type Config struct {
-	Port              string
-	ShippingRatesFile string
+	Port string
 }
 
 // LoadConfig reads configuration from environment variables.
 func LoadConfig() (*Config, error) {
 	return &Config{
-		Port:              getEnv("PORT", "8091"),
-		ShippingRatesFile: os.Getenv("SHIPPING_RATES_FILE"),
+		Port: getEnv("PORT", "8091"),
 	}, nil
 }
 

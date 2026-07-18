@@ -1,39 +1,41 @@
 flowchart LR
   subgraph Users
-    U[Frontend / Client]
+    U[Frontend_Client]
   end
 
   subgraph Edge
-    API[API Gateway (http://localhost:8080)]
+    API[API_Gateway_8080]
   end
 
   subgraph BFF_Service
-    BFF[BFF Service (http://localhost:8088)]
+    BFF[BFF_8088]
   end
 
   subgraph Services
-    AUTH[Auth Service]
-    USER[User Service]
-    PROD[Product Service]
-    CART[Cart Service]
-    ORDER[Order Service]
-    PAYMENT[Payment Service]
-    INVENT[Inventory Service]
-    PROMO[Promotion Service]
-    SHIP[Shipping Service]
+    AUTH[Auth_8081]
+    USER[User_8085]
+    PROD[Product_8082]
+    CART[Cart_8086]
+    ORDER[Order_8083]
+    PAYMENT[Payment_8087]
+    INVENT[Inventory_8084]
+    PROMO[Promotion_8090]
+    SHIP[Shipping_8091]
+    NOTIF[Notification_8092]
+    AGENT[Agent_8089]
   end
 
   subgraph Infrastructure
     PG[(Postgres)]
     REDIS[(Redis)]
-    S3[(S3 / Localstack S3)]
-    SQS[(SQS / Localstack)]
-    DDB[(DynamoDB - optional)]
+    S3[(S3)]
+    SNS_SQS[SNS_SQS]
+    DDB[(DynamoDB)]
     CW[CloudWatch]
     STRIPE[(Stripe)]
   end
 
-  U -->|HTTP /cookies| API
+  U -->|HTTP_cookies| API
   API -->|proxy| BFF
   API -->|proxy| AUTH
   API -->|proxy| USER
@@ -44,33 +46,28 @@ flowchart LR
   API -->|proxy| INVENT
   API -->|proxy| PROMO
   API -->|proxy| SHIP
+  API -->|proxy| NOTIF
+  API -->|proxy| AGENT
 
-  BFF -->|calls| PROD
-  BFF -->|calls| CART
-  BFF -->|calls| ORDER
-  BFF -->|calls| PAYMENT
-  BFF -->|calls| AUTH
-  BFF -->|calls| PROMO
-  BFF -->|calls| SHIP
-  BFF -->|idempotency/cache| REDIS
+  BFF -->|HTTP_via_gateway| API
+  BFF -->|idempotency| REDIS
 
-  CART -->|store| REDIS
-  CART -->|writes| PG
-  ORDER -->|writes/read| PG
-  AUTH -->|writes| PG
-  USER -->|writes| PG
-  PROMO -->|writes| PG
-  SHIP -->|writes| PG
+  CART --> REDIS
+  ORDER --> PG
+  AUTH --> PG
+  USER --> PG
+  PROMO --> PG
+  NOTIF --> PG
+  PAYMENT --> PG
 
-  PROD -->|media| S3
-  PROD -->|category lookup| DDB
+  PROD --> S3
+  PROD --> DDB
+  INVENT --> DDB
 
-  PAYMENT -->|publishes| SQS
-  PAYMENT -->|webhook| STRIPE
-  PAYMENT -->|stores| PG
-
-  PROMO -->|events| SQS
-  INVENT -->|events| SQS
+  CART -->|SNS| SNS_SQS
+  ORDER --> SNS_SQS
+  PAYMENT --> SNS_SQS
+  PAYMENT --> STRIPE
+  NOTIF -->|SQS| SNS_SQS
   ORDER -->|reserve| INVENT
-
-  ALL_SERVICES([All services]) -->|logs/metrics| CW
+  AGENT -->|BFF_direct| BFF

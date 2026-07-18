@@ -6,21 +6,22 @@ import (
 	"github.com/google/uuid"
 )
 
+// Category is the API/domain model. Persistence is DynamoDB (see repository adapters).
 type Category struct {
-	ID                uuid.UUID   `bson:"_id" json:"_id"`
-	Name              string      `bson:"name" json:"name"`
-	ParentIDs         []uuid.UUID `bson:"parent_ids,omitempty" json:"parent_ids,omitempty"`
-	Image             string      `bson:"image,omitempty" json:"image,omitempty"`
-	Ancestors         []uuid.UUID `bson:"ancestors,omitempty" json:"ancestors,omitempty"`
-	Slug              string      `bson:"slug" json:"slug"`
-	Path              []string    `bson:"path,omitempty" json:"path,omitempty"`
-	Level             int         `bson:"level,omitempty" json:"level,omitempty"`
-	IsActive          bool        `bson:"is_active" json:"is_active"`
-	DirectProductCount int        `bson:"direct_product_count" json:"directProductCount"`  // Products directly in this category
-	TotalProductCount  int        `bson:"total_product_count" json:"totalProductCount"`    // Including descendants
-	CreatedAt         time.Time   `bson:"created_at" json:"created_at"`
-	UpdatedAt         time.Time   `bson:"updated_at" json:"updated_at"`
-	DeletedAt         *time.Time  `bson:"deleted_at,omitempty" json:"deleted_at,omitempty"`
+	ID                 uuid.UUID   `json:"_id"`
+	Name               string      `json:"name"`
+	ParentIDs          []uuid.UUID `json:"parent_ids,omitempty"`
+	Image              string      `json:"image,omitempty"`
+	Ancestors          []uuid.UUID `json:"ancestors,omitempty"`
+	Slug               string      `json:"slug"`
+	Path               []string    `json:"path,omitempty"`
+	Level              int         `json:"level,omitempty"`
+	IsActive           bool        `json:"is_active"`
+	DirectProductCount int         `json:"directProductCount"` // Products directly in this category
+	TotalProductCount  int         `json:"totalProductCount"`  // Including descendants
+	CreatedAt          time.Time   `json:"created_at"`
+	UpdatedAt          time.Time   `json:"updated_at"`
+	DeletedAt          *time.Time  `json:"deleted_at,omitempty"`
 
-	Children []*Category `bson:"-" json:"children,omitempty"` // transient field for frontend
+	Children []*Category `json:"children,omitempty"` // transient field for frontend
 }

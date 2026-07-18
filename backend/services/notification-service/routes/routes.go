@@ -10,8 +10,11 @@ import (
 
 func RegisterRoutes(router *gin.Engine, controller *controllers.NotificationController) {
 	// Public
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "OK", "service": "notification-service"})
+	live := func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "notification-service"}) }
+	router.GET("/health", live)
+	router.GET("/health/live", live)
+	router.GET("/health/ready", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ready", "service": "notification-service"})
 	})
 
 	// Admin only

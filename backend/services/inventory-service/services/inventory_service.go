@@ -65,13 +65,14 @@ func (s *InventoryService) SetStock(ctx context.Context, req *models.SetStockReq
 		return existing, nil
 	}
 
-	// First time: create a new inventory record
+	// First time: create a new inventory record (empty order_reservations for nested SET on reserve)
 	inv := &models.Inventory{
-		ProductID: req.ProductID,
-		Available: req.Available,
-		Reserved:  0,
-		Threshold: req.Threshold,
-		UpdatedAt: now,
+		ProductID:         req.ProductID,
+		Available:         req.Available,
+		Reserved:          0,
+		Threshold:         req.Threshold,
+		OrderReservations: map[string]int{},
+		UpdatedAt:         now,
 	}
 
 	if err := s.repo.Set(ctx, inv); err != nil {

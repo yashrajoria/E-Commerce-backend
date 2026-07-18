@@ -1,0 +1,11 @@
+-- Idempotent down: safe if objects were already removed.
+DROP TABLE IF EXISTS shipments CASCADE;
+DROP TABLE IF EXISTS notification_logs CASCADE;
+DROP TABLE IF EXISTS coupons CASCADE;
+DROP TABLE IF EXISTS stripe_processed_events CASCADE;
+DROP TABLE IF EXISTS payments CASCADE;
+DROP TABLE IF EXISTS order_items CASCADE;
+DROP TABLE IF EXISTS orders CASCADE;
+DROP TABLE IF EXISTS addresses CASCADE;
+DROP TABLE IF EXISTS refresh_tokens CASCADE;
+DROP TABLE IF EXISTS users CASCADE;

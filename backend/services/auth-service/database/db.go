@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	commondb "github.com/yashrajoria/common/db"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -69,12 +70,13 @@ func ConnectPostgres(autoMigrateModels ...interface{}) (*gorm.DB, error) {
 			sqlDB.SetMaxIdleConns(10)
 			sqlDB.SetConnMaxLifetime(2 * time.Hour)
 
-			// Auto-migrate any provided models (e.g. models.User, models.XYZ)
-			if len(autoMigrateModels) > 0 {
+			if len(autoMigrateModels) > 0 && commondb.AllowAutoMigrate() {
 				if err := db.AutoMigrate(autoMigrateModels...); err != nil {
 					log.Printf("❌ AutoMigrate failed: %v", err)
 					return nil, fmt.Errorf("AutoMigrate failed: %w", err)
 				}
+			} else if len(autoMigrateModels) > 0 {
+				log.Println("⏭️  Skipping AutoMigrate (ALLOW_AUTO_MIGRATE=false)")
 			}
 			return db, nil
 		}

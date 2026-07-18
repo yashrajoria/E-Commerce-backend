@@ -17,13 +17,25 @@ import (
 // DynamoAdapter is a DynamoDB-backed ProductRepo implementation.
 // It stores products in table with primary key `id` (string).
 type DynamoAdapter struct {
-	client *dynamodb.Client
-	table  string
+	client             *dynamodb.Client
+	table              string
+	categoryLinksTable string
 }
 
 func NewDynamoAdapter(client *dynamodb.Client, table string) *DynamoAdapter {
 	return &DynamoAdapter{client: client, table: table}
 }
+
+// WithCategoryLinksTable enables ProductCategories adjacency for category→product Query.
+func (d *DynamoAdapter) WithCategoryLinksTable(table string) *DynamoAdapter {
+	d.categoryLinksTable = table
+	return d
+}
+
+const (
+	skuIndexName      = "sku-index"
+	featuredIndexName = "featured-index"
+)
 
 type ddbProduct struct {
 	ProductID    string   `dynamodbav:"id"`
@@ -36,10 +48,86 @@ type ddbProduct struct {
 	SKU          string   `dynamodbav:"sku"`
 	CategoryIDs  []string `dynamodbav:"category_ids,omitempty"`
 	CategoryPath []string `dynamodbav:"category_path,omitempty"`
-	IsFeatured   bool     `dynamodbav:"is_featured"`
-	CreatedAt    string   `dynamodbav:"created_at"`
-	UpdatedAt    string   `dynamodbav:"updated_at"`
-	DeletedAt    *string  `dynamodbav:"deleted_at,omitempty"`
+	// IsFeatured is stored as "true"/"false" string for the featured-index GSI HASH key.
+	IsFeatured string  `dynamodbav:"is_featured"`
+	CreatedAt  string  `dynamodbav:"created_at"`
+	UpdatedAt  string  `dynamodbav:"updated_at"`
+	DeletedAt  *string `dynamodbav:"deleted_at,omitempty"`
+}
+
+func featuredKey(v bool) string {
+	if v {
+		return "true"
+	}
+	return "false"
+}
+
+func parseFeatured(s string) bool {
+	return strings.EqualFold(s, "true") || s == "1"
+}
+
+func (d *DynamoAdapter) productFromDDB(dp *ddbProduct) *models.Product {
+	p := &models.Product{}
+	p.ID, _ = uuid.Parse(dp.ProductID)
+	p.Name = dp.Name
+	p.Price = dp.Price
+	p.Quantity = dp.Quantity
+	if dp.Description != nil {
+		p.Description = *dp.Description
+	}
+	p.Images = dp.Images
+	if dp.Brand != nil {
+		p.Brand = *dp.Brand
+	}
+	p.SKU = dp.SKU
+	for _, s := range dp.CategoryIDs {
+		if u, err := uuid.Parse(s); err == nil {
+			p.CategoryIDs = append(p.CategoryIDs, u)
+		}
+	}
+	p.CategoryPath = dp.CategoryPath
+	p.IsFeatured = parseFeatured(dp.IsFeatured)
+	if t, err := time.Parse(time.RFC3339, dp.CreatedAt); err == nil {
+		p.CreatedAt = t
+	}
+	if t, err := time.Parse(time.RFC3339, dp.UpdatedAt); err == nil {
+		p.UpdatedAt = t
+	}
+	if dp.DeletedAt != nil {
+		if t, err := time.Parse(time.RFC3339, *dp.DeletedAt); err == nil {
+			p.DeletedAt = &t
+		}
+	}
+	return p
+}
+
+func (d *DynamoAdapter) toDDB(product *models.Product) ddbProduct {
+	dp := ddbProduct{
+		ProductID:    product.ID.String(),
+		Name:         product.Name,
+		Price:        product.Price,
+		Quantity:     product.Quantity,
+		Images:       product.Images,
+		SKU:          product.SKU,
+		CategoryPath: product.CategoryPath,
+		IsFeatured:   featuredKey(product.IsFeatured),
+		CreatedAt:    product.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:    product.UpdatedAt.Format(time.RFC3339),
+	}
+	if product.DeletedAt != nil {
+		s := product.DeletedAt.Format(time.RFC3339)
+		dp.DeletedAt = &s
+	}
+	if product.Description != "" {
+		dp.Description = &product.Description
+	}
+	if product.Brand != "" {
+		dp.Brand = &product.Brand
+	}
+	for _, uid := range product.CategoryIDs {
+		dp.CategoryIDs = append(dp.CategoryIDs, uid.String())
+	}
+	return dp
 }
 
 func (d *DynamoAdapter) FindByID(ctx context.Context, id uuid.UUID) (*models.Product, error) {
@@ -58,68 +146,11 @@ func (d *DynamoAdapter) FindByID(ctx context.Context, id uuid.UUID) (*models.Pro
 	if err := attributevalue.UnmarshalMap(out.Item, &dp); err != nil {
 		return nil, fmt.Errorf("unmarshal item: %w", err)
 	}
-	// Map to models.Product
-	p := &models.Product{}
-	p.ID, _ = uuid.Parse(dp.ProductID)
-	p.Name = dp.Name
-	p.Price = dp.Price
-	p.Quantity = dp.Quantity
-	if dp.Description != nil {
-		p.Description = *dp.Description
-	}
-	p.Images = dp.Images
-	if dp.Brand != nil {
-		p.Brand = *dp.Brand
-	}
-	p.SKU = dp.SKU
-	// convert category ids
-	for _, s := range dp.CategoryIDs {
-		if u, err := uuid.Parse(s); err == nil {
-			p.CategoryIDs = append(p.CategoryIDs, u)
-		}
-	}
-	p.CategoryPath = dp.CategoryPath
-	p.IsFeatured = dp.IsFeatured
-	if t, err := time.Parse(time.RFC3339, dp.CreatedAt); err == nil {
-		p.CreatedAt = t
-	}
-	if t, err := time.Parse(time.RFC3339, dp.UpdatedAt); err == nil {
-		p.UpdatedAt = t
-	}
-	if dp.DeletedAt != nil {
-		if t, err := time.Parse(time.RFC3339, *dp.DeletedAt); err == nil {
-			p.DeletedAt = &t
-		}
-	}
-	return p, nil
+	return d.productFromDDB(&dp), nil
 }
 
 func (d *DynamoAdapter) Create(ctx context.Context, product *models.Product) error {
-	dp := ddbProduct{
-		ProductID:    product.ID.String(),
-		Name:         product.Name,
-		Price:        product.Price,
-		Quantity:     product.Quantity,
-		Images:       product.Images,
-		SKU:          product.SKU,
-		CategoryPath: product.CategoryPath,
-		IsFeatured:   product.IsFeatured,
-		CreatedAt:    product.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:    product.UpdatedAt.Format(time.RFC3339),
-	}
-	if product.DeletedAt != nil {
-		s := product.DeletedAt.Format(time.RFC3339)
-		dp.DeletedAt = &s
-	}
-	if product.Description != "" {
-		dp.Description = &product.Description
-	}
-	if product.Brand != "" {
-		dp.Brand = &product.Brand
-	}
-	for _, uid := range product.CategoryIDs {
-		dp.CategoryIDs = append(dp.CategoryIDs, uid.String())
-	}
+	dp := d.toDDB(product)
 
 	item, err := attributevalue.MarshalMap(dp)
 	if err != nil {
@@ -128,6 +159,9 @@ func (d *DynamoAdapter) Create(ctx context.Context, product *models.Product) err
 	_, err = d.client.PutItem(ctx, &dynamodb.PutItemInput{TableName: &d.table, Item: item})
 	if err != nil {
 		return fmt.Errorf("dynamodb PutItem failed: %w", err)
+	}
+	if err := d.PutCategoryLinks(ctx, product.ID, product.CategoryIDs); err != nil {
+		return fmt.Errorf("sync category links: %w", err)
 	}
 	return nil
 }
@@ -153,7 +187,7 @@ func (d *DynamoAdapter) buildFilterExpression(filter map[string]interface{}) (fi
 		ph := fmt.Sprintf(":v%d", i)
 		nm := fmt.Sprintf("#f%d", i)
 		expressions = append(expressions, fmt.Sprintf("%s = %s", nm, ph))
-		av, _ := attributevalue.Marshal(v)
+		av, _ := attributevalue.Marshal(featuredKey(v))
 		attrValues[ph] = av
 		attrNames[nm] = "is_featured"
 		i++
@@ -225,8 +259,34 @@ func (d *DynamoAdapter) buildFilterExpression(filter map[string]interface{}) (fi
 	return &joined, attrValues, attrNames
 }
 
-// Find performs a Scan with pagination and optional FilterExpression.
+// isFeaturedOnlyFilter is true when the only business filter is is_featured
+// (soft-delete exclusion is always applied). Suitable for featured-index Query.
+func isFeaturedOnlyFilter(filter map[string]interface{}) (bool, bool) {
+	if filter == nil {
+		return false, false
+	}
+	featured, hasFeatured := filter["is_featured"].(bool)
+	if !hasFeatured {
+		return false, false
+	}
+	for k := range filter {
+		if k != "is_featured" {
+			return false, false
+		}
+	}
+	return true, featured
+}
+
+// Find uses featured-index Query when filtering only by is_featured;
+// ProductCategories Query when filtering by category_ids; otherwise Scan.
 func (d *DynamoAdapter) Find(ctx context.Context, filter map[string]interface{}, limit, skip int) ([]*models.Product, error) {
+	if ok, featured := isFeaturedOnlyFilter(filter); ok {
+		return d.findFeatured(ctx, featured, limit, skip)
+	}
+	if catIDs, ok := categoryIDsFromFilter(filter); ok && d.categoryLinksTable != "" {
+		return d.findByCategories(ctx, catIDs, filterWithoutCategoryIDs(filter), limit, skip)
+	}
+
 	filterExpr, attrValues, attrNames := d.buildFilterExpression(filter)
 
 	input := &dynamodb.ScanInput{
@@ -255,39 +315,7 @@ func (d *DynamoAdapter) Find(ctx context.Context, filter map[string]interface{},
 			if err := attributevalue.UnmarshalMap(it, &dp); err != nil {
 				return nil, fmt.Errorf("unmarshal item: %w", err)
 			}
-
-			p := &models.Product{}
-			p.ID, _ = uuid.Parse(dp.ProductID)
-			p.Name = dp.Name
-			p.Price = dp.Price
-			p.Quantity = dp.Quantity
-			if dp.Description != nil {
-				p.Description = *dp.Description
-			}
-			p.Images = dp.Images
-			if dp.Brand != nil {
-				p.Brand = *dp.Brand
-			}
-			p.SKU = dp.SKU
-			for _, s := range dp.CategoryIDs {
-				if u, err := uuid.Parse(s); err == nil {
-					p.CategoryIDs = append(p.CategoryIDs, u)
-				}
-			}
-			p.CategoryPath = dp.CategoryPath
-			p.IsFeatured = dp.IsFeatured
-			if t, err := time.Parse(time.RFC3339, dp.CreatedAt); err == nil {
-				p.CreatedAt = t
-			}
-			if t, err := time.Parse(time.RFC3339, dp.UpdatedAt); err == nil {
-				p.UpdatedAt = t
-			}
-			if dp.DeletedAt != nil {
-				if t, err := time.Parse(time.RFC3339, *dp.DeletedAt); err == nil {
-					p.DeletedAt = &t
-				}
-			}
-			results = append(results, p)
+			results = append(results, d.productFromDDB(&dp))
 			if limit > 0 && len(results) >= limit {
 				return results, nil
 			}
@@ -296,8 +324,105 @@ func (d *DynamoAdapter) Find(ctx context.Context, filter map[string]interface{},
 	return results, nil
 }
 
+func (d *DynamoAdapter) findByCategories(ctx context.Context, catIDs []string, residual map[string]interface{}, limit, skip int) ([]*models.Product, error) {
+	ids, err := d.ListProductIDsByCategory(ctx, catIDs)
+	if err != nil {
+		return nil, err
+	}
+	products, err := d.GetProductsByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	var results []*models.Product
+	seenMatches := 0
+	for _, p := range products {
+		if !productMatchesResidualFilter(p, residual) {
+			continue
+		}
+		if skip > 0 && seenMatches < skip {
+			seenMatches++
+			continue
+		}
+		results = append(results, p)
+		if limit > 0 && len(results) >= limit {
+			break
+		}
+	}
+	return results, nil
+}
+
+func (d *DynamoAdapter) findFeatured(ctx context.Context, featured bool, limit, skip int) ([]*models.Product, error) {
+	idx := featuredIndexName
+	keyCond := "#feat = :feat"
+	filterExpr := "attribute_not_exists(#deleted_at)"
+	input := &dynamodb.QueryInput{
+		TableName:              &d.table,
+		IndexName:              &idx,
+		KeyConditionExpression: &keyCond,
+		FilterExpression:       &filterExpr,
+		ExpressionAttributeNames: map[string]string{
+			"#feat":       "is_featured",
+			"#deleted_at": "deleted_at",
+		},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":feat": &types.AttributeValueMemberS{Value: featuredKey(featured)},
+		},
+		ScanIndexForward: ptrBool(false), // newest created_at first
+	}
+
+	var results []*models.Product
+	paginator := dynamodb.NewQueryPaginator(d.client, input)
+	seenMatches := 0
+
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("featured query failed: %w", err)
+		}
+		for _, it := range page.Items {
+			if skip > 0 && seenMatches < skip {
+				seenMatches++
+				continue
+			}
+			var dp ddbProduct
+			if err := attributevalue.UnmarshalMap(it, &dp); err != nil {
+				return nil, fmt.Errorf("unmarshal item: %w", err)
+			}
+			results = append(results, d.productFromDDB(&dp))
+			if limit > 0 && len(results) >= limit {
+				return results, nil
+			}
+		}
+	}
+	return results, nil
+}
+
+func ptrBool(v bool) *bool { return &v }
+
 // Count returns the item count using FilterExpression if provided
 func (d *DynamoAdapter) Count(ctx context.Context, filter map[string]interface{}) (int64, error) {
+	if catIDs, ok := categoryIDsFromFilter(filter); ok && d.categoryLinksTable != "" {
+		ids, err := d.ListProductIDsByCategory(ctx, catIDs)
+		if err != nil {
+			return 0, err
+		}
+		residual := filterWithoutCategoryIDs(filter)
+		if residual == nil {
+			return int64(len(ids)), nil
+		}
+		products, err := d.GetProductsByIDs(ctx, ids)
+		if err != nil {
+			return 0, err
+		}
+		var n int64
+		for _, p := range products {
+			if productMatchesResidualFilter(p, residual) {
+				n++
+			}
+		}
+		return n, nil
+	}
+
 	filterExpr, attrValues, attrNames := d.buildFilterExpression(filter)
 
 	input := &dynamodb.ScanInput{
@@ -330,27 +455,8 @@ func (d *DynamoAdapter) CreateMany(ctx context.Context, products []models.Produc
 		}
 		writeReqs := make([]types.WriteRequest, 0, end-i)
 		for _, p := range products[i:end] {
-			dp := ddbProduct{
-				ProductID:    p.ID.String(),
-				Name:         p.Name,
-				Price:        p.Price,
-				Quantity:     p.Quantity,
-				Images:       p.Images,
-				SKU:          p.SKU,
-				CategoryPath: p.CategoryPath,
-				IsFeatured:   p.IsFeatured,
-				CreatedAt:    p.CreatedAt.Format(time.RFC3339),
-				UpdatedAt:    p.UpdatedAt.Format(time.RFC3339),
-			}
-			if p.Description != "" {
-				dp.Description = &p.Description
-			}
-			if p.Brand != "" {
-				dp.Brand = &p.Brand
-			}
-			for _, uid := range p.CategoryIDs {
-				dp.CategoryIDs = append(dp.CategoryIDs, uid.String())
-			}
+			prod := p
+			dp := d.toDDB(&prod)
 			item, err := attributevalue.MarshalMap(dp)
 			if err != nil {
 				return fmt.Errorf("marshal batch item: %w", err)
@@ -381,6 +487,11 @@ func (d *DynamoAdapter) CreateMany(ctx context.Context, products []models.Produc
 			}
 			// simple backoff
 			time.Sleep(time.Duration(attempts*300) * time.Millisecond)
+		}
+		for _, p := range products[i:end] {
+			if err := d.PutCategoryLinks(ctx, p.ID, p.CategoryIDs); err != nil {
+				return fmt.Errorf("sync category links for %s: %w", p.ID, err)
+			}
 		}
 	}
 	return nil
@@ -414,7 +525,13 @@ func (d *DynamoAdapter) Update(ctx context.Context, id uuid.UUID, updates map[st
 		}
 		expr += fmt.Sprintf("%s = %s", namePh, ph)
 		exprNames[namePh] = k
-		av, err := attributevalue.Marshal(v)
+		val := v
+		if k == "is_featured" {
+			if b, ok := v.(bool); ok {
+				val = featuredKey(b)
+			}
+		}
+		av, err := attributevalue.Marshal(val)
 		if err != nil {
 			return fmt.Errorf("marshal update value: %w", err)
 		}
@@ -450,6 +567,22 @@ func (d *DynamoAdapter) Update(ctx context.Context, id uuid.UUID, updates map[st
 	if err != nil {
 		return fmt.Errorf("update item failed: %w", err)
 	}
+	if raw, ok := updates["category_ids"]; ok {
+		var cats []uuid.UUID
+		switch v := raw.(type) {
+		case []uuid.UUID:
+			cats = v
+		case []string:
+			for _, s := range v {
+				if u, err := uuid.Parse(s); err == nil {
+					cats = append(cats, u)
+				}
+			}
+		}
+		if err := d.ReplaceCategoryLinks(ctx, id, cats); err != nil {
+			return fmt.Errorf("sync category links: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -479,6 +612,7 @@ func (d *DynamoAdapter) Delete(ctx context.Context, id uuid.UUID) error {
 	if err != nil {
 		return fmt.Errorf("soft delete item failed: %w", err)
 	}
+	_ = d.DeleteCategoryLinksForProduct(ctx, id)
 	return nil
 }
 
@@ -496,72 +630,45 @@ func (d *DynamoAdapter) FindBySKUs(ctx context.Context, skus []string) ([]models
 	if len(skus) == 0 {
 		return nil, nil
 	}
-	// Build FilterExpression: sku IN (:s0, :s1...)
-	expr := ""
-	values := make(map[string]types.AttributeValue)
-	for i, s := range skus {
-		ph := fmt.Sprintf(":s%d", i)
-		if i > 0 {
-			expr += ", "
-		}
-		expr += ph
-		av, err := attributevalue.Marshal(s)
-		if err != nil {
-			return nil, fmt.Errorf("marshal sku: %w", err)
-		}
-		values[ph] = av
-	}
-	filterExpr := fmt.Sprintf("sku IN (%s) AND attribute_not_exists(#deleted_at)", expr)
-	input := &dynamodb.ScanInput{
-		TableName:                 &d.table,
-		FilterExpression:          &filterExpr,
-		ExpressionAttributeValues: values,
-		ExpressionAttributeNames:  map[string]string{"#deleted_at": "deleted_at"},
-	}
-	paginator := dynamodb.NewScanPaginator(d.client, input)
+	idx := skuIndexName
+	filterExpr := "attribute_not_exists(#deleted_at)"
+	exprNames := map[string]string{"#deleted_at": "deleted_at", "#sku": "sku"}
 	var res []models.Product
-	for paginator.HasMorePages() {
-		page, err := paginator.NextPage(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("scan for skus failed: %w", err)
+	seen := make(map[string]struct{})
+
+	for _, sku := range skus {
+		if sku == "" {
+			continue
 		}
-		for _, it := range page.Items {
-			var dp ddbProduct
-			if err := attributevalue.UnmarshalMap(it, &dp); err != nil {
-				return nil, fmt.Errorf("unmarshal item: %w", err)
+		if _, dup := seen[sku]; dup {
+			continue
+		}
+		seen[sku] = struct{}{}
+
+		keyCond := "#sku = :sku"
+		input := &dynamodb.QueryInput{
+			TableName:              &d.table,
+			IndexName:              &idx,
+			KeyConditionExpression: &keyCond,
+			FilterExpression:       &filterExpr,
+			ExpressionAttributeNames: exprNames,
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":sku": &types.AttributeValueMemberS{Value: sku},
+			},
+		}
+		paginator := dynamodb.NewQueryPaginator(d.client, input)
+		for paginator.HasMorePages() {
+			page, err := paginator.NextPage(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("sku query failed: %w", err)
 			}
-			p := models.Product{}
-			p.ID, _ = uuid.Parse(dp.ProductID)
-			p.Name = dp.Name
-			p.Price = dp.Price
-			p.Quantity = dp.Quantity
-			if dp.Description != nil {
-				p.Description = *dp.Description
-			}
-			p.Images = dp.Images
-			if dp.Brand != nil {
-				p.Brand = *dp.Brand
-			}
-			p.SKU = dp.SKU
-			for _, s := range dp.CategoryIDs {
-				if u, err := uuid.Parse(s); err == nil {
-					p.CategoryIDs = append(p.CategoryIDs, u)
+			for _, it := range page.Items {
+				var dp ddbProduct
+				if err := attributevalue.UnmarshalMap(it, &dp); err != nil {
+					return nil, fmt.Errorf("unmarshal item: %w", err)
 				}
+				res = append(res, *d.productFromDDB(&dp))
 			}
-			p.CategoryPath = dp.CategoryPath
-			p.IsFeatured = dp.IsFeatured
-			if t, err := time.Parse(time.RFC3339, dp.CreatedAt); err == nil {
-				p.CreatedAt = t
-			}
-			if t, err := time.Parse(time.RFC3339, dp.UpdatedAt); err == nil {
-				p.UpdatedAt = t
-			}
-			if dp.DeletedAt != nil {
-				if t, err := time.Parse(time.RFC3339, *dp.DeletedAt); err == nil {
-					p.DeletedAt = &t
-				}
-			}
-			res = append(res, p)
 		}
 	}
 	return res, nil

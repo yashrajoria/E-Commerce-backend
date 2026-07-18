@@ -1,30 +1,71 @@
 package middlewares
 
 import (
+	"time"
+
+	"api-gateway/logger"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
-const CorrelationIDHeader = "X-Correlation-ID"
+const (
+	CorrelationIDHeader = "X-Correlation-ID"
+	RequestIDHeader     = "X-Request-ID"
+)
 
-// CorrelationIDMiddleware ensures every request has a unique correlation ID
-// for distributed tracing across microservices.
-func CorrelationIDMiddleware() gin.HandlerFunc {
+// RequestIDMiddleware ensures every request has X-Request-ID (and mirrors it to X-Correlation-ID when missing).
+func RequestIDMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		corID := c.GetHeader(CorrelationIDHeader)
-		if corID == "" {
-			corID = uuid.New().String()
+		reqID := c.GetHeader(RequestIDHeader)
+		if reqID == "" {
+			reqID = c.GetHeader(CorrelationIDHeader)
+		}
+		if reqID == "" {
+			reqID = uuid.New().String()
 		}
 
-		// Set in Gin context for internal use
-		c.Set("CorrelationID", corID)
-
-		// Set in request header so it gets forwarded to downstream services
-		c.Request.Header.Set(CorrelationIDHeader, corID)
-
-		// Set in response header so clients can report it in case of errors
-		c.Writer.Header().Set(CorrelationIDHeader, corID)
-
+		c.Set("RequestID", reqID)
+		c.Set("CorrelationID", reqID)
+		c.Request.Header.Set(RequestIDHeader, reqID)
+		c.Request.Header.Set(CorrelationIDHeader, reqID)
+		c.Writer.Header().Set(RequestIDHeader, reqID)
+		c.Writer.Header().Set(CorrelationIDHeader, reqID)
 		c.Next()
+	}
+}
+
+// CorrelationIDMiddleware is kept for compatibility; prefer RequestIDMiddleware.
+func CorrelationIDMiddleware() gin.HandlerFunc {
+	return RequestIDMiddleware()
+}
+
+// StructuredRequestLogger logs method/path/status/latency with request ID.
+func StructuredRequestLogger() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		path := c.Request.URL.Path
+		method := c.Request.Method
+		c.Next()
+		reqID, _ := c.Get("RequestID")
+		fields := []zap.Field{
+			zap.String("method", method),
+			zap.String("path", path),
+			zap.Int("status", c.Writer.Status()),
+			zap.Duration("latency", time.Since(start)),
+			zap.String("client_ip", c.ClientIP()),
+			zap.Int("body_size", c.Writer.Size()),
+			zap.Any("request_id", reqID),
+		}
+		status := c.Writer.Status()
+		switch {
+		case status >= 500:
+			logger.Log.Error("http_request", fields...)
+		case status >= 400:
+			logger.Log.Warn("http_request", fields...)
+		default:
+			logger.Log.Info("http_request", fields...)
+		}
 	}
 }

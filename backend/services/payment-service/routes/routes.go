@@ -8,6 +8,15 @@ import (
 )
 
 func RegisterPaymentRoutes(r *gin.Engine, pc *controllers.PaymentController) {
+	live := func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "ok", "service": "payment-service"})
+	}
+	r.GET("/health", live)
+	r.GET("/health/live", live)
+	r.GET("/health/ready", func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "ready", "service": "payment-service"})
+	})
+
 	payments := r.Group("/payment")
 	payments.Use(middleware.AuthMiddleware())
 	{

@@ -20,6 +20,7 @@ import (
 	"github.com/go-redis/redis/v8"
 	"github.com/joho/godotenv"
 	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	apperrors "github.com/yashrajoria/common/errors"
 	"go.uber.org/zap"
 )
 
@@ -30,7 +31,7 @@ func CORSMiddleware() gin.HandlerFunc {
 	config := cors.Config{
 		AllowCredentials: true,
 		AllowMethods:     []string{"POST", "HEAD", "PATCH", "OPTIONS", "GET", "PUT", "DELETE"},
-		AllowHeaders:     []string{"Content-Type", "Content-Length", "Accept-Encoding", "X-CSRF-Token", "Authorization", "Accept", "Origin", "Cache-Control", "X-Requested-With"},
+		AllowHeaders:     []string{"Content-Type", "Content-Length", "Accept-Encoding", "X-CSRF-Token", "Authorization", "Accept", "Origin", "Cache-Control", "X-Requested-With", "X-Request-ID", "X-Correlation-ID", "Idempotency-Key"},
 	}
 
 	if allowed == "*" {
@@ -67,6 +68,12 @@ func CustomRecovery(zlogger *zap.Logger) gin.HandlerFunc {
 func main() {
 	_ = godotenv.Load()
 
+	if mode := os.Getenv("GIN_MODE"); mode != "" {
+		gin.SetMode(mode)
+	} else {
+		gin.SetMode(gin.ReleaseMode)
+	}
+
 	// Initialize logger
 	if err := logger.InitLogger(); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
@@ -96,10 +103,11 @@ func main() {
 	// Configure Gin to handle trailing slashes
 	r.RedirectTrailingSlash = true
 
-	r.Use(gin.Logger())
+	r.Use(middlewares.RequestIDMiddleware())
 	r.Use(CustomRecovery(logger.Log))
-
 	r.Use(CORSMiddleware())
+	r.Use(apperrors.ErrorMiddleware())
+	r.Use(middlewares.StructuredRequestLogger())
 
 	// CloudWatch HTTP metrics middleware
 	if metricsClient != nil && metricsClient.IsEnabled() {
@@ -121,31 +129,6 @@ func main() {
 
 	r.GET("/test-cors", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "CORS is working!"})
-	})
-	// Structured HTTP request logging → CloudWatch via Zap writer
-	r.Use(func(c *gin.Context) {
-		start := time.Now()
-		path := c.Request.URL.Path
-		method := c.Request.Method
-		c.Next()
-		latency := time.Since(start)
-		status := c.Writer.Status()
-		fields := []zap.Field{
-			zap.String("method", method),
-			zap.String("path", path),
-			zap.Int("status", status),
-			zap.Duration("latency", latency),
-			zap.String("client_ip", c.ClientIP()),
-			zap.Int("body_size", c.Writer.Size()),
-		}
-		switch {
-		case status >= 500:
-			logger.Log.Error("http_request", fields...)
-		case status >= 400:
-			logger.Log.Warn("http_request", fields...)
-		default:
-			logger.Log.Info("http_request", fields...)
-		}
 	})
 
 	// Initialize Redis

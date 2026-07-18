@@ -5,9 +5,10 @@ WORKDIR /app
 RUN apk add --no-cache git
 RUN apk add --no-cache tzdata
 
-# Copy local replaced packages first
+# Copy local replaced packages first.
+# go.mod replaces: ../pkg/aws and ../services/common (relative to WORKDIR /app)
 COPY pkg/aws /pkg/aws
-COPY services/common /common
+COPY services/common /services/common
 
 COPY api-gateway/go.mod api-gateway/go.sum ./
 RUN go mod download

@@ -14,14 +14,26 @@ import (
 func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 
 	// ── Global Middlewares ────────────────────────────────────────────────────
-	// FIX: ALL r.Use() calls must come BEFORE any group or route registration.
-	// In Gin, middleware added to the engine after groups are created is not
-	// reliably inherited by those groups (handler chains are built at registration
-	// time). This was causing /bff/auth/login and other routes to return 404.
-	r.Use(middlewares.CorrelationIDMiddleware())
+	r.Use(middlewares.RequestIDMiddleware())
 	if redisClient != nil {
 		r.Use(middlewares.GlobalRateLimiter(redisClient))
 	}
+
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "api-gateway"})
+	})
+	r.GET("/health/live", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "api-gateway"})
+	})
+	r.GET("/health/ready", func(c *gin.Context) {
+		if redisClient != nil {
+			if err := redisClient.Ping(c.Request.Context()).Err(); err != nil {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": err.Error()})
+				return
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ready", "service": "api-gateway"})
+	})
 
 	// ── forwardTo helper ──────────────────────────────────────────────────────
 	// URL path so it can append it correctly to TargetBase.
@@ -222,7 +234,8 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	// ADMIN ROUTES — JWT + admin role required
 	// =========================================================================
 
-	// Products — write
+	// Products — write (presign is under /bff/admin/products/presign — do not
+	// register admin.GET("/products/presign") here; it conflicts with public /products/*any)
 	admin.POST("/products", products)
 	admin.POST("/products/*any", products)
 	admin.PUT("/products/*any", products)

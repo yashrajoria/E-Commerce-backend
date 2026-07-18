@@ -19,7 +19,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	commondb "github.com/yashrajoria/common/db"
 	commonmw "github.com/yashrajoria/common/middleware"
+	apperrors "github.com/yashrajoria/common/errors"
 	"go.uber.org/zap"
 )
 
@@ -35,8 +37,12 @@ func main() {
 		log.Fatal("[PaymentService] ❌ Failed to connect to DB:", err)
 	}
 
-	if err := database.DB.AutoMigrate(&models.Payment{}); err != nil {
-		log.Fatal("[PaymentService] ❌ Failed to migrate Payment model:", err)
+	if commondb.AllowAutoMigrate() {
+		if err := database.DB.AutoMigrate(&models.Payment{}, &models.StripeProcessedEvent{}); err != nil {
+			log.Fatal("[PaymentService] ❌ Failed to migrate Payment model:", err)
+		}
+	} else {
+		log.Println("[PaymentService] Skipping AutoMigrate (ALLOW_AUTO_MIGRATE=false)")
 	}
 
 	log.Println(cfg)
@@ -109,6 +115,7 @@ func main() {
 	// HTTP server
 	r := gin.New()
 	r.Use(gin.Recovery())
+	r.Use(apperrors.ErrorMiddleware())
 
 	// CloudWatch HTTP metrics middleware
 	if metricsClient != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"time"
 
 	"payment-service/models"
@@ -14,12 +15,15 @@ import (
 	"gorm.io/gorm"
 )
 
-// frontendURL returns the configured frontend base URL, falling back to localhost.
+// frontendURL returns the storefront base URL used for Stripe success/cancel redirects.
+// Prefer FRONTEND_URL / STOREFRONT_URL — must NOT point at the admin app (:3000).
 func (pc *PaymentController) frontendURL() string {
-	if url := os.Getenv("FRONTEND_URL"); url != "" {
-		return url
+	for _, key := range []string{"FRONTEND_URL", "STOREFRONT_URL"} {
+		if url := strings.TrimRight(strings.TrimSpace(os.Getenv(key)), "/"); url != "" {
+			return url
+		}
 	}
-	return "http://localhost:3000"
+	return "http://localhost:3001"
 }
 
 // respondError logs a warning and writes a JSON error response.

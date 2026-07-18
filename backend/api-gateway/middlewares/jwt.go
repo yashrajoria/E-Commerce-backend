@@ -77,8 +77,12 @@ func JWTMiddleware() gin.HandlerFunc {
 		userID, _ := claims["sub"].(string)
 		email, _ := claims["email"].(string)
 		role, _ := claims["role"].(string)
+		if userID == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token subject"})
+			c.Abort()
+			return
+		}
 
-		// log claims for debugging
 		logger.Log.Debug("jwt claims parsed",
 			zap.String("user_id", userID),
 			zap.String("role", role),
@@ -86,7 +90,7 @@ func JWTMiddleware() gin.HandlerFunc {
 
 		c.Set("user_id", userID)
 		c.Set("email", email)
-		c.Set("role", role)
+		c.Set("role", strings.ToLower(strings.TrimSpace(role)))
 
 		c.Next()
 	}
@@ -97,7 +101,7 @@ func AdminRoleMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		roleVal, exists := c.Get("role")
 		roleStr, ok := roleVal.(string)
-		if !exists || !ok || roleStr != "admin" {
+		if !exists || !ok || strings.ToLower(strings.TrimSpace(roleStr)) != "admin" {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Admin role required"})
 			c.Abort()
 			return

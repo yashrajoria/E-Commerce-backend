@@ -2,6 +2,7 @@ package routes
 
 import (
 	"product-service/controllers"
+	"product-service/middleware"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
@@ -48,28 +49,31 @@ func registerProductRoutes(
 	bulkHandler *controllers.BulkImportHandler,
 	presignHandler *controllers.PresignedURLHandler,
 ) {
+	r.RedirectTrailingSlash = false
+	r.RedirectFixedPath = false
+
 	products := r.Group("/products")
 	{
-		// Basic CRUD operations
-		products.GET("/", productCtrl.GetProducts)         // List with filters
-		products.GET("/:id", productCtrl.GetProductByID)   // Get single product
-		products.POST("/", productCtrl.CreateProduct)      // Create product
-		products.PUT("/:id", productCtrl.UpdateProduct)    // Update product
-		products.DELETE("/:id", productCtrl.DeleteProduct) // Delete product
+		// Public reads — both "" and "/" so gateway /products does not 301-loop
+		products.GET("", productCtrl.GetProducts)
+		products.GET("/", productCtrl.GetProducts)
 
-		// Presigned URL generation for S3 uploads
-		products.GET("/presign", presignHandler.GetPresignUpload)              // Legacy: presign by SKU
-		products.POST("/:id/images/presign", presignHandler.PostPresignUpload) // Presign for specific product
+		// Admin writes / helpers (before /:id so "presign" is not captured as an id)
+		admin := products.Group("/")
+		admin.Use(middleware.AdminOnly())
+		{
+			admin.POST("/", productCtrl.CreateProduct)
+			admin.GET("/presign", presignHandler.GetPresignUpload)
+			admin.POST("/bulk/validate", bulkHandler.ValidateBulkImport)
+			admin.POST("/bulk", bulkHandler.CreateBulkProducts)
+			admin.GET("/bulk/jobs/:id", bulkHandler.GetBulkImportJobStatus)
+			admin.POST("/bulk/delete", productCtrl.BulkDeleteProducts)
+			admin.PUT("/:id", productCtrl.UpdateProduct)
+			admin.DELETE("/:id", productCtrl.DeleteProduct)
+			admin.POST("/:id/images/presign", presignHandler.PostPresignUpload)
+		}
 
-		// Bulk import operations
-		products.POST("/bulk/validate", bulkHandler.ValidateBulkImport)    // Validate CSV
-		products.POST("/bulk", bulkHandler.CreateBulkProducts)             // Import CSV (sync/async)
-		products.GET("/bulk/jobs/:id", bulkHandler.GetBulkImportJobStatus) // Get job status
-
-		// Bulk delete operations
-		products.POST("/bulk/delete", productCtrl.BulkDeleteProducts) // Delete multiple products
-
-		// Internal service-to-service endpoint
+		products.GET("/:id", productCtrl.GetProductByID)
 		products.GET("/internal/:id", productCtrl.GetProductByIDInternal)
 	}
 }
@@ -80,13 +84,18 @@ func registerCategoryRoutes(
 ) {
 	categories := r.Group("/categories")
 	{
-		// CRUD operations
-		categories.GET("/", categoryCtrl.GetCategories)        // Get category tree
-		categories.GET("/:id", categoryCtrl.GetCategory)       // Get single category
-		categories.POST("/", categoryCtrl.CreateCategory)      // Create category
-		categories.PUT("/:id", categoryCtrl.UpdateCategory)    // Update category
-		categories.DELETE("/:id", categoryCtrl.DeleteCategory) // Delete category
-		categories.POST("/bulk", categoryCtrl.CreateBulkCategories)
+		categories.GET("", categoryCtrl.GetCategories)
+		categories.GET("/", categoryCtrl.GetCategories)
+		categories.GET("/:id", categoryCtrl.GetCategory)
+
+		admin := categories.Group("/")
+		admin.Use(middleware.AdminOnly())
+		{
+			admin.POST("/", categoryCtrl.CreateCategory)
+			admin.PUT("/:id", categoryCtrl.UpdateCategory)
+			admin.DELETE("/:id", categoryCtrl.DeleteCategory)
+			admin.POST("/bulk", categoryCtrl.CreateBulkCategories)
+		}
 	}
 }
 
@@ -101,7 +110,7 @@ func SetupRouter(
 
 	// Create controllers
 	productCtrl := controllers.NewProductController(productService, redisClient)
-	categoryCtrl := controllers.NewCategoryController(categoryService)
+	categoryCtrl := controllers.NewCategoryController(categoryService, redisClient)
 
 	// Create handlers
 	bulkHandler := controllers.NewBulkImportHandler(

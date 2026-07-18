@@ -65,6 +65,9 @@ func buildServiceParams(page, perPage int, filters *ProductFilters) services.Lis
 // buildProductListResponse builds a simple paginated response map
 func buildProductListResponse(products []*models.Product, total int64, page, perPage int) map[string]interface{} {
 	totalPages := int((total + int64(perPage) - 1) / int64(perPage))
+	if products == nil {
+		products = []*models.Product{}
+	}
 
 	return map[string]interface{}{
 		"products": products,
