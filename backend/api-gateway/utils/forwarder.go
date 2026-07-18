@@ -9,6 +9,7 @@ import (
 	"api-gateway/logger"
 
 	"github.com/gin-gonic/gin"
+	"github.com/yashrajoria/common/internalauth"
 	"go.uber.org/zap"
 )
 
@@ -83,7 +84,8 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 	// Copy original headers, but never trust client-supplied identity claims.
 	for k, v := range c.Request.Header {
 		lower := strings.ToLower(k)
-		if lower == "x-user-id" || lower == "x-user-email" || lower == "x-user-role" {
+		if lower == "x-user-id" || lower == "x-user-email" || lower == "x-user-role" ||
+			lower == "x-internal-service-token" {
 			continue
 		}
 		req.Header[k] = v
@@ -91,6 +93,7 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 	req.Header.Del("X-User-ID")
 	req.Header.Del("X-User-Email")
 	req.Header.Del("X-User-Role")
+	req.Header.Del(internalauth.Header)
 
 	// Inject identity from JWT context only (set by JWTMiddleware on protected/admin routes).
 	if userID, exists := c.Get("user_id"); exists {
@@ -111,6 +114,10 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 			req.AddCookie(&http.Cookie{Name: "user_role", Value: r, HttpOnly: true, Path: "/"})
 		}
 	}
+
+	// Gateway is the trusted ingress — attach mesh token for internal-gated routes
+	// (e.g. inventory /check) that frontend users reach via JWT on the gateway.
+	internalauth.Apply(req)
 
 	resp, err := forwardHTTPClient.Do(req)
 	if err != nil {

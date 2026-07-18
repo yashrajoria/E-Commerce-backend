@@ -28,6 +28,9 @@ func RegisterRoutes(r *gin.Engine, ctrl *controllers.BFFController) {
 
 		// Home page: products + categories
 		public.GET("/home", ctrl.Home)
+
+		// Guest promo validation (also available at gateway /coupons/validate)
+		public.POST("/promotions/validate", ctrl.Proxy("POST", "/coupons/validate"))
 	}
 
 	// Protected routes - require authentication
@@ -60,8 +63,7 @@ func RegisterRoutes(r *gin.Engine, ctrl *controllers.BFFController) {
 		protected.GET("/payment/status/by-order/:order_id", ctrl.PaymentStatusByOrderID)
 		protected.POST("/payment/verify-payment", ctrl.Proxy("POST", "/payment/verify-payment"))
 
-		// Promotions / Coupons
-		protected.POST("/promotions/validate", ctrl.Proxy("POST", "/coupons/validate"))
+		// Promotions / Coupons (authenticated lookup)
 		protected.GET("/promotions/:code", ctrl.Proxy("GET", "/coupons/:code"))
 	}
 

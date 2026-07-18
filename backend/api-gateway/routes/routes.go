@@ -108,6 +108,9 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	public.GET("/categories", categories)
 	public.GET("/categories/*any", categories)
 
+	// Coupons — guest checkout can validate without login
+	public.POST("/coupons/validate", coupons)
+
 	// ── BFF routes ────────────────────────────────────────────────────────────
 
 	// BFF — PUBLIC (no auth required)
@@ -117,6 +120,7 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	bffPublic.POST("/auth/verify-email", bff)
 	bffPublic.POST("/auth/resend-verification", bff)
 	bffPublic.POST("/auth/refresh", bff)
+	bffPublic.POST("/promotions/validate", bff)
 	bffPublic.GET("/products", bff)
 	bffPublic.GET("/products/*action", bff)
 	bffPublic.GET("/categories", bff)
@@ -225,8 +229,7 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	protected.GET("/inventory/:productId", inventory)
 	protected.POST("/inventory/check", inventory)
 
-	// Coupons — validate and read single
-	protected.POST("/coupons/validate", coupons)
+	// Coupons — authenticated lookup of a single code
 	protected.GET("/coupons/:code", coupons)
 
 	// Shipping

@@ -8,6 +8,8 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/yashrajoria/common/internalauth"
 )
 
 // InventoryClient communicates with the inventory service via HTTP
@@ -76,6 +78,7 @@ func (c *InventoryClient) GetStock(ctx context.Context, productID string) (*Inve
 	if err != nil {
 		return nil, err
 	}
+	internalauth.Apply(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -115,6 +118,7 @@ func (c *InventoryClient) ReserveStock(ctx context.Context, orderID string, item
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	internalauth.Apply(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -154,6 +158,7 @@ func (c *InventoryClient) ReleaseStock(ctx context.Context, orderID string, item
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	internalauth.Apply(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -187,6 +192,7 @@ func (c *InventoryClient) ConfirmStock(ctx context.Context, orderID string, item
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	internalauth.Apply(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

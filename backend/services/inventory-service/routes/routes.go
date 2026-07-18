@@ -8,7 +8,7 @@ import (
 
 // RegisterRoutes registers all inventory service routes.
 // Admin mutations require X-User-Role=admin (via gateway).
-// reserve/release/confirm stay open for trusted service-mesh callers (order-service).
+// reserve/release/confirm/check require INTERNAL_SERVICE_TOKEN (order/product mesh).
 func RegisterRoutes(r *gin.Engine, ctrl *controllers.InventoryController) {
 	// Prevent /inventory ↔ /inventory/ 301 loops through the gateway proxy.
 	r.RedirectTrailingSlash = false
@@ -28,9 +28,14 @@ func RegisterRoutes(r *gin.Engine, ctrl *controllers.InventoryController) {
 		}
 
 		inventory.GET("/:productId", ctrl.GetStock)
-		inventory.POST("/check", ctrl.CheckStock)
-		inventory.POST("/reserve", ctrl.ReserveStock)
-		inventory.POST("/release", ctrl.ReleaseStock)
-		inventory.POST("/confirm", ctrl.ConfirmStock)
+
+		mesh := inventory.Group("")
+		mesh.Use(middleware.RequireInternalServiceToken())
+		{
+			mesh.POST("/check", ctrl.CheckStock)
+			mesh.POST("/reserve", ctrl.ReserveStock)
+			mesh.POST("/release", ctrl.ReleaseStock)
+			mesh.POST("/confirm", ctrl.ConfirmStock)
+		}
 	}
 }

@@ -10,8 +10,10 @@ docker compose -f docker-compose.yml -f docker-compose.localstack.yml up -d --bu
 
 echo ""
 echo "Gateway:      http://localhost:8080"
-echo "BFF:          http://localhost:8088"
 echo "OpenAPI UI:   http://localhost:8099"
 echo "LocalStack:   http://localhost:4566"
+echo ""
+echo "Microservices are not published on the host (gateway only)."
+echo "Need direct ports? add -f docker-compose.dev-ports.yml"
 echo ""
 echo "Tip: ./scripts/migrate.sh up  (against localhost:5432 when Postgres is up)"
