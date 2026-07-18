@@ -15,6 +15,8 @@ type PaymentRepository interface {
 	GetPaymentByStripeID(ctx context.Context, stripeID string) (*models.Payment, error)
 	UpdatePaymentByOrderID(ctx context.Context, orderID uuid.UUID, status string, checkoutURL *string, stripePaymentID *string) error
 	Update(ctx context.Context, orderID uuid.UUID, updates map[string]interface{}) error
+	// MarkStripeEventProcessed inserts event_id; returns false if already processed.
+	MarkStripeEventProcessed(ctx context.Context, eventID, eventType string) (inserted bool, err error)
 }
 
 type gormPaymentRepo struct {
@@ -71,4 +73,15 @@ func (r *gormPaymentRepo) UpdatePaymentByOrderID(ctx context.Context, orderID uu
 
 func (r *gormPaymentRepo) Update(ctx context.Context, orderID uuid.UUID, updates map[string]interface{}) error {
 	return r.db.WithContext(ctx).Model(&models.Payment{}).Where("order_id = ?", orderID).Updates(updates).Error
+}
+
+func (r *gormPaymentRepo) MarkStripeEventProcessed(ctx context.Context, eventID, eventType string) (bool, error) {
+	tx := r.db.WithContext(ctx).Exec(
+		`INSERT INTO stripe_processed_events (event_id, event_type, processed_at) VALUES (?, ?, NOW()) ON CONFLICT (event_id) DO NOTHING`,
+		eventID, eventType,
+	)
+	if tx.Error != nil {
+		return false, tx.Error
+	}
+	return tx.RowsAffected > 0, nil
 }

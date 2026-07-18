@@ -55,3 +55,10 @@ func (r *UserRepository) RevokeRefreshTokenByTokenID(ctx context.Context, tokenI
 func (r *UserRepository) RevokeAllUserRefreshTokens(ctx context.Context, userID uuid.UUID) error {
 	return r.db.WithContext(ctx).Model(&models.RefreshToken{}).Where("user_id = ?", userID).Update("revoked", true).Error
 }
+
+// CountByRole returns how many users have the given role.
+func (r *UserRepository) CountByRole(ctx context.Context, role string) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&models.User{}).Where("role = ?", role).Count(&count).Error
+	return count, err
+}

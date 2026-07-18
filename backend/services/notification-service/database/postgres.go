@@ -2,6 +2,7 @@ package database
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
 	"gorm.io/driver/postgres"
+	commondb "github.com/yashrajoria/common/db"
 	"gorm.io/gorm"
 )
 
@@ -72,10 +74,12 @@ func ConnectPostgres(logger *zap.Logger, autoMigrateModels ...interface{}) (*gor
 
 			logger.Info("Connected to PostgreSQL successfully")
 
-			if len(autoMigrateModels) > 0 {
+			if len(autoMigrateModels) > 0 && commondb.AllowAutoMigrate() {
 				if err := db.AutoMigrate(autoMigrateModels...); err != nil {
 					return nil, fmt.Errorf("AutoMigrate failed: %w", err)
 				}
+			} else if len(autoMigrateModels) > 0 {
+				log.Println("Skipping AutoMigrate (ALLOW_AUTO_MIGRATE=false)")
 			}
 			return db, nil
 		}

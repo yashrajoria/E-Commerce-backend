@@ -38,8 +38,8 @@ func (s *StripeService) CreateCheckoutSession(amount int64, currency, orderID, u
 	params := &stripe.CheckoutSessionParams{
 		PaymentMethodTypes: stripe.StringSlice([]string{"card"}),
 		Mode:               stripe.String(string(stripe.CheckoutSessionModePayment)),
-		SuccessURL:         stripe.String("http://localhost:3000/payment/success?session_id={CHECKOUT_SESSION_ID}"),
-		CancelURL:          stripe.String("http://localhost:3000/payment/cancel"),
+		SuccessURL:         stripe.String("http://localhost:3001/payment/success?session_id={CHECKOUT_SESSION_ID}"),
+		CancelURL:          stripe.String("http://localhost:3001/payment/cancel"),
 		LineItems: []*stripe.CheckoutSessionLineItemParams{
 			{
 				PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{

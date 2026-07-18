@@ -80,31 +80,35 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 		return
 	}
 
-	// Copy original headers
+	// Copy original headers, but never trust client-supplied identity claims.
 	for k, v := range c.Request.Header {
+		lower := strings.ToLower(k)
+		if lower == "x-user-id" || lower == "x-user-email" || lower == "x-user-role" {
+			continue
+		}
 		req.Header[k] = v
 	}
+	req.Header.Del("X-User-ID")
+	req.Header.Del("X-User-Email")
+	req.Header.Del("X-User-Role")
 
-	// Propagate user claims to downstream services.
-	// Set both X-User-* headers (for services that check headers) and cookies
-	// (for services that check cookies). This dual-injection ensures compatibility
-	// across all microservices regardless of how they read the user identity.
+	// Inject identity from JWT context only (set by JWTMiddleware on protected/admin routes).
 	if userID, exists := c.Get("user_id"); exists {
 		if uid, ok := userID.(string); ok && uid != "" {
 			req.Header.Set("X-User-ID", uid)
-			req.AddCookie(&http.Cookie{Name: "user_id", Value: uid})
+			req.AddCookie(&http.Cookie{Name: "user_id", Value: uid, HttpOnly: true, Path: "/"})
 		}
 	}
 	if email, exists := c.Get("email"); exists {
 		if e, ok := email.(string); ok && e != "" {
 			req.Header.Set("X-User-Email", e)
-			req.AddCookie(&http.Cookie{Name: "user_email", Value: e})
+			req.AddCookie(&http.Cookie{Name: "user_email", Value: e, HttpOnly: true, Path: "/"})
 		}
 	}
 	if role, exists := c.Get("role"); exists {
 		if r, ok := role.(string); ok && r != "" {
 			req.Header.Set("X-User-Role", r)
-			req.AddCookie(&http.Cookie{Name: "user_role", Value: r})
+			req.AddCookie(&http.Cookie{Name: "user_role", Value: r, HttpOnly: true, Path: "/"})
 		}
 	}
 

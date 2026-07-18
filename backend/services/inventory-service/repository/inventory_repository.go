@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
@@ -11,6 +12,16 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/yashrajoria/inventory-service/models"
 )
+
+// inventoryTxnToken builds a DynamoDB ClientRequestToken (max 36 chars).
+// Op must be a single letter so reserve/release/confirm stay distinct for the same order.
+func inventoryTxnToken(op, orderID string) string {
+	compact := strings.ReplaceAll(orderID, "-", "")
+	if len(compact) > 35 {
+		compact = compact[:35]
+	}
+	return op + compact
+}
 
 var (
 	ErrNotFound          = errors.New("inventory record not found")
@@ -85,12 +96,16 @@ func (r *DynamoInventoryRepository) Get(ctx context.Context, productID string) (
 }
 
 func (r *DynamoInventoryRepository) Set(ctx context.Context, inv *models.Inventory) error {
+	orderRes := inv.OrderReservations
+	if orderRes == nil {
+		orderRes = map[string]int{}
+	}
 	di := ddbInventory{
 		ProductID:         inv.ProductID,
 		Available:         inv.Available,
 		Reserved:          inv.Reserved,
 		Threshold:         inv.Threshold,
-		OrderReservations: inv.OrderReservations,
+		OrderReservations: orderRes,
 		UpdatedAt:         inv.UpdatedAt.Format(time.RFC3339),
 	}
 
@@ -162,9 +177,14 @@ func (r *DynamoInventoryRepository) ReserveAll(ctx context.Context, orderID stri
 		qtyAV, _ := attributevalue.Marshal(item.Quantity)
 		nowAV, _ := attributevalue.Marshal(now)
 
-		// Update available, reserved, and track the reservation by orderID for idempotency
-		expr := "SET #avail = #avail - :qty, #resv = #resv + :qty, #order_resv.#orderID = :qty, updated_at = :now"
+		// Ensure order_reservations map exists (DynamoDB nested SET requires parent map),
+		// then atomically decrement available and record per-order reservation.
+		expr := "SET #avail = #avail - :qty, #resv = #resv + :qty, " +
+			"#order_resv = if_not_exists(#order_resv, :empty), " +
+			"#order_resv.#orderID = :qty, updated_at = :now"
 		cond := "#avail >= :qty AND attribute_not_exists(#order_resv.#orderID)"
+
+		emptyMap, _ := attributevalue.Marshal(map[string]int{})
 
 		transactItems = append(transactItems, types.TransactWriteItem{
 			Update: &types.Update{
@@ -179,15 +199,19 @@ func (r *DynamoInventoryRepository) ReserveAll(ctx context.Context, orderID stri
 					"#orderID":    orderID,
 				},
 				ExpressionAttributeValues: map[string]types.AttributeValue{
-					":qty": qtyAV,
-					":now": nowAV,
+					":qty":   qtyAV,
+					":now":   nowAV,
+					":empty": emptyMap,
 				},
 			},
 		})
 	}
 
+	// ClientRequestToken makes the whole transaction idempotent on retries (AWS best practice).
+	token := inventoryTxnToken("v", orderID) // "v" = reserve (distinct from release/confirm)
 	_, err := r.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
-		TransactItems: transactItems,
+		TransactItems:      transactItems,
+		ClientRequestToken: &token,
 	})
 	if err != nil {
 		var ccf *types.TransactionCanceledException
@@ -237,8 +261,10 @@ func (r *DynamoInventoryRepository) ReleaseAll(ctx context.Context, orderID stri
 		})
 	}
 
+	token := inventoryTxnToken("r", orderID)
 	_, err := r.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
-		TransactItems: transactItems,
+		TransactItems:      transactItems,
+		ClientRequestToken: &token,
 	})
 	if err != nil {
 		return fmt.Errorf("transact release failed: %w", err)
@@ -279,8 +305,10 @@ func (r *DynamoInventoryRepository) ConfirmAll(ctx context.Context, orderID stri
 		})
 	}
 
+	token := inventoryTxnToken("c", orderID)
 	_, err := r.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
-		TransactItems: transactItems,
+		TransactItems:      transactItems,
+		ClientRequestToken: &token,
 	})
 	if err != nil {
 		return fmt.Errorf("transact confirm failed: %w", err)

@@ -9,6 +9,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
+	commondb "github.com/yashrajoria/common/db"
 	"gorm.io/gorm"
 )
 
@@ -61,10 +62,12 @@ func ConnectPostgres(autoMigrateModels ...interface{}) (*gorm.DB, error) {
 		db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 		if err == nil {
 			log.Println("✅ Connected to PostgreSQL successfully!")
-			if len(autoMigrateModels) > 0 {
+			if len(autoMigrateModels) > 0 && commondb.AllowAutoMigrate() {
 				if err := db.AutoMigrate(autoMigrateModels...); err != nil {
 					return nil, fmt.Errorf("AutoMigrate failed: %w", err)
 				}
+			} else if len(autoMigrateModels) > 0 {
+				log.Println("Skipping AutoMigrate (ALLOW_AUTO_MIGRATE=false)")
 			}
 			return db, nil
 		}
@@ -76,7 +79,7 @@ func ConnectPostgres(autoMigrateModels ...interface{}) (*gorm.DB, error) {
 
 func Connect() error {
 	var err error
-	DB, err = ConnectPostgres(&models.User{}, &models.Address{})
+	DB, err = ConnectPostgres(&models.Address{})
 	if err != nil {
 		log.Println("❌ Failed to connect to PostgreSQL:", err)
 		return err

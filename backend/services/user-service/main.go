@@ -12,7 +12,6 @@ import (
 	"user-service/controllers"
 	"user-service/database"
 	"user-service/middleware"
-	"user-service/models"
 	"user-service/repository"
 	"user-service/routes"
 	"user-service/services"
@@ -38,14 +37,9 @@ func main() {
 		logger.Fatal("Failed to load config", zap.Error(err))
 	}
 
+	// AutoMigrate for addresses runs inside database.Connect when ALLOW_AUTO_MIGRATE=true.
 	if err := database.Connect(); err != nil {
 		logger.Fatal("Database connection failed", zap.Error(err))
-	}
-
-	if os.Getenv("ENV") != "production" {
-		if err := models.Migrate(database.DB); err != nil {
-			logger.Fatal("Migration failed", zap.Error(err))
-		}
 	}
 
 	r := gin.New()
@@ -82,9 +76,9 @@ func main() {
 	// CORS is handled by API Gateway, not here
 	// Remove duplicate CORS middleware to avoid conflicts
 
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "OK"})
-	})
+	r.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	r.GET("/health/live", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	r.GET("/health/ready", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ready"}) })
 
 	// Initialize Repository, Service and Controller
 	userRepo := repository.NewGormUserRepository(database.DB)

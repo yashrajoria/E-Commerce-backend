@@ -19,6 +19,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	commondb "github.com/yashrajoria/common/db"
+	apperrors "github.com/yashrajoria/common/errors"
 	"go.uber.org/zap"
 )
 
@@ -38,8 +40,10 @@ func main() {
 	if err := database.Connect(); err != nil {
 		logger.Fatal("DB connection failed", zap.Error(err))
 	}
-	if err := database.DB.AutoMigrate(&models.Order{}, &models.OrderItem{}); err != nil {
-		logger.Fatal("Migration failed", zap.Error(err))
+	if commondb.AllowAutoMigrate() {
+		if err := database.DB.AutoMigrate(&models.Order{}, &models.OrderItem{}); err != nil {
+			logger.Fatal("Migration failed", zap.Error(err))
+		}
 	}
 
 	// --- AWS setup ---
@@ -54,6 +58,7 @@ func main() {
 	// --- HTTP router ---
 	r := gin.New()
 	r.Use(gin.Recovery())
+	r.Use(apperrors.ErrorMiddleware())
 	r.Use(middleware.ConfigMiddleware(cfg.ProductServiceURL))
 
 	// CloudWatch HTTP metrics middleware (metricsClient created later, use closure)
@@ -122,7 +127,9 @@ func main() {
 	orderController := controllers.NewOrderController(orderService)
 	routes.RegisterOrderRoutes(r, orderController)
 
-	r.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "OK"}) })
+	r.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	r.GET("/health/live", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	r.GET("/health/ready", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ready"}) })
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: r}
 
 	// --- Graceful shutdown context ---

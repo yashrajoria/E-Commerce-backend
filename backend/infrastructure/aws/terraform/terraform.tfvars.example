@@ -5,6 +5,7 @@ s3_bucket  = "shopswift"
 products = "Products"
 categories = "Categories"
 inventory = "Inventory"
+product_categories = "ProductCategories"
 
 ["sqs_queues"]
 order_processing = "order-processing-queue"

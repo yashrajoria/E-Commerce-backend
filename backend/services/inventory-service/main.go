@@ -111,9 +111,9 @@ func main() {
 
 	routes.RegisterRoutes(r, inventoryController)
 
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "OK"})
-	})
+	r.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	r.GET("/health/live", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	r.GET("/health/ready", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ready"}) })
 
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: r}
 

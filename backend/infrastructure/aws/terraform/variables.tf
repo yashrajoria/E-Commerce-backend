@@ -14,9 +14,10 @@ variable "ddb_tables" {
   description = "DynamoDB table names"
   type = map(string)
   default = {
-    products   = "Products"
-    categories = "Categories"
-    inventory  = "Inventory"
+    products            = "Products"
+    categories          = "Categories"
+    inventory           = "Inventory"
+    product_categories  = "ProductCategories"
   }
 }
 

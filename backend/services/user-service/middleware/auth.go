@@ -31,11 +31,6 @@ func AuthMiddleware() gin.HandlerFunc {
 func AdminOnly() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role := c.GetHeader("X-User-Role")
-		if role == "" {
-			if v, err := c.Cookie("user_role"); err == nil && v != "" {
-				role = v
-			}
-		}
 		if role != "admin" {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Forbidden: admin access required"})
 			return

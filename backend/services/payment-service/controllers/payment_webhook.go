@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -31,25 +32,44 @@ func (pc *PaymentController) StripeWebhook(c *gin.Context) {
 
 	rawPayload, _ := json.Marshal(event)
 
+	// Fulfill first, then record event_id. Claiming before fulfill permanently
+	// drops Stripe retries if mid-flight processing fails (Context7 / Stripe guidance:
+	// fulfillment must be safely re-runnable; terminal payment status is the concurrency guard).
+	var fulfillErr error
 	switch event.Type {
-	case "checkout.session.completed":
-		pc.handleCheckoutCompleted(event, rawPayload)
+	case "checkout.session.completed", "checkout.session.async_payment_succeeded":
+		fulfillErr = pc.handleCheckoutCompleted(event, rawPayload)
 	case "payment_intent.succeeded":
-		pc.handlePaymentIntentStatus(event, "succeeded", rawPayload)
+		fulfillErr = pc.handlePaymentIntentStatus(event, "succeeded", rawPayload)
 	case "payment_intent.payment_failed":
-		pc.handlePaymentIntentStatus(event, "failed", rawPayload)
+		fulfillErr = pc.handlePaymentIntentStatus(event, "failed", rawPayload)
 	default:
 		pc.Logger.Info("Unhandled webhook event type", zap.String("event_type", string(event.Type)))
+	}
+	if fulfillErr != nil {
+		pc.Logger.Error("Stripe webhook fulfillment failed",
+			zap.String("event_id", event.ID),
+			zap.String("event_type", string(event.Type)),
+			zap.Error(fulfillErr),
+		)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "webhook processing failed"})
+		return
+	}
+
+	if _, err := pc.Repo.MarkStripeEventProcessed(c.Request.Context(), event.ID, string(event.Type)); err != nil {
+		// Fulfillment already succeeded; log and still ack so Stripe does not loop forever.
+		pc.Logger.Warn("Failed to record Stripe event id after fulfill",
+			zap.String("event_id", event.ID), zap.Error(err))
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "received"})
 }
 
-func (pc *PaymentController) handleCheckoutCompleted(event stripe.Event, rawPayload []byte) {
+func (pc *PaymentController) handleCheckoutCompleted(event stripe.Event, rawPayload []byte) error {
 	var sess stripe.CheckoutSession
 	if err := json.Unmarshal(event.Data.Raw, &sess); err != nil {
 		pc.Logger.Error("Failed to unmarshal checkout session", zap.Error(err))
-		return
+		return fmt.Errorf("unmarshal checkout session: %w", err)
 	}
 
 	orderID := sess.Metadata["order_id"]
@@ -59,7 +79,8 @@ func (pc *PaymentController) handleCheckoutCompleted(event stripe.Event, rawPayl
 			zap.String("session_id", sess.ID),
 			zap.Any("metadata", sess.Metadata),
 		)
-		return
+		// Acknowledge without retry — missing metadata will not self-heal.
+		return nil
 	}
 
 	// Look up by order_id from metadata rather than stripe_payment_id.
@@ -69,7 +90,7 @@ func (pc *PaymentController) handleCheckoutCompleted(event stripe.Event, rawPayl
 	if err != nil {
 		pc.Logger.Error("Invalid order_id in checkout session metadata",
 			zap.String("order_id", orderID), zap.Error(err))
-		return
+		return nil
 	}
 
 	payment, err := pc.Repo.GetPaymentByOrderID(context.Background(), orderUUID)
@@ -78,7 +99,7 @@ func (pc *PaymentController) handleCheckoutCompleted(event stripe.Event, rawPayl
 			zap.String("order_id", orderID),
 			zap.String("session_id", sess.ID),
 			zap.Error(err))
-		return
+		return fmt.Errorf("payment not found for order %s: %w", orderID, err)
 	}
 
 	if terminalStatuses[payment.Status] {
@@ -86,7 +107,7 @@ func (pc *PaymentController) handleCheckoutCompleted(event stripe.Event, rawPayl
 			zap.String("payment_id", payment.Payment_ID.String()),
 			zap.String("status", payment.Status),
 		)
-		return
+		return nil
 	}
 
 	now := time.Now()
@@ -102,7 +123,7 @@ func (pc *PaymentController) handleCheckoutCompleted(event stripe.Event, rawPayl
 			zap.String("payment_id", payment.Payment_ID.String()),
 			zap.Error(err),
 		)
-		return
+		return fmt.Errorf("update payment status: %w", err)
 	}
 	pc.publishPaymentEvent(models.PaymentEvent{
 		Type:      "payment_succeeded",
@@ -113,12 +134,14 @@ func (pc *PaymentController) handleCheckoutCompleted(event stripe.Event, rawPayl
 		Currency:  payment.Currency,
 		Timestamp: now.UTC(),
 	})
+	return nil
 }
-func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, status string, rawPayload []byte) {
+
+func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, status string, rawPayload []byte) error {
 	var pi stripe.PaymentIntent
 	if err := json.Unmarshal(event.Data.Raw, &pi); err != nil {
 		pc.Logger.Error("Failed to unmarshal payment intent", zap.Error(err))
-		return
+		return fmt.Errorf("unmarshal payment intent: %w", err)
 	}
 
 	// Primary lookup: direct PaymentIntent flow stores the PI ID as stripe_payment_id.
@@ -132,13 +155,13 @@ func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, statu
 				zap.String("payment_intent_id", pi.ID),
 				zap.Error(err),
 			)
-			return
+			return fmt.Errorf("payment not found for payment_intent %s: %w", pi.ID, err)
 		}
 		orderUUID, parseErr := uuid.Parse(orderIDStr)
 		if parseErr != nil {
 			pc.Logger.Error("Invalid order_id in PaymentIntent metadata",
 				zap.String("order_id", orderIDStr), zap.Error(parseErr))
-			return
+			return nil
 		}
 		payment, err = pc.Repo.GetPaymentByOrderID(context.Background(), orderUUID)
 		if err != nil {
@@ -147,7 +170,7 @@ func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, statu
 				zap.String("order_id", orderIDStr),
 				zap.Error(err),
 			)
-			return
+			return fmt.Errorf("payment not found for payment_intent %s: %w", pi.ID, err)
 		}
 	}
 
@@ -156,7 +179,7 @@ func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, statu
 			zap.String("payment_id", payment.Payment_ID.String()),
 			zap.String("status", payment.Status),
 		)
-		return
+		return nil
 	}
 
 	now := time.Now()
@@ -176,7 +199,7 @@ func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, statu
 			zap.String("payment_id", payment.Payment_ID.String()),
 			zap.Error(err),
 		)
-		return
+		return fmt.Errorf("update payment status: %w", err)
 	}
 
 	pc.publishPaymentEvent(models.PaymentEvent{
@@ -202,10 +225,11 @@ func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, statu
 		payload, err := json.Marshal(notificationEvent)
 		if err != nil {
 			pc.Logger.Warn("Failed to marshal payment_failed notification event", zap.Error(err))
-			return
+			return nil
 		}
 		if err := pc.SNS.Publish(context.Background(), pc.NotificationTopicArn, payload); err != nil {
 			pc.Logger.Warn("Failed to publish payment_failed notification event", zap.Error(err))
 		}
 	}
+	return nil
 }

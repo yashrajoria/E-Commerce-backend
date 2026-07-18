@@ -12,6 +12,7 @@ import (
 	"product-service/services"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
@@ -28,15 +29,23 @@ type CategoryServiceAPI interface {
 
 type CategoryController struct {
 	service   CategoryServiceAPI
+	cache     *CacheManager
 	validator *RequestValidator
 	timeout   time.Duration
 }
 
-func NewCategoryController(s CategoryServiceAPI) *CategoryController {
+func NewCategoryController(s CategoryServiceAPI, redisClient *redis.Client) *CategoryController {
 	return &CategoryController{
 		service:   s,
+		cache:     NewCacheManager(redisClient),
 		validator: NewRequestValidator(),
 		timeout:   DefaultContextTimeout,
+	}
+}
+
+func (ctrl *CategoryController) invalidateProductCache(ctx context.Context) {
+	if err := ctrl.cache.Invalidate(ctx); err != nil {
+		zap.L().Error("Failed to invalidate product cache after category mutation", zap.Error(err))
 	}
 }
 
@@ -68,6 +77,7 @@ func (ctrl *CategoryController) CreateCategory(c *gin.Context) {
 		return
 	}
 
+	ctrl.invalidateProductCache(ctx)
 	c.JSON(http.StatusCreated, category)
 }
 
@@ -146,6 +156,7 @@ func (ctrl *CategoryController) UpdateCategory(c *gin.Context) {
 		return
 	}
 
+	ctrl.invalidateProductCache(ctx)
 	c.JSON(http.StatusOK, gin.H{"message": "Category updated successfully"})
 }
 
@@ -167,6 +178,7 @@ func (ctrl *CategoryController) DeleteCategory(c *gin.Context) {
 		return
 	}
 
+	ctrl.invalidateProductCache(ctx)
 	c.JSON(http.StatusOK, gin.H{"message": "Category deleted successfully"})
 }
 
@@ -192,6 +204,7 @@ func (ctrl *CategoryController) CreateBulkCategories(c *gin.Context) {
 		return
 	}
 
+	ctrl.invalidateProductCache(ctx)
 	c.JSON(http.StatusCreated, gin.H{
 		"message":    fmt.Sprintf("Successfully created %d categories", len(categories)),
 		"categories": categories,

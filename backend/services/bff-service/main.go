@@ -18,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	apperrors "github.com/yashrajoria/common/errors"
 	"go.uber.org/zap"
 )
 
@@ -69,6 +70,7 @@ func main() {
 
 	r := gin.New()
 	r.Use(gin.Recovery())
+	r.Use(apperrors.ErrorMiddleware())
 
 	// Initialize structured logger for request logging
 	zapLogger, _ := zap.NewProduction()

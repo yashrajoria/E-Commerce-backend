@@ -62,5 +62,6 @@ async def health_check():
     return {"status": "healthy", "version": "3.0.0"}
 
 @router.get("/tools")
+@router.get("/agent/tools")
 async def list_tools():
     return {"tools": TOOL_REGISTRY}

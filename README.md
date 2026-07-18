@@ -1,196 +1,150 @@
 <div align="center">
-  <h1>🚀 ShopSwift - Microservices Backend</h1>
-  <p><strong>Scalable, production-ready e-commerce backend built with Go and modern microservices architecture</strong></p>
-  
-  ![Go](https://img.shields.io/badge/Go-100%25-00ADD8?style=flat&logo=go&logoColor=white)
-![Commits](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/yashrajoria/68669c1c711655a41895753490af2898/raw/commits-badge.json)
-![Status](https://img.shields.io/badge/Status-Active-success?style=flat)
+  <h1>ShopSwift — Microservices Backend</h1>
+  <p><strong>Scalable e-commerce backend: Go microservices, Postgres, DynamoDB, Redis, SNS/SQS</strong></p>
 
-### 🛠️ Tech Stack
-
-![Go](https://img.shields.io/badge/Go-1.20+-00ADD8?logo=go&logoColor=white)
-![Microservices](https://img.shields.io/badge/Architecture-Microservices-blue)
-![REST API](https://img.shields.io/badge/API-RESTful-green)
-![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL-336791?logo=postgresql&logoColor=white)
-![MongoDB](https://img.shields.io/badge/DB-MongoDB-47A248?logo=mongodb&logoColor=white)
-![Docker](https://img.shields.io/badge/Deploy-Docker-2496ED?logo=docker&logoColor=white)
-![Kubernetes](https://img.shields.io/badge/Deploy-Kubernetes-326CE5?logo=kubernetes&logoColor=white)
+  ![Go](https://img.shields.io/badge/Go-1.25-00ADD8?style=flat&logo=go&logoColor=white)
+  ![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL-336791?logo=postgresql&logoColor=white)
+  ![DynamoDB](https://img.shields.io/badge/DB-DynamoDB-4053D6?logo=amazondynamodb&logoColor=white)
+  ![Redis](https://img.shields.io/badge/Cache-Redis-DC382D?logo=redis&logoColor=white)
+  ![Docker](https://img.shields.io/badge/Deploy-Docker-2496ED?logo=docker&logoColor=white)
+  ![LocalStack](https://img.shields.io/badge/Local-AWS-LocalStack-purple)
 </div>
 
 ---
 
-## 📋 Overview
+## Overview
 
-This repository contains the microservices-based backend for ShopSwift, an enterprise-grade e-commerce platform. The system is designed for high availability, scalability, and maintainability, leveraging a distributed architecture with independent services.
+ShopSwift backend is a Go (plus Python agent) microservices platform with an API gateway, BFF, and domain services. Local development uses Docker Compose + **LocalStack** for S3, DynamoDB, SNS, and SQS.
 
-The backend is built entirely in **Go**, providing superior performance, efficient concurrency handling, and a robust standard library for building distributed systems.
+## Architecture (short)
 
----
+| Layer | Role |
+|-------|------|
+| **API Gateway** `:8080` | Routing, cookies/auth headers, rate limits, correlation / request IDs |
+| **BFF** `:8088` | Frontend aggregation; Redis SetNX checkout idempotency |
+| **Domain services** | Auth, user, product, cart, order, payment, inventory, promotion, shipping, notification, agent |
+| **Data** | Postgres (transactions), DynamoDB (catalog/inventory), Redis (cart/cache/locks), S3 (images) |
+| **Messaging** | SNS topics → SQS queues (checkout, payment, notifications) |
 
-## 🏗️ Architecture
+See [backend/docs/architecture.md](backend/docs/architecture.md), [backend/docs/data-and-messaging.md](backend/docs/data-and-messaging.md), and [backend/docs/best-practices-and-gaps.md](backend/docs/best-practices-and-gaps.md).
 
-The backend follows a microservices architectural pattern, consisting of:
+### Services and ports
 
-### **API Gateway**
-The entry point for all client requests, responsible for:
-- Request routing to appropriate services
-- Authentication and authorization
-- Rate limiting and request validation
-- Centralized logging and monitoring
+| Service | Port | Stack | Primary storage |
+|---------|------|-------|-----------------|
+| api-gateway | 8080 | Go / Gin | Redis (rate limit) |
+| auth-service | 8081 | Go | Postgres |
+| product-service | 8082 | Go | DynamoDB + Redis + S3 |
+| order-service | 8083 | Go | Postgres + SQS/SNS |
+| inventory-service | 8084 | Go | DynamoDB |
+| user-service | 8085 | Go | Postgres |
+| cart-service | 8086 | Go | Redis |
+| payment-service | 8087 | Go | Postgres + Stripe + SQS/SNS |
+| bff-service | 8088 | Go | Redis |
+| agent-service | 8089→8000 | Python FastAPI | Stateless (calls BFF) |
+| promotion-service | 8090 | Go | Postgres + SQS/SNS |
+| shipping-service | 8091 | Go | In-memory / JSON rates (no DB) |
+| notification-service | 8092 | Go | Postgres + SQS |
+| docs (Swagger UI) | 8099 | swagger-ui | — |
+| LocalStack | 4566 | AWS emulator | S3/DDB/SNS/SQS |
+| postgres | 5432 | Postgres | DB `ecommerce` |
+| redis | 6379 | Redis 7 | — |
 
-### **Core Services**
-- **BFF (Backend-for-Frontend):** Optimized aggregation layer with Redis-backed idempotency.
-- **Auth Service:** Manages user authentication, registration, and session tokens.
-- **Promotion Service:** Distributed coupon management with usage limit enforcement.
-- **Shipping Service:** Dynamic zone-based rate calculation (Local & Cloud ready).
-- **Cart Service:** Manages shopping cart state and validation.
-- **Product Service:** Manages product catalog, categories, and inventory data.
-- **Order Service:** Handles order placement, tracking, and history.
-- **Common:** Shared libraries, utilities, and middleware.
+## Tech stack
 
----
+- **Languages:** Go 1.25 (workspace), Python (agent-service)
+- **HTTP:** Gin; gateway proxies to services and BFF
+- **Postgres:** auth, user, order, payment, promotion, notification
+- **DynamoDB:** products, categories, inventory (not MongoDB)
+- **Redis:** cart, BFF checkout locks, gateway rate limit, product cache
+- **AWS (or LocalStack):** S3, SNS, SQS, Secrets Manager (optional), CloudWatch (optional)
+- **Payments:** Stripe + stripe-cli webhook forwarding in Compose
 
-## ✨ Key Features
-
-- **Distributed System:** Independent services that can be scaled and deployed separately.
-- **Idempotent Checkout:** Atomic Redis-backed logic to prevent duplicate orders.
-- **Dynamic Shipping:** Intelligent zone-based rate calculation without external costs.
-- **Atomic Promotions:** Safe coupon usage tracking across distributed systems.
-- **API Gateway Routing:** Centralized entry point with optimized request handling.
-- **High Performance:** Leverages Go's efficient runtime and concurrency primitives.
-
----
-
-## 🛠️ Tech Stack
-
-- **Language:** Go (Golang)
-- **Architecture:** Microservices
-- **Communication:** RESTful APIs
-- **Databases Supported:**
-  - PostgreSQL (Relational data)
-  - MongoDB (Document data)
-- **Deployment:** Docker & Kubernetes ready
-- **Tooling:**
-  - Standard Go toolchain
-  - GDB for debugging
-  - Version control with Git
-
----
-
-## 📁 Project Structure
+## Project structure
 
 ```
 E-Commerce-backend/
 └── backend/
-    ├── api-gateway/         # Central API entry point and router
-    └── services/            # Microservices directory
-        ├── auth-service/    # Authentication and identity management
-        ├── common/          # Shared utilities and middleware
-        ├── inventory-service/# Real-time stock and inventory
-        ├── order-service/   # Order processing and management
-        ├── product-service/ # Product catalog and management
-        └── user-service/    # User profiles and account data
+    ├── api-gateway/
+    ├── services/
+    │   ├── agent-service/          # Python AI agent
+    │   ├── auth-service/
+    │   ├── bff-service/
+    │   ├── cart-service/
+    │   ├── common/                 # Shared Go libs
+    │   ├── inventory-service/
+    │   ├── notification-service/
+    │   ├── order-service/
+    │   ├── payment-service/
+    │   ├── product-service/
+    │   ├── promotion-service/
+    │   ├── shipping-service/
+    │   └── user-service/
+    ├── docs/                       # Architecture, OpenAPI, API md
+    ├── migrations/                 # SQL migrations (golang-migrate)
+    ├── localstack/                 # LocalStack image + bootstrap
+    ├── infrastructure/aws/         # Terraform / deploy helpers
+    ├── docker-compose.yml
+    ├── docker-compose.localstack.yml
+    └── scripts/dev-up.sh           # Recommended local start
 ```
 
----
-
-## 🚀 Getting Started
+## Getting started
 
 ### Prerequisites
-- Go 1.20 or higher
-- PostgreSQL & MongoDB
-- Git
 
-### Installation
+- Docker + Docker Compose
+- Go 1.25+ (optional, for running services outside Docker)
+- Copy `backend/.env.example` → `backend/.env` and set secrets (JWT, Stripe, SMTP, Postgres password)
 
-1. **Clone the repository**
-```bash
-git clone https://github.com/yashrajoria/E-Commerce-backend.git
-cd E-Commerce-backend
-```
+### Run the full stack (recommended)
 
-2. **Navigate to a specific service**
-```bash
-cd backend/services/auth-service
-```
-
-3. **Install dependencies**
-```bash
-go mod download
-```
-
-### Running Locally
-
-Each service can be run independently:
+Local AWS emulation is **required** for notification, order, payment, and product flows:
 
 ```bash
-go run main.go
+cd backend
+cp -n .env.example .env   # if needed
+./scripts/dev-up.sh
+# equivalent:
+# docker compose -f docker-compose.yml -f docker-compose.localstack.yml up -d --build
 ```
 
-To run the entire system, it's recommended to start the services in order (Auth, Products, etc.) and then start the API Gateway.
+Useful URLs:
 
----
+- Gateway: http://localhost:8080  
+- BFF: http://localhost:8088  
+- OpenAPI UI: http://localhost:8099  
+- LocalStack: http://localhost:4566  
 
-## 🔐 Security
+### Migrations
 
-The backend implements several security best practices:
-- Centralized authentication via Auth Service
-- Password hashing with validation
-- Secure middleware for protected routes
-- Request validation and sanitization
-- Environment variable management for sensitive data
+```bash
+cd backend
+./scripts/migrate.sh up
+```
 
----
+Set `ALLOW_AUTO_MIGRATE=false` in production so schema comes only from SQL migrations. Local Compose defaults `ALLOW_AUTO_MIGRATE=true` for DX.
 
-## 🚧 Future Roadmap
+### Docs
 
-- [ ] Implementation of gRPC for inter-service communication
-- [ ] Centralized configuration management
-- [ ] Service discovery with Consul or Etcd
-- [ ] Message queue integration (RabbitMQ/Kafka) for async tasks
-- [ ] Comprehensive unit and integration test suite
-- [ ] Prometheus and Grafana for metrics and monitoring
-- [ ] ELK stack for centralized logging
-- [ ] Distributed tracing with Jaeger
+- [Architecture](backend/docs/architecture.md)
+- [Data & messaging](backend/docs/data-and-messaging.md)
+- [API docs index](backend/docs/api/README.md)
+- [Best practices & gaps](backend/docs/best-practices-and-gaps.md)
 
----
+## Security
 
-## 📝 Development Notes
+- Auth service issues JWT / cookies; gateway forwards identity
+- Secrets via env / IAM / LocalStack secrets (not committed)
+- Stripe webhooks verified with signing secret; event ID dedup
 
-### Technical Decisions
-- **Go Selection:** Chosen for its performance, type safety, and first-class support for networking and concurrency.
-- **Microservices vs Monolith:** Adopted to allow independent scaling and development of different domains.
-- **RESTful Design:** Provides a standardized and well-documented interface for frontend applications.
+## Roadmap (remaining)
 
-### Performance
-- Minimal runtime overhead
-- Efficient memory management
-- Fast startup times for services
-- High throughput handling
+- [ ] Broader contract / SQS consumer tests in CI
+- [ ] Full OpenAPI agent-ready pass (`operationId`, error schemas)
+- [ ] Prometheus / OpenTelemetry exporters
+- [ ] Remove unused Mongo helpers and dormant shipping DB code
 
----
+## Author
 
-## 🤝 Contributing
-
-Contributions are welcome! This project has over 100+ commits and is actively evolving.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
----
-
-## 👨‍💻 Author
-
-**Yash Rajoria**
-- GitHub: [@yashrajoria](https://github.com/yashrajoria)
-- LinkedIn: [yashrajoria](https://www.linkedin.com/in/yashrajoria)
-
----
-
-<div align="center">
-  <p><strong>⭐ Star this repository if you find it helpful!</strong></p>
-  <p>Made with ❤️ by Yash Rajoria</p>
-</div>
+**Yash Rajoria** — [GitHub](https://github.com/yashrajoria) · [LinkedIn](https://www.linkedin.com/in/yashrajoria)

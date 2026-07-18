@@ -2,7 +2,8 @@
 
 Base URL: http://localhost:8088
 
-Security: uses API Gateway auth (cookie-based). Supported header: `Idempotency-Key` (optional) for POST idempotency.
+Security: uses API Gateway auth (cookie-based).  
+**Checkout requires** header `Idempotency-Key` (Redis SetNX). Checkout is **async**: cart publishes to SNS → order/payment SQS consumers → BFF polls payment for Stripe `checkout_url`.
 
 Endpoints (concise):
 
@@ -28,8 +29,9 @@ Endpoints (concise):
 
 Notes:
 
-- **Idempotency**: The `/bff/checkout` endpoint uses a distributed Redis lock to prevent duplicate orders. If a second request is received while the first is still processing, it will return a `409 Conflict`.
-- **Aggregation**: This service calls Product, Cart, Order, Promotion, Shipping, and Payment services to provide unified responses to the storefront.
+- **Idempotency**: `/bff/checkout` uses Redis SetNX. Concurrent duplicate keys return `409 Conflict`. Downstream order/payment also store `idempotency_key`.
+- **Aggregation**: Calls gateway/services for Product, Cart, Order, Promotion, Shipping, and Payment. Does not create orders synchronously via a single POST `/orders` in the happy path.
+- **Health**: `GET /health`, `GET /health/live`, `GET /health/ready`.
 - Responses reference shared schemas in `docs/openapi.yaml`.
 
 - For examples, open `docs/openapi.yaml` and inspect request/response schemas under `components.schemas`.

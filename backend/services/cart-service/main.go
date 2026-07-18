@@ -65,6 +65,10 @@ func main() {
 	// Register routes
 	routes.RegisterCartRoutes(router, redisClient, snsClient, cfg)
 
+	router.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	router.GET("/health/live", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	router.GET("/health/ready", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ready"}) })
+
 	// Start HTTP server
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,

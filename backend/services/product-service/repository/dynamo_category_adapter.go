@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"product-service/models"
-	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
@@ -19,11 +18,20 @@ type DynamoCategoryAdapter struct {
 	client       *dynamodb.Client
 	table        string
 	productTable string
+	productLinks *DynamoAdapter // optional: ProductCategories Query helper
 }
 
 func NewDynamoCategoryAdapter(client *dynamodb.Client, table, productTable string) *DynamoCategoryAdapter {
 	return &DynamoCategoryAdapter{client: client, table: table, productTable: productTable}
 }
+
+// WithProductLinks wires adjacency-backed HasProducts.
+func (d *DynamoCategoryAdapter) WithProductLinks(productRepo *DynamoAdapter) *DynamoCategoryAdapter {
+	d.productLinks = productRepo
+	return d
+}
+
+const nameIndexName = "name-index"
 
 type ddbCategory struct {
 	CategoryID string   `dynamodbav:"id"`
@@ -123,22 +131,26 @@ func (d *DynamoCategoryAdapter) FindByID(ctx context.Context, id uuid.UUID) (*mo
 }
 
 func (d *DynamoCategoryAdapter) FindByName(ctx context.Context, name string) (*models.Category, error) {
-	// Scan with filter (for production, use GSI on name)
-	filterExpr := "attribute_not_exists(deleted_at) AND #n = :name"
-	exprNames := map[string]string{"#n": "name"}
-	exprVals, _ := attributevalue.MarshalMap(map[string]string{":name": name})
-
-	input := &dynamodb.ScanInput{
-		TableName:                 &d.table,
-		FilterExpression:          &filterExpr,
-		ExpressionAttributeNames:  exprNames,
-		ExpressionAttributeValues: exprVals,
+	idx := nameIndexName
+	keyCond := "#n = :name"
+	filterExpr := "attribute_not_exists(deleted_at)"
+	input := &dynamodb.QueryInput{
+		TableName:              &d.table,
+		IndexName:              &idx,
+		KeyConditionExpression: &keyCond,
+		FilterExpression:       &filterExpr,
+		ExpressionAttributeNames: map[string]string{
+			"#n": "name",
+		},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":name": &types.AttributeValueMemberS{Value: name},
+		},
 	}
-	paginator := dynamodb.NewScanPaginator(d.client, input)
+	paginator := dynamodb.NewQueryPaginator(d.client, input)
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("scan failed: %w", err)
+			return nil, fmt.Errorf("name query failed: %w", err)
 		}
 		for _, item := range page.Items {
 			var dc ddbCategory
@@ -156,38 +168,46 @@ func (d *DynamoCategoryAdapter) FindByNames(ctx context.Context, names []string)
 		return []models.Category{}, nil
 	}
 
-	// Build filter: name IN (:n0, :n1, ...)
-	placeholders := make([]string, len(names))
-	exprVals := make(map[string]types.AttributeValue)
-	for i, name := range names {
-		ph := fmt.Sprintf(":n%d", i)
-		placeholders[i] = ph
-		av, _ := attributevalue.Marshal(name)
-		exprVals[ph] = av
-	}
-	filterExpr := fmt.Sprintf("attribute_not_exists(deleted_at) AND #n IN (%s)", strings.Join(placeholders, ", "))
-	exprNames := map[string]string{"#n": "name"}
-
-	input := &dynamodb.ScanInput{
-		TableName:                 &d.table,
-		FilterExpression:          &filterExpr,
-		ExpressionAttributeNames:  exprNames,
-		ExpressionAttributeValues: exprVals,
-	}
-
-	paginator := dynamodb.NewScanPaginator(d.client, input)
+	idx := nameIndexName
+	filterExpr := "attribute_not_exists(deleted_at)"
 	var results []models.Category
-	for paginator.HasMorePages() {
-		page, err := paginator.NextPage(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("scan failed: %w", err)
+	seen := make(map[string]struct{})
+
+	for _, name := range names {
+		if name == "" {
+			continue
 		}
-		for _, item := range page.Items {
-			var dc ddbCategory
-			if err := attributevalue.UnmarshalMap(item, &dc); err != nil {
-				continue
+		if _, dup := seen[name]; dup {
+			continue
+		}
+		seen[name] = struct{}{}
+
+		keyCond := "#n = :name"
+		input := &dynamodb.QueryInput{
+			TableName:              &d.table,
+			IndexName:              &idx,
+			KeyConditionExpression: &keyCond,
+			FilterExpression:       &filterExpr,
+			ExpressionAttributeNames: map[string]string{
+				"#n": "name",
+			},
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":name": &types.AttributeValueMemberS{Value: name},
+			},
+		}
+		paginator := dynamodb.NewQueryPaginator(d.client, input)
+		for paginator.HasMorePages() {
+			page, err := paginator.NextPage(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("name query failed: %w", err)
 			}
-			results = append(results, *d.toModel(&dc))
+			for _, item := range page.Items {
+				var dc ddbCategory
+				if err := attributevalue.UnmarshalMap(item, &dc); err != nil {
+					continue
+				}
+				results = append(results, *d.toModel(&dc))
+			}
 		}
 	}
 	return results, nil
@@ -283,9 +303,12 @@ func (d *DynamoCategoryAdapter) Delete(ctx context.Context, id uuid.UUID) error 
 	})
 }
 
-// HasProducts checks if any products reference this category
+// HasProducts checks if any products reference this category via ProductCategories adjacency.
 func (d *DynamoCategoryAdapter) HasProducts(ctx context.Context, categoryID uuid.UUID) (bool, error) {
-	// Scan products table for category_ids containing this ID
+	if d.productLinks != nil {
+		return d.productLinks.CategoryHasProducts(ctx, categoryID)
+	}
+	// Fallback Scan when adjacency table is not wired (tests / legacy).
 	filterExpr := "attribute_not_exists(deleted_at) AND contains(category_ids, :catId)"
 	exprVals, _ := attributevalue.MarshalMap(map[string]string{":catId": categoryID.String()})
 
@@ -293,7 +316,7 @@ func (d *DynamoCategoryAdapter) HasProducts(ctx context.Context, categoryID uuid
 		TableName:                 &d.productTable,
 		FilterExpression:          &filterExpr,
 		ExpressionAttributeValues: exprVals,
-		Limit:                     ptrInt32(1), // We only need to know if at least one exists
+		Limit:                     ptrInt32(1),
 	}
 
 	paginator := dynamodb.NewScanPaginator(d.client, input)

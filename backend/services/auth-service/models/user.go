@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	commondb "github.com/yashrajoria/common/db"
 	"gorm.io/gorm"
 )
 
@@ -31,7 +32,10 @@ type RefreshToken struct {
 	CreatedAt time.Time `gorm:"autoCreateTime"`
 }
 
-// Migrate function for auto migration
+// Migrate function for auto migration (gated by ALLOW_AUTO_MIGRATE).
 func Migrate(db *gorm.DB) error {
+	if !commondb.AllowAutoMigrate() {
+		return nil
+	}
 	return db.AutoMigrate(&User{}, &RefreshToken{})
 }

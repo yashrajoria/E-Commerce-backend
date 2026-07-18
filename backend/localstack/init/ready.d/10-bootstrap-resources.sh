@@ -16,7 +16,6 @@ awslocal_cmd() {
 ORDER_TOPIC_NAME="${ORDER_SNS_TOPIC_NAME:-order-events}"
 PAYMENT_TOPIC_NAME="${PAYMENT_SNS_TOPIC_NAME:-payment-events}"
 AUTH_TOPIC_NAME="${AUTH_SNS_TOPIC_NAME:-auth-events}"
-SHIPPING_TOPIC_NAME="${SHIPPING_SNS_TOPIC_NAME:-shipping-events}"
 PROMOTION_TOPIC_NAME="${PROMOTION_SNS_TOPIC_NAME:-promotion-events}"
 
 ORDER_QUEUE_NAME="${ORDER_PROCESSING_QUEUE_NAME:-order-processing-queue}"
@@ -63,9 +62,80 @@ fi
 
 # --------------------------------------------------
 # DynamoDB (idempotent)
+# NOTE: Existing LocalStack volumes with old table schemas will NOT pick up
+# new GSIs. Recreate the LocalStack volume (or delete/recreate these tables)
+# once after pulling GSI changes.
 # --------------------------------------------------
-create_table_if_missing() {
-    local tbl_name="$1"
+create_products_table_if_missing() {
+    local tbl_name="${DDB_TABLE_PRODUCTS:-Products}"
+
+    if awslocal_cmd dynamodb describe-table --table-name "$tbl_name" >/dev/null 2>&1; then
+        echo "DynamoDB table '$tbl_name' already exists"
+        return 0
+    fi
+
+    echo "Creating DynamoDB table '$tbl_name' with sku-index and featured-index..."
+
+    retry awslocal_cmd dynamodb create-table \
+        --table-name "$tbl_name" \
+        --attribute-definitions \
+            AttributeName=id,AttributeType=S \
+            AttributeName=sku,AttributeType=S \
+            AttributeName=is_featured,AttributeType=S \
+            AttributeName=created_at,AttributeType=S \
+        --key-schema AttributeName=id,KeyType=HASH \
+        --global-secondary-indexes \
+            '[
+              {
+                "IndexName": "sku-index",
+                "KeySchema": [{"AttributeName":"sku","KeyType":"HASH"}],
+                "Projection": {"ProjectionType":"ALL"}
+              },
+              {
+                "IndexName": "featured-index",
+                "KeySchema": [
+                  {"AttributeName":"is_featured","KeyType":"HASH"},
+                  {"AttributeName":"created_at","KeyType":"RANGE"}
+                ],
+                "Projection": {"ProjectionType":"ALL"}
+              }
+            ]' \
+        --billing-mode PAY_PER_REQUEST
+
+    retry awslocal_cmd dynamodb wait table-exists --table-name "$tbl_name"
+}
+
+create_categories_table_if_missing() {
+    local tbl_name="${DDB_TABLE_CATEGORIES:-Categories}"
+
+    if awslocal_cmd dynamodb describe-table --table-name "$tbl_name" >/dev/null 2>&1; then
+        echo "DynamoDB table '$tbl_name' already exists"
+        return 0
+    fi
+
+    echo "Creating DynamoDB table '$tbl_name' with name-index..."
+
+    retry awslocal_cmd dynamodb create-table \
+        --table-name "$tbl_name" \
+        --attribute-definitions \
+            AttributeName=id,AttributeType=S \
+            AttributeName=name,AttributeType=S \
+        --key-schema AttributeName=id,KeyType=HASH \
+        --global-secondary-indexes \
+            '[
+              {
+                "IndexName": "name-index",
+                "KeySchema": [{"AttributeName":"name","KeyType":"HASH"}],
+                "Projection": {"ProjectionType":"ALL"}
+              }
+            ]' \
+        --billing-mode PAY_PER_REQUEST
+
+    retry awslocal_cmd dynamodb wait table-exists --table-name "$tbl_name"
+}
+
+create_inventory_table_if_missing() {
+    local tbl_name="${DDB_TABLE_INVENTORY:-Inventory}"
 
     if awslocal_cmd dynamodb describe-table --table-name "$tbl_name" >/dev/null 2>&1; then
         echo "DynamoDB table '$tbl_name' already exists"
@@ -80,13 +150,47 @@ create_table_if_missing() {
         --key-schema AttributeName=id,KeyType=HASH \
         --billing-mode PAY_PER_REQUEST
 
-    # wait until ACTIVE
     retry awslocal_cmd dynamodb wait table-exists --table-name "$tbl_name"
 }
 
-create_table_if_missing "${DDB_TABLE_PRODUCTS:-Products}"
-create_table_if_missing "${DDB_TABLE_CATEGORIES:-Categories}"
-create_table_if_missing "${DDB_TABLE_INVENTORY:-Inventory}"
+create_product_categories_table_if_missing() {
+    local tbl_name="${DDB_TABLE_PRODUCT_CATEGORIES:-ProductCategories}"
+
+    if awslocal_cmd dynamodb describe-table --table-name "$tbl_name" >/dev/null 2>&1; then
+        echo "DynamoDB table '$tbl_name' already exists"
+        return 0
+    fi
+
+    echo "Creating DynamoDB table '$tbl_name' (category_id HASH, product_id RANGE, product-index)..."
+
+    retry awslocal_cmd dynamodb create-table \
+        --table-name "$tbl_name" \
+        --attribute-definitions \
+            AttributeName=category_id,AttributeType=S \
+            AttributeName=product_id,AttributeType=S \
+        --key-schema \
+            AttributeName=category_id,KeyType=HASH \
+            AttributeName=product_id,KeyType=RANGE \
+        --global-secondary-indexes \
+            '[
+              {
+                "IndexName": "product-index",
+                "KeySchema": [
+                  {"AttributeName":"product_id","KeyType":"HASH"},
+                  {"AttributeName":"category_id","KeyType":"RANGE"}
+                ],
+                "Projection": {"ProjectionType":"ALL"}
+              }
+            ]' \
+        --billing-mode PAY_PER_REQUEST
+
+    retry awslocal_cmd dynamodb wait table-exists --table-name "$tbl_name"
+}
+
+create_products_table_if_missing
+create_categories_table_if_missing
+create_inventory_table_if_missing
+create_product_categories_table_if_missing
 
 
 # --------------------------------------------------
@@ -104,7 +208,6 @@ create_topic_if_missing() {
 ORDER_TOPIC_ARN=$(retry create_topic_if_missing "$ORDER_TOPIC_NAME")
 PAYMENT_TOPIC_ARN=$(retry create_topic_if_missing "$PAYMENT_TOPIC_NAME")
 AUTH_TOPIC_ARN=$(retry create_topic_if_missing "$AUTH_TOPIC_NAME")
-SHIPPING_TOPIC_ARN=$(retry create_topic_if_missing "$SHIPPING_TOPIC_NAME")
 PROMOTION_TOPIC_ARN=$(retry create_topic_if_missing "$PROMOTION_TOPIC_NAME")
 NOTIFICATION_TOPIC_ARN=$(retry create_topic_if_missing "notification-events")
 

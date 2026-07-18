@@ -56,7 +56,7 @@ services:
         if ! [[ \"$${q_count}\" =~ ^[0-9]+$ ]]; then q_count=0; fi;
         if ! [[ \"$${t_count}\" =~ ^[0-9]+$ ]]; then t_count=0; fi;
         if ! [[ \"$${s_count}\" =~ ^[0-9]+$ ]]; then s_count=0; fi;
-        if [ \"$${q_count}\" -ge 8 ] && [ \"$${t_count}\" -ge 6 ] && [ \"$${s_count}\" -ge 4 ]; then
+        if [ \"$${q_count}\" -ge 8 ] && [ \"$${t_count}\" -ge 5 ] && [ \"$${s_count}\" -ge 4 ]; then
           echo \"LocalStack resources ready: queues=$${q_count}, topics=$${t_count}, subscriptions=$${s_count}\";
           exit 0;
         fi;
@@ -76,6 +76,7 @@ services:
       - DDB_TABLE_PRODUCTS=${DDB_TABLE_PRODUCTS:-Products}
       - DDB_TABLE_CATEGORIES=${DDB_TABLE_CATEGORIES:-Categories}
       - DDB_TABLE_INVENTORY=${DDB_TABLE_INVENTORY:-Inventory}
+      - DDB_TABLE_PRODUCT_CATEGORIES=${DDB_TABLE_PRODUCT_CATEGORIES:-ProductCategories}
       - ORDER_SNS_TOPIC_NAME=${ORDER_SNS_TOPIC_NAME:-order-events}
       - PAYMENT_SNS_TOPIC_NAME=${PAYMENT_SNS_TOPIC_NAME:-payment-events}
       - ORDER_PROCESSING_QUEUE_NAME=${ORDER_PROCESSING_QUEUE_NAME:-order-processing-queue}
@@ -159,9 +160,10 @@ services:
       - AWS_ACCESS_KEY_ID=test
       - AWS_SECRET_ACCESS_KEY=test
       - AWS_SESSION_TOKEN=
-      - CHECKOUT_QUEUE_URL=http://localstack:4566/000000000000/${ORDER_PROCESSING_QUEUE_NAME:-order-processing-queue}
-      - PAYMENT_REQUEST_QUEUE_URL=http://localstack:4566/000000000000/${PAYMENT_REQUEST_QUEUE_NAME:-payment-request-queue}
-      - PAYMENT_EVENTS_QUEUE_URL=http://localstack:4566/000000000000/${PAYMENT_EVENTS_QUEUE_NAME:-payment-events-queue}
+      # Path-style URLs match SQS_ENDPOINT_STRATEGY=path on the localstack service
+      - CHECKOUT_QUEUE_URL=http://localstack:4566/queue/us-east-1/000000000000/${ORDER_PROCESSING_QUEUE_NAME:-order-processing-queue}
+      - PAYMENT_REQUEST_QUEUE_URL=http://localstack:4566/queue/us-east-1/000000000000/${PAYMENT_REQUEST_QUEUE_NAME:-payment-request-queue}
+      - PAYMENT_EVENTS_QUEUE_URL=http://localstack:4566/queue/us-east-1/000000000000/${PAYMENT_EVENTS_QUEUE_NAME:-payment-events-queue}
       - ORDER_SNS_TOPIC_ARN=arn:aws:sns:${AWS_REGION:-us-east-1}:000000000000:${ORDER_SNS_TOPIC_NAME:-order-events}
       - PAYMENT_SNS_TOPIC_ARN=arn:aws:sns:${AWS_REGION:-us-east-1}:000000000000:${PAYMENT_SNS_TOPIC_NAME:-payment-events}
       - NOTIFICATION_SNS_TOPIC_ARN=arn:aws:sns:${AWS_REGION:-us-east-1}:000000000000:notification-events
@@ -178,8 +180,8 @@ services:
       - AWS_ACCESS_KEY_ID=test
       - AWS_SECRET_ACCESS_KEY=test
       - AWS_SESSION_TOKEN=
-      - PAYMENT_REQUEST_QUEUE_URL=http://localstack:4566/000000000000/${PAYMENT_REQUEST_QUEUE_NAME:-payment-request-queue}
-      - PAYMENT_EVENTS_QUEUE_URL=http://localstack:4566/000000000000/${PAYMENT_EVENTS_QUEUE_NAME:-payment-events-queue}
+      - PAYMENT_REQUEST_QUEUE_URL=http://localstack:4566/queue/us-east-1/000000000000/${PAYMENT_REQUEST_QUEUE_NAME:-payment-request-queue}
+      - PAYMENT_EVENTS_QUEUE_URL=http://localstack:4566/queue/us-east-1/000000000000/${PAYMENT_EVENTS_QUEUE_NAME:-payment-events-queue}
       - PAYMENT_SNS_TOPIC_ARN=arn:aws:sns:${AWS_REGION:-us-east-1}:000000000000:${PAYMENT_SNS_TOPIC_NAME:-payment-events}
       - NOTIFICATION_SNS_TOPIC_ARN=arn:aws:sns:${AWS_REGION:-us-east-1}:000000000000:notification-events
       - STORE_CURRENCY=${STORE_CURRENCY:-USD}
@@ -196,8 +198,8 @@ services:
       - AWS_SECRET_ACCESS_KEY=test
       - AWS_SESSION_TOKEN="test"
       # Keep both for compatibility; the service code expects SQS_QUEUE_URL
-      - NOTIFICATION_SQS_QUEUE_URL=http://localstack:4566/000000000000/${NOTIFICATION_SQS_QUEUE_NAME:-notification-queue}
-      - SQS_QUEUE_URL=http://localstack:4566/000000000000/${NOTIFICATION_SQS_QUEUE_NAME:-notification-queue}
+      - NOTIFICATION_SQS_QUEUE_URL=http://localstack:4566/queue/us-east-1/000000000000/${NOTIFICATION_SQS_QUEUE_NAME:-notification-queue}
+      - SQS_QUEUE_URL=http://localstack:4566/queue/us-east-1/000000000000/${NOTIFICATION_SQS_QUEUE_NAME:-notification-queue}
     depends_on:
       localstack-init:
         condition: service_completed_successfully
@@ -207,7 +209,7 @@ services:
       - USE_LOCALSTACK=true
       - LOCALSTACK_ENDPOINT=http://localstack:4566
       - AWS_REGION=us-east-1
-      - ORDER_CREATED_QUEUE_URL=http://localstack:4566/000000000000/promotion-order-queue
+      - ORDER_CREATED_QUEUE_URL=http://localstack:4566/queue/us-east-1/000000000000/promotion-order-queue
     depends_on:
       localstack-init:
         condition: service_completed_successfully
