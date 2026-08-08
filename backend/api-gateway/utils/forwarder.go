@@ -95,6 +95,23 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 	req.Header.Del("X-User-Role")
 	req.Header.Del(internalauth.Header)
 
+	// SECURITY: also strip client-supplied user_id/user_email/user_role
+	// cookies before we inject our own (the header strip above doesn't touch
+	// the Cookie header). Downstream services trust these without
+	// re-validating the JWT, so a caller must never be able to smuggle a
+	// spoofed identity cookie through — regardless of whether this route
+	// runs JWTMiddleware.
+	if cookieHeader := c.Request.Header.Get("Cookie"); cookieHeader != "" {
+		req.Header.Del("Cookie")
+		for _, cookie := range c.Request.Cookies() {
+			switch cookie.Name {
+			case "user_id", "user_email", "user_role":
+				continue
+			}
+			req.AddCookie(cookie)
+		}
+	}
+
 	// Inject identity from JWT context only (set by JWTMiddleware on protected/admin routes).
 	if userID, exists := c.Get("user_id"); exists {
 		if uid, ok := userID.(string); ok && uid != "" {
