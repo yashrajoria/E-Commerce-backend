@@ -20,9 +20,19 @@ import (
 	"github.com/go-redis/redis/v8"
 	"github.com/joho/godotenv"
 	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
-	apperrors "github.com/yashrajoria/common/errors"
 	"go.uber.org/zap"
 )
+
+// defaultAllowedOrigins is the fallback CORS origin list used when
+// ALLOWED_ORIGINS is unset or "*" (wildcard can't be combined with
+// AllowCredentials). Kept as a named default so the fallback is
+// documented and easy to find, not just inline magic strings.
+var defaultAllowedOrigins = []string{
+	"http://localhost:3000",
+	"http://localhost:3001",
+	"https://shopswift-storefront.vercel.app",
+	"https://shopswift-admin.vercel.app",
+}
 
 // CORS Middleware - Apply this globally
 func CORSMiddleware() gin.HandlerFunc {
@@ -37,7 +47,8 @@ func CORSMiddleware() gin.HandlerFunc {
 	if allowed == "*" {
 		// Do not combine wildcard CORS with credentialed cookies. Fall back to
 		// explicit trusted origins so browser-enforced auth cookies remain safe.
-		config.AllowOrigins = []string{"http://localhost:3000", "http://localhost:3001", "https://shopswift-storefront.vercel.app", "https://shopswift-admin.vercel.app"}
+		logger.Log.Warn("ALLOWED_ORIGINS=* cannot be combined with credentialed cookies; falling back to default origin allowlist", zap.Strings("origins", defaultAllowedOrigins))
+		config.AllowOrigins = defaultAllowedOrigins
 	} else if allowed != "" {
 		var origins []string
 		for _, o := range strings.Split(allowed, ",") {
@@ -45,10 +56,41 @@ func CORSMiddleware() gin.HandlerFunc {
 		}
 		config.AllowOrigins = origins
 	} else {
-		config.AllowOrigins = []string{"http://localhost:3000", "http://localhost:3001", "https://shopswift-storefront.vercel.app", "https://shopswift-admin.vercel.app"}
+		logger.Log.Warn("ALLOWED_ORIGINS not set; falling back to default origin allowlist", zap.Strings("origins", defaultAllowedOrigins))
+		config.AllowOrigins = defaultAllowedOrigins
 	}
 
 	return cors.New(config)
+}
+
+// metricsJob carries the per-request data needed to emit CloudWatch metrics.
+type metricsJob struct {
+	path   string
+	method string
+	status int
+	dur    time.Duration
+}
+
+// startMetricsWorkers spins up a small, fixed pool of goroutines that drain
+// metric jobs from a buffered channel, so metric emission under load is
+// bounded rather than spawning one goroutine per request.
+func startMetricsWorkers(metricsClient *awspkg.MetricsClient, workers int) chan<- metricsJob {
+	ch := make(chan metricsJob, 256)
+	for range workers {
+		go func() {
+			for job := range ch {
+				mctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				dims := map[string]string{"Service": "api-gateway", "Method": job.method, "Path": job.path}
+				_ = metricsClient.RecordCount(mctx, awspkg.MetricHTTPRequests, dims)
+				_ = metricsClient.RecordLatency(mctx, awspkg.MetricHTTPLatency, job.dur, dims)
+				if job.status >= 400 {
+					_ = metricsClient.RecordCount(mctx, awspkg.MetricHTTPErrors, dims)
+				}
+				cancel()
+			}
+		}()
+	}
+	return ch
 }
 
 // CustomRecovery recovers from panics and logs them
@@ -120,33 +162,37 @@ func main() {
 		logger.Log.Fatal("Failed to set trusted proxies", zap.Error(err))
 	}
 
-	r.Use(middlewares.RequestIDMiddleware())
 	r.Use(CustomRecovery(logger.Log))
 	r.Use(CORSMiddleware())
-	r.Use(apperrors.ErrorMiddleware())
 	r.Use(middlewares.StructuredRequestLogger())
 
-	// CloudWatch HTTP metrics middleware
+	// CloudWatch HTTP metrics middleware. Metric emission is offloaded to a
+	// bounded worker pool (metricsWorkers) rather than one goroutine per
+	// request, so a traffic spike can't cause unbounded goroutine growth.
 	if metricsClient != nil && metricsClient.IsEnabled() {
+		metricsCh := startMetricsWorkers(metricsClient, 20)
 		r.Use(func(c *gin.Context) {
 			start := time.Now()
 			c.Next()
-			go func(path, method string, status int, dur time.Duration) {
-				mctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				dims := map[string]string{"Service": "api-gateway", "Method": method, "Path": path}
-				_ = metricsClient.RecordCount(mctx, awspkg.MetricHTTPRequests, dims)
-				_ = metricsClient.RecordLatency(mctx, awspkg.MetricHTTPLatency, dur, dims)
-				if status >= 400 {
-					_ = metricsClient.RecordCount(mctx, awspkg.MetricHTTPErrors, dims)
-				}
-			}(c.Request.URL.Path, c.Request.Method, c.Writer.Status(), time.Since(start))
+			job := metricsJob{
+				path:   c.Request.URL.Path,
+				method: c.Request.Method,
+				status: c.Writer.Status(),
+				dur:    time.Since(start),
+			}
+			select {
+			case metricsCh <- job:
+			default:
+				logger.Log.Warn("metrics worker pool saturated, dropping metric", zap.String("path", job.path))
+			}
 		})
 	}
 
-	r.GET("/test-cors", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"message": "CORS is working!"})
-	})
+	if gin.Mode() != gin.ReleaseMode {
+		r.GET("/test-cors", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"message": "CORS is working!"})
+		})
+	}
 
 	// Initialize Redis
 	redisURL := os.Getenv("REDIS_URL")
@@ -164,8 +210,12 @@ func main() {
 		port = "8080"
 	}
 	srv := &http.Server{
-		Addr:    ":" + port,
-		Handler: r,
+		Addr:              ":" + port,
+		Handler:           r,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// Start server

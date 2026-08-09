@@ -23,6 +23,11 @@ var forwardHTTPClient = &http.Client{
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		return http.ErrUseLastResponse
 	},
+	Transport: &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 20, // gateway fans out to ~11 upstream services; default of 2 causes connection churn
+		IdleConnTimeout:     90 * time.Second,
+	},
 }
 
 func ForwardRequest(c *gin.Context, opts ForwardOptions) {
@@ -74,7 +79,7 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 		zap.String("correlation_id", c.GetString("CorrelationID")),
 	)
 
-	req, err := http.NewRequest(c.Request.Method, targetURL, c.Request.Body)
+	req, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, targetURL, c.Request.Body)
 	if err != nil {
 		logger.Log.Error("❌ Failed to create forward request", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create request"})
@@ -90,10 +95,6 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 		}
 		req.Header[k] = v
 	}
-	req.Header.Del("X-User-ID")
-	req.Header.Del("X-User-Email")
-	req.Header.Del("X-User-Role")
-	req.Header.Del(internalauth.Header)
 
 	// SECURITY: also strip client-supplied user_id/user_email/user_role
 	// cookies before we inject our own (the header strip above doesn't touch
@@ -116,19 +117,19 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 	if userID, exists := c.Get("user_id"); exists {
 		if uid, ok := userID.(string); ok && uid != "" {
 			req.Header.Set("X-User-ID", uid)
-			req.AddCookie(&http.Cookie{Name: "user_id", Value: uid, HttpOnly: true, Path: "/"})
+			req.AddCookie(&http.Cookie{Name: "user_id", Value: uid, HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode, Path: "/"})
 		}
 	}
 	if email, exists := c.Get("email"); exists {
 		if e, ok := email.(string); ok && e != "" {
 			req.Header.Set("X-User-Email", e)
-			req.AddCookie(&http.Cookie{Name: "user_email", Value: e, HttpOnly: true, Path: "/"})
+			req.AddCookie(&http.Cookie{Name: "user_email", Value: e, HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode, Path: "/"})
 		}
 	}
 	if role, exists := c.Get("role"); exists {
 		if r, ok := role.(string); ok && r != "" {
 			req.Header.Set("X-User-Role", r)
-			req.AddCookie(&http.Cookie{Name: "user_role", Value: r, HttpOnly: true, Path: "/"})
+			req.AddCookie(&http.Cookie{Name: "user_role", Value: r, HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode, Path: "/"})
 		}
 	}
 
