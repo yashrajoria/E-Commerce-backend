@@ -47,6 +47,12 @@ const dummyPasswordHash = "$2a$10$CwTycUXWue0Thq9StjUM0uJ8vFN/eD3ubjLBQZTV5D0Rwa
 // verificationCodeTTL is how long an email verification code remains valid.
 const verificationCodeTTL = 15 * time.Minute
 
+// refreshTokenReuseGrace tolerates a just-rotated refresh token being replayed by a
+// concurrent in-flight request (e.g. a page firing several API calls at once, each
+// triggering a silent refresh off the same expired access token). Reuse beyond this
+// window is treated as a hard failure — it likely means a stolen/replayed token.
+const refreshTokenReuseGrace = 10 * time.Second
+
 type AuthService struct {
 	userRepo       IUserRepository
 	tokenService   ITokenService
@@ -275,7 +281,11 @@ func (s *AuthService) RefreshTokens(ctx context.Context, refreshToken string) (*
 	}
 
 	if existingToken.Revoked {
-		return nil, fmt.Errorf("refresh token has been revoked")
+		// Allow a benign concurrent replay of a token that was *just* rotated (see
+		// refreshTokenReuseGrace); reject anything older as a genuine reuse/theft attempt.
+		if existingToken.RevokedAt == nil || time.Since(*existingToken.RevokedAt) > refreshTokenReuseGrace {
+			return nil, fmt.Errorf("refresh token has been revoked")
+		}
 	}
 
 	userID, err := uuid.Parse(userIDStr)
@@ -301,8 +311,12 @@ func (s *AuthService) RefreshTokens(ctx context.Context, refreshToken string) (*
 		return nil, fmt.Errorf("refresh token revoked or expired")
 	}
 
-	if err := s.userRepo.RevokeRefreshTokenByTokenID(ctx, tokenIDStr); err != nil {
-		return nil, fmt.Errorf("failed to revoke old refresh token: %w", err)
+	// Skip re-revoking an already-revoked token (grace-period replay) — doing so would
+	// reset RevokedAt and keep extending the reuse window indefinitely.
+	if !existingToken.Revoked {
+		if err := s.userRepo.RevokeRefreshTokenByTokenID(ctx, tokenIDStr); err != nil {
+			return nil, fmt.Errorf("failed to revoke old refresh token: %w", err)
+		}
 	}
 
 	tokenPair, newTokenID, err := s.tokenService.GenerateTokenPair(userIDStr, email, role)

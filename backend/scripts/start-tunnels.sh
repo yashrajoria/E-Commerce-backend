@@ -49,9 +49,9 @@ done
 echo "========================================="
 echo ""
 echo "Or use direct local IP (same WiFi, faster):"
-echo "  http://172.16.12.20:8080  ← API Gateway"
-echo "  http://172.16.12.20:8088  ← BFF Service"
-echo "  http://172.16.12.20:8099  ← Swagger Docs"
+echo "  http://172.16.14.242:8080  ← API Gateway"
+echo "  http://172.16.14.242:8088  ← BFF Service"
+echo "  http://172.16.14.242:8099  ← Swagger Docs"
 echo "========================================="
 echo "Press Ctrl+C to stop all tunnels"
 wait

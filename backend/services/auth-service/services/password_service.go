@@ -45,6 +45,22 @@ func NewPasswordValidator() *PasswordValidator {
 	}
 }
 
+// charClass groups a rune by character class so sequential-character detection only
+// flags sequences within the same class (e.g. "abc", "123") — not cross-class
+// adjacency like "a9" or "Az", which isn't a meaningful sequence to a user.
+func charClass(r rune) int {
+	switch {
+	case unicode.IsUpper(r):
+		return 1
+	case unicode.IsLower(r):
+		return 2
+	case unicode.IsNumber(r):
+		return 3
+	default:
+		return 0
+	}
+}
+
 // ValidatePassword checks if a password meets all security requirements
 func (pv *PasswordValidator) ValidatePassword(password string) error {
 	if len(password) < pv.minLength {
@@ -77,8 +93,9 @@ func (pv *PasswordValidator) ValidatePassword(password string) error {
 			repeatCount = 1
 		}
 
-		// Check for sequential characters
-		if i > 0 && (char == prevChar+1 || char == prevChar-1) {
+		// Check for sequential characters within the same character class
+		if i > 0 && charClass(char) != 0 && charClass(char) == charClass(prevChar) &&
+			(char == prevChar+1 || char == prevChar-1) {
 			return ErrPasswordSequential
 		}
 

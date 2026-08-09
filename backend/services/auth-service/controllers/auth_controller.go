@@ -41,6 +41,18 @@ func cookieSettings() (http.SameSite, bool) {
 	return http.SameSiteLaxMode, false
 }
 
+// clearAuthCookies expires all session/identity cookies on the client.
+func clearAuthCookies(c *gin.Context) {
+	domain := os.Getenv("COOKIE_DOMAIN")
+	sameSite, secure := cookieSettings()
+
+	c.SetSameSite(sameSite)
+	c.SetCookie("__session", "", -1, "/", domain, secure, true)
+	c.SetCookie("refresh_token", "", -1, "/", domain, secure, true)
+	c.SetCookie("user_id", "", -1, "/", domain, secure, false)
+	c.SetCookie("user_role", "", -1, "/", domain, secure, false)
+}
+
 func (ctrl *AuthController) Login(c *gin.Context) {
 	var req struct {
 		Email    string `json:"email" binding:"required,email"`
@@ -159,14 +171,7 @@ func (ctrl *AuthController) Logout(c *gin.Context) {
 	refreshToken, _ := c.Cookie("refresh_token")
 	_ = ctrl.service.Logout(c.Request.Context(), refreshToken)
 
-	domain := os.Getenv("COOKIE_DOMAIN")
-	sameSite, secure := cookieSettings()
-
-	c.SetSameSite(sameSite)
-	c.SetCookie("__session", "", -1, "/", domain, secure, true)
-	c.SetCookie("refresh_token", "", -1, "/", domain, secure, true)
-	c.SetCookie("user_id", "", -1, "/", domain, secure, false)
-	c.SetCookie("user_role", "", -1, "/", domain, secure, false)
+	clearAuthCookies(c)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
 }
@@ -180,7 +185,13 @@ func (ctrl *AuthController) Refresh(c *gin.Context) {
 
 	newTokenPair, err := ctrl.service.RefreshTokens(c.Request.Context(), refreshToken)
 	if err != nil {
-		ctrl.Logout(c)
+		// Best-effort revoke of whatever refresh token was presented, then force the
+		// client to re-authenticate. Must be a real failure status (not 200) — the
+		// gateway's silent-refresh path relies on the status code alone to decide
+		// whether the refresh succeeded.
+		_ = ctrl.service.Logout(c.Request.Context(), refreshToken)
+		clearAuthCookies(c)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired refresh token"})
 		return
 	}
 
@@ -203,15 +214,13 @@ func (ctrl *AuthController) Refresh(c *gin.Context) {
 }
 
 func (ctrl *AuthController) GetAuthStatus(c *gin.Context) {
+	// Identity must come from the gateway-injected headers (backed by a validated JWT).
+	// Client-supplied cookies are not trusted here — see middleware/rbac.go's AdminOnly
+	// for the same pattern.
 	userID := c.GetHeader("X-User-ID")
 	email := c.GetHeader("X-User-Email")
 	role := c.GetHeader("X-User-Role")
 
-	if userID == "" {
-		if v, err := c.Cookie("user_id"); err == nil && v != "" {
-			userID = v
-		}
-	}
 	if userID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Not authenticated"})
 		return
@@ -221,16 +230,6 @@ func (ctrl *AuthController) GetAuthStatus(c *gin.Context) {
 		role = u.Role
 		if email == "" {
 			email = u.Email
-		}
-	}
-	if role == "" {
-		if v, err := c.Cookie("user_role"); err == nil && v != "" {
-			role = v
-		}
-	}
-	if email == "" {
-		if v, err := c.Cookie("user_email"); err == nil && v != "" {
-			email = v
 		}
 	}
 

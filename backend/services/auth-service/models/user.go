@@ -26,11 +26,12 @@ type User struct {
 // RefreshToken model stores issued refresh tokens for rotation and revocation
 type RefreshToken struct {
 	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
-	TokenID   string    `gorm:"unique;not null"`
-	UserID    uuid.UUID `gorm:"type:uuid;not null;index"`
-	Revoked   bool      `gorm:"default:false"`
-	ExpiresAt time.Time `gorm:"not null;index"`
-	CreatedAt time.Time `gorm:"autoCreateTime"`
+	TokenID   string     `gorm:"unique;not null"`
+	UserID    uuid.UUID  `gorm:"type:uuid;not null;index"`
+	Revoked   bool       `gorm:"default:false"`
+	RevokedAt *time.Time `gorm:""`
+	ExpiresAt time.Time  `gorm:"not null;index"`
+	CreatedAt time.Time  `gorm:"autoCreateTime"`
 }
 
 // Migrate function for auto migration (gated by ALLOW_AUTO_MIGRATE).

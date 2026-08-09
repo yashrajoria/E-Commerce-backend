@@ -95,7 +95,11 @@ func main() {
 	})
 
 	// r.Use(middlewares.SecurityHeaders()) // Good to have
-	// r.Use(middlewares.RateLimitMiddleware()) // Good to have
+	// Defense-in-depth: the gateway already rate-limits /auth/login, /auth/register,
+	// and /auth/refresh, but this service is also reachable directly by other
+	// containers on the internal network (e.g. the gateway's silent-refresh path),
+	// which bypasses those gateway-level limiters entirely.
+	r.Use(middlewares.RateLimitMiddleware())
 
 	// --- 4. Route Registration ---
 

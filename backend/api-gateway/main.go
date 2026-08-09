@@ -103,6 +103,23 @@ func main() {
 	// Configure Gin to handle trailing slashes
 	r.RedirectTrailingSlash = true
 
+	// SECURITY: Gin's default trusted-proxy setting trusts everything and derives
+	// ClientIP() from X-Forwarded-For, which lets a caller spoof a fresh IP on every
+	// request and bypass the rate limiters below. There is no reverse proxy/load
+	// balancer in front of this gateway by default, so trust nothing unless the
+	// deployment explicitly configures one via TRUSTED_PROXIES (comma-separated CIDRs).
+	var trustedProxies []string
+	if tp := strings.TrimSpace(os.Getenv("TRUSTED_PROXIES")); tp != "" {
+		for _, p := range strings.Split(tp, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				trustedProxies = append(trustedProxies, p)
+			}
+		}
+	}
+	if err := r.SetTrustedProxies(trustedProxies); err != nil {
+		logger.Log.Fatal("Failed to set trusted proxies", zap.Error(err))
+	}
+
 	r.Use(middlewares.RequestIDMiddleware())
 	r.Use(CustomRecovery(logger.Log))
 	r.Use(CORSMiddleware())
