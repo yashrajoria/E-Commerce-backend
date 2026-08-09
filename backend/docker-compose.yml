@@ -45,8 +45,6 @@ services:
     volumes:
       - ./services/auth-service:/app
       - ./services/common:/common
-    ports:
-      - "8081:8081"
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/health/live"]
       interval: 30s
@@ -87,8 +85,6 @@ services:
       - ./services/user-service:/app
       - ./services/common:/common
       - ./pkg/aws:/pkg/aws
-    ports:
-      - "8085:8085"
     env_file:
       - .env
     environment:
@@ -119,8 +115,6 @@ services:
       - ./services/product-service:/app
       - ./services/common:/common
       - ./pkg/aws:/pkg/aws
-    ports:
-      - "8082:8082"
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8082/health/live"]
       interval: 30s
@@ -162,8 +156,6 @@ services:
       - ./services/cart-service:/app
       - ./services/common:/common
       - ./pkg/aws:/pkg/aws
-    ports:
-      - "8086:8086"
     env_file:
       - .env
     environment:
@@ -196,8 +188,6 @@ services:
       - ./services/inventory-service:/app
       - ./services/common:/common
       - ./pkg/aws:/pkg/aws
-    ports:
-      - "8084:8084"
     env_file:
       - .env
     environment:
@@ -225,8 +215,6 @@ services:
       - ./services/order-service:/app
       - ./services/common:/common
       - ./pkg/aws:/pkg/aws
-    ports:
-      - "8083:8083"
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8083/health/live"]
       interval: 30s
@@ -266,8 +254,6 @@ services:
       - ./services/payment-service:/app
       - ./services/common:/common
       - ./pkg/aws:/pkg/aws
-    ports:
-      - "8087:8087"
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8087/health/live"]
       interval: 30s
@@ -308,8 +294,6 @@ services:
       - ./services/promotion-service:/app
       - ./services/common:/common
       - ./pkg/aws:/pkg/aws
-    ports:
-      - "8090:8090"
     env_file:
       - .env
     environment:
@@ -340,8 +324,6 @@ services:
     restart: unless-stopped
     volumes:
       - ./services/shipping-service:/app
-    ports:
-      - "8091:8091"
     env_file:
       - .env
     environment:
@@ -360,8 +342,6 @@ services:
       - ./services/notification-service:/app
       - ./services/common:/common
       - ./pkg/aws:/pkg/aws
-    ports:
-      - "8092:8092"
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8092/health/live"]
       interval: 30s
@@ -472,8 +452,6 @@ services:
       - ./docs:/docs:ro
       - ./services/common:/common
       - ./pkg/aws:/pkg/aws
-    ports:
-      - "8088:8088"
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8088/health/live"]
       interval: 30s
@@ -513,8 +491,6 @@ services:
     restart: unless-stopped
     volumes:
       - ./services/agent-service:/app
-    ports:
-      - "8089:8000"
     env_file:
       - .env
     environment:

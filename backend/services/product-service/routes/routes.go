@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
+	"github.com/yashrajoria/common/internalauth"
 )
 
 // RegisterRoutes sets up all API routes
@@ -74,7 +75,11 @@ func registerProductRoutes(
 		}
 
 		products.GET("/:id", productCtrl.GetProductByID)
-		products.GET("/internal/:id", productCtrl.GetProductByIDInternal)
+		products.GET(
+			"/internal/:id",
+			internalauth.Require(),
+			productCtrl.GetProductByIDInternal,
+		)
 	}
 }
 

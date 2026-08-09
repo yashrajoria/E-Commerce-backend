@@ -39,6 +39,20 @@ type IEventPublisher interface {
 	Publish(ctx context.Context, eventType string, payload map[string]interface{}) error
 }
 
+// dummyPasswordHash is a bcrypt hash with no known plaintext, compared against
+// on login when the email lookup fails so the response timing for "unknown
+// email" matches "wrong password" and doesn't leak account existence.
+const dummyPasswordHash = "$2a$10$CwTycUXWue0Thq9StjUM0uJ8vFN/eD3ubjLBQZTV5D0RwaP0kBRt2"
+
+// verificationCodeTTL is how long an email verification code remains valid.
+const verificationCodeTTL = 15 * time.Minute
+
+// refreshTokenReuseGrace tolerates a just-rotated refresh token being replayed by a
+// concurrent in-flight request (e.g. a page firing several API calls at once, each
+// triggering a silent refresh off the same expired access token). Reuse beyond this
+// window is treated as a hard failure — it likely means a stolen/replayed token.
+const refreshTokenReuseGrace = 10 * time.Second
+
 type AuthService struct {
 	userRepo       IUserRepository
 	tokenService   ITokenService
@@ -63,15 +77,21 @@ func NewAuthService(
 func (s *AuthService) Login(ctx context.Context, email, password string) (*TokenPair, error) {
 	user, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil {
+		// Run the hash comparison anyway against a dummy hash so responses for
+		// unknown emails take the same time as responses for wrong passwords.
+		_ = bcrypt.CompareHashAndPassword([]byte(dummyPasswordHash), []byte(password))
 		return nil, fmt.Errorf("invalid email or password")
-	}
-
-	if !user.EmailVerified {
-		return nil, fmt.Errorf("email not verified")
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
 		return nil, fmt.Errorf("invalid email or password")
+	}
+
+	// Only reveal unverified status *after* the password has been confirmed,
+	// so an attacker can't use this endpoint to enumerate unverified accounts
+	// without knowing the password.
+	if !user.EmailVerified {
+		return nil, fmt.Errorf("email not verified")
 	}
 
 	tokenPair, refreshTokenID, err := s.tokenService.GenerateTokenPair(
@@ -138,19 +158,22 @@ func (s *AuthService) ProvisionUser(ctx context.Context, in ProvisionUserInput) 
 		}
 
 		verificationCode := ""
+		var verificationCodeExpiresAt time.Time
 		if !in.EmailVerified {
 			verificationCode = GenerateRandomCode(6)
+			verificationCodeExpiresAt = time.Now().Add(verificationCodeTTL)
 		}
 
 		newUser := &models.User{
-			ID:               uuid.New(),
-			Email:            in.Email,
-			Name:             in.Name,
-			Password:         string(hashedPassword),
-			Role:             role,
-			StoreName:        "",
-			EmailVerified:    in.EmailVerified,
-			VerificationCode: verificationCode,
+			ID:                        uuid.New(),
+			Email:                     in.Email,
+			Name:                      in.Name,
+			Password:                  string(hashedPassword),
+			Role:                      role,
+			StoreName:                 "",
+			EmailVerified:             in.EmailVerified,
+			VerificationCode:          verificationCode,
+			VerificationCodeExpiresAt: verificationCodeExpiresAt,
 		}
 
 		if err := txRepo.Create(ctx, newUser); err != nil {
@@ -221,12 +244,17 @@ func (s *AuthService) VerifyEmail(ctx context.Context, email, code string) error
 		return fmt.Errorf("user not found")
 	}
 
-	if user.VerificationCode != code {
+	if user.VerificationCode == "" || user.VerificationCode != code {
 		return fmt.Errorf("invalid verification code")
+	}
+
+	if time.Now().After(user.VerificationCodeExpiresAt) {
+		return fmt.Errorf("verification code has expired, please request a new one")
 	}
 
 	user.EmailVerified = true
 	user.VerificationCode = ""
+	user.VerificationCodeExpiresAt = time.Time{}
 
 	return s.userRepo.Update(ctx, user)
 }
@@ -253,7 +281,11 @@ func (s *AuthService) RefreshTokens(ctx context.Context, refreshToken string) (*
 	}
 
 	if existingToken.Revoked {
-		return nil, fmt.Errorf("refresh token has been revoked")
+		// Allow a benign concurrent replay of a token that was *just* rotated (see
+		// refreshTokenReuseGrace); reject anything older as a genuine reuse/theft attempt.
+		if existingToken.RevokedAt == nil || time.Since(*existingToken.RevokedAt) > refreshTokenReuseGrace {
+			return nil, fmt.Errorf("refresh token has been revoked")
+		}
 	}
 
 	userID, err := uuid.Parse(userIDStr)
@@ -279,8 +311,12 @@ func (s *AuthService) RefreshTokens(ctx context.Context, refreshToken string) (*
 		return nil, fmt.Errorf("refresh token revoked or expired")
 	}
 
-	if err := s.userRepo.RevokeRefreshTokenByTokenID(ctx, tokenIDStr); err != nil {
-		return nil, fmt.Errorf("failed to revoke old refresh token: %w", err)
+	// Skip re-revoking an already-revoked token (grace-period replay) — doing so would
+	// reset RevokedAt and keep extending the reuse window indefinitely.
+	if !existingToken.Revoked {
+		if err := s.userRepo.RevokeRefreshTokenByTokenID(ctx, tokenIDStr); err != nil {
+			return nil, fmt.Errorf("failed to revoke old refresh token: %w", err)
+		}
 	}
 
 	tokenPair, newTokenID, err := s.tokenService.GenerateTokenPair(userIDStr, email, role)
@@ -324,6 +360,7 @@ func (s *AuthService) ResendVerificationEmail(ctx context.Context, email string)
 
 	verificationCode := GenerateRandomCode(6)
 	user.VerificationCode = verificationCode
+	user.VerificationCodeExpiresAt = time.Now().Add(verificationCodeTTL)
 
 	if err := s.userRepo.Update(ctx, user); err != nil {
 		return fmt.Errorf("failed to update verification code: %w", err)

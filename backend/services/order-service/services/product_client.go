@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/yashrajoria/common/internalauth"
 )
 
 type Product struct {
@@ -24,6 +25,7 @@ func FetchProductByID(ctx context.Context, baseURL string, productID uuid.UUID) 
 	if err != nil {
 		return nil, err
 	}
+	internalauth.Apply(req)
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)

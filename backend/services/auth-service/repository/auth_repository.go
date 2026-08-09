@@ -3,6 +3,7 @@ package repository
 import (
 	"auth-service/models"
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -49,7 +50,9 @@ func (r *UserRepository) GetRefreshTokenByTokenID(ctx context.Context, tokenID s
 }
 
 func (r *UserRepository) RevokeRefreshTokenByTokenID(ctx context.Context, tokenID string) error {
-	return r.db.WithContext(ctx).Model(&models.RefreshToken{}).Where("token_id = ?", tokenID).Update("revoked", true).Error
+	now := time.Now()
+	return r.db.WithContext(ctx).Model(&models.RefreshToken{}).Where("token_id = ?", tokenID).
+		Updates(map[string]interface{}{"revoked": true, "revoked_at": now}).Error
 }
 
 func (r *UserRepository) RevokeAllUserRefreshTokens(ctx context.Context, userID uuid.UUID) error {

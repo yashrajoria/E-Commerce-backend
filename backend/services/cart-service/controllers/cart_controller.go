@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"github.com/yashrajoria/common/internalauth"
 	"go.uber.org/zap"
 )
 
@@ -309,6 +310,7 @@ func (cc *CartController) Checkout(c *gin.Context) {
 		if corID := c.GetHeader("X-Correlation-ID"); corID != "" {
 			req.Header.Set("X-Correlation-ID", corID)
 		}
+		internalauth.Apply(req)
 
 		resp, err := httpClient.Do(req)
 		if err != nil || resp.StatusCode != http.StatusOK {

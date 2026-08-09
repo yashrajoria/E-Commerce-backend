@@ -2,6 +2,7 @@ package routes
 
 import (
 	"net/http"
+	"os"
 	"strings"
 
 	"api-gateway/middlewares"
@@ -10,6 +11,24 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
 )
+
+// getEnv returns the env var value for key, or fallback if unset/blank.
+func getEnv(key, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return fallback
+}
+
+// newAdminGroup creates a sub-group of parent gated by JWT (inherited) + the
+// admin role, in one place, so every admin-only route group is guaranteed to
+// carry AdminRoleMiddleware by construction rather than relying on each call
+// site remembering to attach it.
+func newAdminGroup(parent *gin.RouterGroup, relativePath string) *gin.RouterGroup {
+	g := parent.Group(relativePath)
+	g.Use(middlewares.AdminRoleMiddleware())
+	return g
+}
 
 func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 
@@ -52,38 +71,53 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 		}
 	}
 
+	// ── service base URLs ─────────────────────────────────────────────────────
+	// Overridable per-environment via env vars; default to the Docker Compose
+	// service names/ports used in local/LocalStack deployments.
+	bffBase := getEnv("BFF_SERVICE_URL", "http://bff-service:8088")
+	productBase := getEnv("PRODUCT_SERVICE_URL", "http://product-service:8082")
+	userBase := getEnv("USER_SERVICE_URL", "http://user-service:8085")
+	cartBase := getEnv("CART_SERVICE_URL", "http://cart-service:8086")
+	orderBase := getEnv("ORDER_SERVICE_URL", "http://order-service:8083")
+	paymentBase := getEnv("PAYMENT_SERVICE_URL", "http://payment-service:8087")
+	inventoryBase := getEnv("INVENTORY_SERVICE_URL", "http://inventory-service:8084")
+	promotionBase := getEnv("PROMOTION_SERVICE_URL", "http://promotion-service:8090")
+	shippingBase := getEnv("SHIPPING_SERVICE_URL", "http://shipping-service:8091")
+	authBase := getEnv("AUTH_SERVICE_URL", "http://auth-service:8081")
+	notificationBase := getEnv("NOTIFICATION_SERVICE_URL", "http://notification-service:8092")
+	agentBase := getEnv("AGENT_SERVICE_URL", "http://agent-service:8000")
+
 	// ── service targets ───────────────────────────────────────────────────────
-	bff := forwardTo("http://bff-service:8088/bff")
-	products := forwardTo("http://product-service:8082/products")
-	categories := forwardTo("http://product-service:8082/categories")
-	users := forwardTo("http://user-service:8085/users")
-	cart := forwardTo("http://cart-service:8086/cart")
-	orders := forwardTo("http://order-service:8083/orders")
-	payment := forwardTo("http://payment-service:8087/payment")
-	inventory := forwardTo("http://inventory-service:8084/inventory")
-	coupons := forwardTo("http://promotion-service:8090/coupons")
-	shipping := forwardTo("http://shipping-service:8091/shipping")
-	authProxy := forwardTo("http://auth-service:8081/auth")
-	notifications := forwardTo("http://notification-service:8092/notifications")
-	agent := forwardTo("http://agent-service:8000/agent")
+	bff := forwardTo(bffBase + "/bff")
+	products := forwardTo(productBase + "/products")
+	categories := forwardTo(productBase + "/categories")
+	users := forwardTo(userBase + "/users")
+	cart := forwardTo(cartBase + "/cart")
+	orders := forwardTo(orderBase + "/orders")
+	payment := forwardTo(paymentBase + "/payment")
+	inventory := forwardTo(inventoryBase + "/inventory")
+	coupons := forwardTo(promotionBase + "/coupons")
+	shipping := forwardTo(shippingBase + "/shipping")
+	authProxy := forwardTo(authBase + "/auth")
+	notifications := forwardTo(notificationBase + "/notifications")
+	agent := forwardTo(agentBase + "/agent")
 
 	// ── route groups ──────────────────────────────────────────────────────────
 	public := r.Group("/")
 	protected := r.Group("/")
 	protected.Use(middlewares.JWTMiddleware())
-	admin := protected.Group("/")
-	admin.Use(middlewares.AdminRoleMiddleware())
+	admin := newAdminGroup(protected, "/")
 
 	// =========================================================================
 	// PUBLIC ROUTES — no authentication required
 	// =========================================================================
 
 	// Docs
-	public.GET("/docs", forwardTo("http://bff-service:8088/docs"))
-	public.GET("/docs/*any", forwardTo("http://bff-service:8088/docs"))
+	public.GET("/docs", forwardTo(bffBase+"/docs"))
+	public.GET("/docs/*any", forwardTo(bffBase+"/docs"))
 
 	// Stripe webhook — Stripe calls this directly, no auth
-	public.POST("/stripe/webhook", forwardTo("http://payment-service:8087/payment"))
+	public.POST("/stripe/webhook", forwardTo(paymentBase+"/payment"))
 
 	// Auth — sensitive public actions (strict rate limiting)
 	authStrict := public.Group("/auth")
@@ -93,6 +127,9 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	authStrict.POST("/login", authProxy)
 	authStrict.POST("/register", authProxy)
 	authStrict.POST("/resend-verification", authProxy)
+	// Refresh must be public: access JWT is often expired when this is called.
+	// Auth is the refresh_token cookie, not __session.
+	authStrict.POST("/refresh", authProxy)
 
 	// Auth — other public actions
 	public.POST("/auth/verify-email", authProxy)
@@ -105,6 +142,9 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	public.GET("/categories", categories)
 	public.GET("/categories/*any", categories)
 
+	// Coupons — guest checkout can validate without login
+	public.POST("/coupons/validate", coupons)
+
 	// ── BFF routes ────────────────────────────────────────────────────────────
 
 	// BFF — PUBLIC (no auth required)
@@ -114,6 +154,7 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	bffPublic.POST("/auth/verify-email", bff)
 	bffPublic.POST("/auth/resend-verification", bff)
 	bffPublic.POST("/auth/refresh", bff)
+	bffPublic.POST("/promotions/validate", bff)
 	bffPublic.GET("/products", bff)
 	bffPublic.GET("/products/*action", bff)
 	bffPublic.GET("/categories", bff)
@@ -137,10 +178,8 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	bffProtected.POST("/payment/*action", bff)
 
 	// BFF — ADMIN (JWT + Admin Role required)
-	// FIX: removed redundant .Use(JWTMiddleware()) — already applied by `protected` group.
-	bffAdmin := protected.Group("/bff/admin")
-	bffAdmin.Use(middlewares.AdminRoleMiddleware())
-	
+	bffAdmin := newAdminGroup(protected, "/bff/admin")
+
 	// Keep dashboard and analytics routed to BFF
 	bffAdmin.GET("/dashboard", bff)
 	bffAdmin.GET("/reports/*any", bff)
@@ -148,7 +187,7 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	// Map CRUD operations directly to microservices to avoid bff double-proxy
 	bffAdmin.GET("/products", products)
 	bffAdmin.POST("/products", products)
-	bffAdmin.GET("/products/presign", forwardTo("http://product-service:8082/products/presign"))
+	bffAdmin.GET("/products/presign", forwardTo(productBase+"/products/presign"))
 	bffAdmin.PUT("/products/*any", products)
 	bffAdmin.POST("/products/*any", products)
 	bffAdmin.DELETE("/products/*any", products)
@@ -159,11 +198,11 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	bffAdmin.DELETE("/categories/*any", categories)
 
 	bffAdmin.GET("/users", users)
-	bffAdmin.POST("/users", forwardTo("http://auth-service:8081/auth/admin/users"))
-	bffAdmin.PUT("/users/*any", users) 
+	bffAdmin.POST("/users", forwardTo(authBase+"/auth/admin/users"))
+	bffAdmin.PUT("/users/*any", users)
 	bffAdmin.DELETE("/users/*any", users)
 
-	bffAdmin.GET("/orders", forwardTo("http://order-service:8083/orders/admin/"))
+	bffAdmin.GET("/orders", forwardTo(orderBase+"/orders/admin/"))
 	bffAdmin.GET("/orders/*any", orders)
 	bffAdmin.PUT("/orders/*any", orders)
 
@@ -176,12 +215,10 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	bffAdmin.DELETE("/coupons/*any", coupons)
 
 	bffAdmin.GET("/notifications", notifications)
-	bffAdmin.GET("/notifications/log", forwardTo("http://notification-service:8092/notifications/log"))
+	bffAdmin.GET("/notifications/log", forwardTo(notificationBase+"/notifications/log"))
 
 	// Agent — ADMIN (JWT + Admin Role required)
-	// FIX: same — no need to re-apply JWTMiddleware inside a protected sub-group.
-	agentAdmin := protected.Group("/agent")
-	agentAdmin.Use(middlewares.AdminRoleMiddleware())
+	agentAdmin := newAdminGroup(protected, "/agent")
 	agentAdmin.Any("", agent)
 	agentAdmin.Any("/*any", agent)
 
@@ -191,7 +228,6 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 
 	// Auth — protected actions
 	protected.POST("/auth/logout", authProxy)
-	protected.POST("/auth/refresh", authProxy)
 	protected.GET("/auth/*any", authProxy)
 
 	// Users
@@ -223,8 +259,7 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	protected.GET("/inventory/:productId", inventory)
 	protected.POST("/inventory/check", inventory)
 
-	// Coupons — validate and read single
-	protected.POST("/coupons/validate", coupons)
+	// Coupons — authenticated lookup of a single code
 	protected.GET("/coupons/:code", coupons)
 
 	// Shipping

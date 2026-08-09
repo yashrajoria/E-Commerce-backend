@@ -1,0 +1,40 @@
+# Optional overlay: publish microservice ports for local debugging.
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.localstack.yml -f docker-compose.dev-ports.yml up -d
+services:
+  auth-service:
+    ports:
+      - "8081:8081"
+  user-service:
+    ports:
+      - "8085:8085"
+  product-service:
+    ports:
+      - "8082:8082"
+  cart-service:
+    ports:
+      - "8086:8086"
+  inventory-service:
+    ports:
+      - "8084:8084"
+  order-service:
+    ports:
+      - "8083:8083"
+  payment-service:
+    ports:
+      - "8087:8087"
+  promotion-service:
+    ports:
+      - "8090:8090"
+  shipping-service:
+    ports:
+      - "8091:8091"
+  notification-service:
+    ports:
+      - "8092:8092"
+  bff-service:
+    ports:
+      - "8088:8088"
+  agent-service:
+    ports:
+      - "8089:8000"
