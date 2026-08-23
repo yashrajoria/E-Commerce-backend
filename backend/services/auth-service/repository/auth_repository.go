@@ -56,6 +56,12 @@ func (r *UserRepository) RevokeAllUserRefreshTokens(ctx context.Context, userID 
 	return r.db.WithContext(ctx).Model(&models.RefreshToken{}).Where("user_id = ?", userID).Update("revoked", true).Error
 }
 
+// RevokeRefreshTokenFamily revokes every token descended from the same login,
+// used when a rotated-out token is presented again (reuse => theft signal).
+func (r *UserRepository) RevokeRefreshTokenFamily(ctx context.Context, familyID uuid.UUID) error {
+	return r.db.WithContext(ctx).Model(&models.RefreshToken{}).Where("family_id = ?", familyID).Update("revoked", true).Error
+}
+
 // CountByRole returns how many users have the given role.
 func (r *UserRepository) CountByRole(ctx context.Context, role string) (int64, error) {
 	var count int64

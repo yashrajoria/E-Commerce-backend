@@ -12,6 +12,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
+	"github.com/yashrajoria/common/password"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -25,6 +26,8 @@ type IUserRepository interface {
 	CreateRefreshToken(ctx context.Context, rt *models.RefreshToken) error
 	GetRefreshTokenByTokenID(ctx context.Context, tokenID string) (*models.RefreshToken, error)
 	RevokeRefreshTokenByTokenID(ctx context.Context, tokenID string) error
+	RevokeRefreshTokenFamily(ctx context.Context, familyID uuid.UUID) error
+	RevokeAllUserRefreshTokens(ctx context.Context, userID uuid.UUID) error
 	CountByRole(ctx context.Context, role string) (int64, error)
 }
 
@@ -66,12 +69,25 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*Token
 		return nil, fmt.Errorf("invalid email or password")
 	}
 
+	if user.LoginLockedUntil != nil && time.Now().Before(*user.LoginLockedUntil) {
+		return nil, fmt.Errorf("too many failed login attempts, try again later")
+	}
+
 	if !user.EmailVerified {
 		return nil, fmt.Errorf("email not verified")
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
+		s.recordFailedLogin(ctx, user)
 		return nil, fmt.Errorf("invalid email or password")
+	}
+
+	if user.LoginAttempts != 0 || user.LoginLockedUntil != nil {
+		user.LoginAttempts = 0
+		user.LoginLockedUntil = nil
+		if updateErr := s.userRepo.Update(ctx, user); updateErr != nil {
+			zap.L().Warn("failed to reset login attempt count", zap.Error(updateErr))
+		}
 	}
 
 	tokenPair, refreshTokenID, err := s.tokenService.GenerateTokenPair(
@@ -84,6 +100,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*Token
 	rt := &models.RefreshToken{
 		TokenID:   refreshTokenID,
 		UserID:    user.ID,
+		FamilyID:  uuid.New(),
 		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
 	}
 	if err := s.userRepo.CreateRefreshToken(ctx, rt); err != nil {
@@ -126,7 +143,7 @@ func (s *AuthService) ProvisionUser(ctx context.Context, in ProvisionUserInput) 
 
 		_, err := txRepo.FindByEmail(ctx, in.Email)
 		if err == nil {
-			return fmt.Errorf("email already exists")
+			return ErrEmailAlreadyExists
 		}
 		if err != gorm.ErrRecordNotFound {
 			return err
@@ -143,14 +160,16 @@ func (s *AuthService) ProvisionUser(ctx context.Context, in ProvisionUserInput) 
 		}
 
 		newUser := &models.User{
-			ID:               uuid.New(),
-			Email:            in.Email,
-			Name:             in.Name,
-			Password:         string(hashedPassword),
-			Role:             role,
-			StoreName:        "",
-			EmailVerified:    in.EmailVerified,
-			VerificationCode: verificationCode,
+			ID:            uuid.New(),
+			Email:         in.Email,
+			Name:          in.Name,
+			Password:      string(hashedPassword),
+			Role:          role,
+			StoreName:     "",
+			EmailVerified: in.EmailVerified,
+		}
+		if verificationCode != "" {
+			newUser.VerificationCode = hashVerificationCode(verificationCode)
 		}
 
 		if err := txRepo.Create(ctx, newUser); err != nil {
@@ -159,9 +178,11 @@ func (s *AuthService) ProvisionUser(ctx context.Context, in ProvisionUserInput) 
 
 		if in.Notify && !in.EmailVerified && s.eventPublisher != nil {
 			if err := s.eventPublisher.Publish(ctx, "user_registered", map[string]interface{}{
-				"email":             newUser.Email,
-				"name":              newUser.Name,
-				"verification_code": newUser.VerificationCode,
+				"email": newUser.Email,
+				"name":  newUser.Name,
+				// Plaintext code — sent once here to be emailed to the user.
+				// Only the hash (newUser.VerificationCode) is persisted.
+				"verification_code": verificationCode,
 			}); err != nil {
 				fmt.Printf("failed to publish user_registered event: %v\n", err)
 			}
@@ -176,13 +197,13 @@ func (s *AuthService) ProvisionUser(ctx context.Context, in ProvisionUserInput) 
 // Returns nil when skipped (env unset or admin already present).
 func (s *AuthService) BootstrapAdminFromEnv(ctx context.Context) error {
 	email := strings.TrimSpace(strings.ToLower(os.Getenv("ADMIN_EMAIL")))
-	password := os.Getenv("ADMIN_PASSWORD")
+	adminPassword := os.Getenv("ADMIN_PASSWORD")
 	name := strings.TrimSpace(os.Getenv("ADMIN_NAME"))
 	if name == "" {
 		name = "Administrator"
 	}
 
-	if email == "" || password == "" {
+	if email == "" || adminPassword == "" {
 		zap.L().Info("Admin bootstrap skipped (set ADMIN_EMAIL and ADMIN_PASSWORD to enable)")
 		return nil
 	}
@@ -196,14 +217,14 @@ func (s *AuthService) BootstrapAdminFromEnv(ctx context.Context) error {
 		return nil
 	}
 
-	if err := NewPasswordValidator().ValidatePassword(password); err != nil {
+	if err := password.NewValidator().ValidatePassword(adminPassword); err != nil {
 		return fmt.Errorf("ADMIN_PASSWORD does not meet policy: %w", err)
 	}
 
 	if err := s.ProvisionUser(ctx, ProvisionUserInput{
 		Name:          name,
 		Email:         email,
-		Password:      password,
+		Password:      adminPassword,
 		Role:          "admin",
 		EmailVerified: true,
 		Notify:        false,
@@ -215,18 +236,55 @@ func (s *AuthService) BootstrapAdminFromEnv(ctx context.Context) error {
 	return nil
 }
 
+const (
+	maxVerificationAttempts  = 5
+	verificationLockDuration = 15 * time.Minute
+
+	maxLoginAttempts  = 10
+	loginLockDuration = 15 * time.Minute
+)
+
+// recordFailedLogin increments the failed-login counter and locks the
+// account once maxLoginAttempts is reached. Higher-throughput and shorter
+// duration than the strict gateway rate limit alone would allow, but bounds
+// a distributed attacker who spreads attempts across many IPs.
+func (s *AuthService) recordFailedLogin(ctx context.Context, user *models.User) {
+	user.LoginAttempts++
+	if user.LoginAttempts >= maxLoginAttempts {
+		lockUntil := time.Now().Add(loginLockDuration)
+		user.LoginLockedUntil = &lockUntil
+	}
+	if err := s.userRepo.Update(ctx, user); err != nil {
+		zap.L().Warn("failed to persist failed login attempt count", zap.Error(err))
+	}
+}
+
 func (s *AuthService) VerifyEmail(ctx context.Context, email, code string) error {
 	user, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil {
-		return fmt.Errorf("user not found")
+		return ErrUserNotFound
 	}
 
-	if user.VerificationCode != code {
-		return fmt.Errorf("invalid verification code")
+	if user.VerificationLockedUntil != nil && time.Now().Before(*user.VerificationLockedUntil) {
+		return fmt.Errorf("%w: too many attempts, try again later", ErrInvalidVerificationCode)
+	}
+
+	if user.VerificationCode != hashVerificationCode(code) {
+		user.VerificationAttempts++
+		if user.VerificationAttempts >= maxVerificationAttempts {
+			lockUntil := time.Now().Add(verificationLockDuration)
+			user.VerificationLockedUntil = &lockUntil
+		}
+		if updateErr := s.userRepo.Update(ctx, user); updateErr != nil {
+			zap.L().Warn("failed to persist verification attempt count", zap.Error(updateErr))
+		}
+		return ErrInvalidVerificationCode
 	}
 
 	user.EmailVerified = true
 	user.VerificationCode = ""
+	user.VerificationAttempts = 0
+	user.VerificationLockedUntil = nil
 
 	return s.userRepo.Update(ctx, user)
 }
@@ -253,6 +311,15 @@ func (s *AuthService) RefreshTokens(ctx context.Context, refreshToken string) (*
 	}
 
 	if existingToken.Revoked {
+		// A refresh token is single-use; seeing an already-rotated one again
+		// means it was stolen and used out of band. Kill the whole lineage
+		// so both the attacker's and the legitimate user's sessions are cut.
+		if revokeErr := s.userRepo.RevokeRefreshTokenFamily(ctx, existingToken.FamilyID); revokeErr != nil {
+			zap.L().Error("failed to revoke refresh token family after reuse detection",
+				zap.String("family_id", existingToken.FamilyID.String()), zap.Error(revokeErr))
+		}
+		zap.L().Warn("refresh token reuse detected; family revoked",
+			zap.String("family_id", existingToken.FamilyID.String()), zap.String("user_id", existingToken.UserID.String()))
 		return nil, fmt.Errorf("refresh token has been revoked")
 	}
 
@@ -291,6 +358,7 @@ func (s *AuthService) RefreshTokens(ctx context.Context, refreshToken string) (*
 	newRT := &models.RefreshToken{
 		TokenID:   newTokenID,
 		UserID:    userID,
+		FamilyID:  existingToken.FamilyID,
 		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
 	}
 	if err := s.userRepo.CreateRefreshToken(ctx, newRT); err != nil {
@@ -315,15 +383,17 @@ func (s *AuthService) Logout(ctx context.Context, refreshToken string) error {
 func (s *AuthService) ResendVerificationEmail(ctx context.Context, email string) error {
 	user, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil {
-		return fmt.Errorf("user not found")
+		return ErrUserNotFound
 	}
 
 	if user.EmailVerified {
-		return fmt.Errorf("email already verified")
+		return ErrEmailAlreadyVerified
 	}
 
 	verificationCode := GenerateRandomCode(6)
-	user.VerificationCode = verificationCode
+	user.VerificationCode = hashVerificationCode(verificationCode)
+	user.VerificationAttempts = 0
+	user.VerificationLockedUntil = nil
 
 	if err := s.userRepo.Update(ctx, user); err != nil {
 		return fmt.Errorf("failed to update verification code: %w", err)
@@ -343,6 +413,15 @@ func (s *AuthService) ResendVerificationEmail(ctx context.Context, email string)
 	}
 
 	return nil
+}
+
+// RevokeUserTokens revokes every outstanding refresh token for a user.
+func (s *AuthService) RevokeUserTokens(ctx context.Context, userID string) error {
+	id, err := uuid.Parse(userID)
+	if err != nil {
+		return fmt.Errorf("invalid user id")
+	}
+	return s.userRepo.RevokeAllUserRefreshTokens(ctx, id)
 }
 
 // GetUserByID returns the user for status / RBAC checks.

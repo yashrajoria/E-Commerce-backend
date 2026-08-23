@@ -55,7 +55,9 @@ func (r *memUserRepo) CreateRefreshToken(context.Context, *models.RefreshToken) 
 func (r *memUserRepo) GetRefreshTokenByTokenID(context.Context, string) (*models.RefreshToken, error) {
 	return nil, gorm.ErrRecordNotFound
 }
-func (r *memUserRepo) RevokeRefreshTokenByTokenID(context.Context, string) error { return nil }
+func (r *memUserRepo) RevokeRefreshTokenByTokenID(context.Context, string) error   { return nil }
+func (r *memUserRepo) RevokeRefreshTokenFamily(context.Context, uuid.UUID) error   { return nil }
+func (r *memUserRepo) RevokeAllUserRefreshTokens(context.Context, uuid.UUID) error { return nil }
 func (r *memUserRepo) CountByRole(_ context.Context, role string) (int64, error) {
 	var n int64
 	for _, u := range r.users {

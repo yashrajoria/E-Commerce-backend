@@ -40,6 +40,7 @@ func TestRefreshTokens_UsesRoleFromDB(t *testing.T) {
 	tokens[jti] = &models.RefreshToken{
 		TokenID:   jti,
 		UserID:    uid,
+		FamilyID:  uuid.New(),
 		ExpiresAt: time.Now().Add(time.Hour),
 		Revoked:   false,
 	}
@@ -87,6 +88,59 @@ func (r *refreshMemRepo) RevokeRefreshTokenByTokenID(_ context.Context, tokenID 
 		rt.Revoked = true
 	}
 	return nil
+}
+
+func (r *refreshMemRepo) RevokeRefreshTokenFamily(_ context.Context, familyID uuid.UUID) error {
+	for _, rt := range r.tokens {
+		if rt.FamilyID == familyID {
+			rt.Revoked = true
+		}
+	}
+	return nil
+}
+
+func TestRefreshTokens_ReuseOfRevokedTokenRevokesFamily(t *testing.T) {
+	uid := uuid.MustParse("22222222-2222-4222-8222-222222222222")
+	repo := newMemUserRepo()
+	repo.users["u2@example.com"] = &models.User{ID: uid, Email: "u2@example.com", Role: "user"}
+
+	tokens := make(map[string]*models.RefreshToken)
+	repoGet := &refreshMemRepo{memUserRepo: repo, tokens: tokens}
+
+	family := uuid.New()
+	jti := "rotated-out-jti"
+	tokens[jti] = &models.RefreshToken{
+		TokenID:   jti,
+		UserID:    uid,
+		FamilyID:  family,
+		ExpiresAt: time.Now().Add(time.Hour),
+		Revoked:   true, // already rotated once; presenting it again is reuse
+	}
+	sibling := "still-valid-sibling-jti"
+	tokens[sibling] = &models.RefreshToken{
+		TokenID:   sibling,
+		UserID:    uid,
+		FamilyID:  family,
+		ExpiresAt: time.Now().Add(time.Hour),
+		Revoked:   false,
+	}
+
+	stub := refreshStubTokens{claims: jwt.MapClaims{
+		"sub":   uid.String(),
+		"jti":   jti,
+		"email": "u2@example.com",
+		"role":  "user",
+		"typ":   "refresh",
+	}}
+
+	svc := &AuthService{userRepo: repoGet, tokenService: stub, db: nil}
+	_, err := svc.RefreshTokens(context.Background(), "any")
+	if err == nil {
+		t.Fatal("expected error on reuse of revoked refresh token")
+	}
+	if !tokens[sibling].Revoked {
+		t.Fatal("expected sibling token in the same family to be revoked after reuse detection")
+	}
 }
 
 var errNotFound = errRecordNotFound{}

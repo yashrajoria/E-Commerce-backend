@@ -1,8 +1,11 @@
-package services
+// Package password provides the shared password-strength policy used by
+// every service that accepts a new or changed password (auth-service
+// register/admin-create, user-service change-password). Previously each
+// service carried its own byte-for-byte copy of this file.
+package password
 
 import (
 	"errors"
-	// "regexp"
 	"unicode"
 )
 
@@ -17,8 +20,8 @@ var (
 	ErrPasswordRepeating  = errors.New("password contains repeating characters")
 )
 
-// PasswordValidator validates passwords against security requirements
-type PasswordValidator struct {
+// Validator validates passwords against security requirements.
+type Validator struct {
 	minLength       int
 	requireUpper    bool
 	requireLower    bool
@@ -27,9 +30,9 @@ type PasswordValidator struct {
 	commonPasswords map[string]bool
 }
 
-// NewPasswordValidator creates a new password validator with default settings
-func NewPasswordValidator() *PasswordValidator {
-	return &PasswordValidator{
+// NewValidator creates a new password validator with default settings.
+func NewValidator() *Validator {
+	return &Validator{
 		minLength:      8,
 		requireUpper:   true,
 		requireLower:   true,
@@ -45,15 +48,15 @@ func NewPasswordValidator() *PasswordValidator {
 	}
 }
 
-// ValidatePassword checks if a password meets all security requirements
-func (pv *PasswordValidator) ValidatePassword(password string) error {
+// ValidatePassword checks if a password meets all security requirements.
+func (pv *Validator) ValidatePassword(password string) error {
 	if len(password) < pv.minLength {
 		return ErrPasswordTooShort
 	}
 
 	var hasUpper, hasLower, hasNumber, hasSpecial bool
 	var prevChar rune
-	var repeatCount int
+	var repeatCount, ascCount, descCount int
 
 	for i, char := range password {
 		switch {
@@ -77,8 +80,18 @@ func (pv *PasswordValidator) ValidatePassword(password string) error {
 			repeatCount = 1
 		}
 
-		// Check for sequential characters
-		if i > 0 && (char == prevChar+1 || char == prevChar-1) {
+		// Check for a run of 4+ sequential characters (e.g. "1234", "abcd")
+		if i > 0 && char == prevChar+1 {
+			ascCount++
+		} else {
+			ascCount = 1
+		}
+		if i > 0 && char == prevChar-1 {
+			descCount++
+		} else {
+			descCount = 1
+		}
+		if ascCount >= 4 || descCount >= 4 {
 			return ErrPasswordSequential
 		}
 
@@ -104,10 +117,4 @@ func (pv *PasswordValidator) ValidatePassword(password string) error {
 	}
 
 	return nil
-}
-
-// IsPasswordStrong checks if a password meets minimum security requirements
-func IsPasswordStrong(password string) bool {
-	validator := NewPasswordValidator()
-	return validator.ValidatePassword(password) == nil
 }

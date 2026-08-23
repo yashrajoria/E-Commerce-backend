@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -11,6 +12,8 @@ import (
 	"auth-service/services"
 
 	"github.com/gin-gonic/gin"
+	"github.com/yashrajoria/common/password"
+	"go.uber.org/zap"
 )
 
 type IAuthService interface {
@@ -22,6 +25,7 @@ type IAuthService interface {
 	Logout(ctx context.Context, refreshToken string) error
 	ResendVerificationEmail(ctx context.Context, email string) error
 	GetUserByID(ctx context.Context, userID string) (*models.User, error)
+	RevokeUserTokens(ctx context.Context, userID string) error
 }
 
 type AuthController struct {
@@ -103,7 +107,7 @@ func (ctrl *AuthController) Register(c *gin.Context) {
 	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 
 	// Validate password strength before proceeding
-	pwValidator := services.NewPasswordValidator()
+	pwValidator := password.NewValidator()
 	if err := pwValidator.ValidatePassword(req.Password); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -111,12 +115,8 @@ func (ctrl *AuthController) Register(c *gin.Context) {
 
 	err := ctrl.service.Register(c.Request.Context(), req.Name, req.Email, req.Password, req.Role)
 	if err != nil {
-		if strings.Contains(err.Error(), "already exists") {
+		if errors.Is(err, services.ErrEmailAlreadyExists) {
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
-			return
-		}
-		if strings.Contains(err.Error(), "failed to send verification email") {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Account created, but failed to send verification email. Please try verifying later."})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create account at this time."})
@@ -139,11 +139,11 @@ func (ctrl *AuthController) VerifyEmail(c *gin.Context) {
 	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 	err := ctrl.service.VerifyEmail(c.Request.Context(), req.Email, req.Code)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, services.ErrUserNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			return
 		}
-		if strings.Contains(err.Error(), "invalid") {
+		if errors.Is(err, services.ErrInvalidVerificationCode) {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 			return
 		}
@@ -155,9 +155,15 @@ func (ctrl *AuthController) VerifyEmail(c *gin.Context) {
 }
 
 func (ctrl *AuthController) Logout(c *gin.Context) {
-	// try to revoke server-side refresh token if present
+	// Revoke server-side refresh token if present; best-effort — cookies are
+	// cleared regardless so the client is logged out even if this fails
+	// (e.g. token already revoked/expired, which is not an error worth surfacing).
 	refreshToken, _ := c.Cookie("refresh_token")
-	_ = ctrl.service.Logout(c.Request.Context(), refreshToken)
+	if refreshToken != "" {
+		if err := ctrl.service.Logout(c.Request.Context(), refreshToken); err != nil {
+			zap.L().Debug("logout: refresh token revoke failed", zap.Error(err))
+		}
+	}
 
 	domain := os.Getenv("COOKIE_DOMAIN")
 	sameSite, secure := cookieSettings()
@@ -180,6 +186,7 @@ func (ctrl *AuthController) Refresh(c *gin.Context) {
 
 	newTokenPair, err := ctrl.service.RefreshTokens(c.Request.Context(), refreshToken)
 	if err != nil {
+		zap.L().Warn("refresh token rejected", zap.Error(err))
 		ctrl.Logout(c)
 		return
 	}
@@ -202,16 +209,14 @@ func (ctrl *AuthController) Refresh(c *gin.Context) {
 	})
 }
 
+// GetAuthStatus trusts only X-User-* headers set by api-gateway's JWTMiddleware
+// (see forwarder.go) — never client cookies, which anyone reaching this service
+// directly could forge. Route is also gated by internalauth.Require() in main.go.
 func (ctrl *AuthController) GetAuthStatus(c *gin.Context) {
 	userID := c.GetHeader("X-User-ID")
 	email := c.GetHeader("X-User-Email")
 	role := c.GetHeader("X-User-Role")
 
-	if userID == "" {
-		if v, err := c.Cookie("user_id"); err == nil && v != "" {
-			userID = v
-		}
-	}
 	if userID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Not authenticated"})
 		return
@@ -221,16 +226,6 @@ func (ctrl *AuthController) GetAuthStatus(c *gin.Context) {
 		role = u.Role
 		if email == "" {
 			email = u.Email
-		}
-	}
-	if role == "" {
-		if v, err := c.Cookie("user_role"); err == nil && v != "" {
-			role = v
-		}
-	}
-	if email == "" {
-		if v, err := c.Cookie("user_email"); err == nil && v != "" {
-			email = v
 		}
 	}
 
@@ -257,16 +252,12 @@ func (ctrl *AuthController) ResendVerificationEmail(c *gin.Context) {
 	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 	err := ctrl.service.ResendVerificationEmail(c.Request.Context(), req.Email)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, services.ErrUserNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 			return
 		}
-		if strings.Contains(err.Error(), "already verified") {
+		if errors.Is(err, services.ErrEmailAlreadyVerified) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Email already verified"})
-			return
-		}
-		if strings.Contains(err.Error(), "failed to send") {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send verification email. Please try again later."})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not resend verification email"})
@@ -290,7 +281,7 @@ func (ctrl *AuthController) AdminCreateUser(c *gin.Context) {
 
 	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 
-	pwValidator := services.NewPasswordValidator()
+	pwValidator := password.NewValidator()
 	if err := pwValidator.ValidatePassword(req.Password); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -307,7 +298,7 @@ func (ctrl *AuthController) AdminCreateUser(c *gin.Context) {
 		Notify:        false,
 	})
 	if err != nil {
-		if strings.Contains(err.Error(), "already exists") {
+		if errors.Is(err, services.ErrEmailAlreadyExists) {
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 			return
 		}
@@ -316,4 +307,25 @@ func (ctrl *AuthController) AdminCreateUser(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"message": "User created successfully", "email": req.Email, "role": req.Role})
+}
+
+// RevokeUserTokens revokes every outstanding refresh token for a user.
+// Internal-only (gated by internalauth.Require() at the route). Called by
+// user-service right after a password change so a stolen session can't
+// outlive the password that issued it.
+func (ctrl *AuthController) RevokeUserTokens(c *gin.Context) {
+	var req struct {
+		UserID string `json:"user_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	if err := ctrl.service.RevokeUserTokens(c.Request.Context(), req.UserID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to revoke tokens"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Tokens revoked"})
 }

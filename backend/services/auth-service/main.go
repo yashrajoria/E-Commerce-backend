@@ -17,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"github.com/yashrajoria/common/internalauth"
 	commonmw "github.com/yashrajoria/common/middleware"
 	"go.uber.org/zap"
 )
@@ -34,6 +35,12 @@ func main() {
 
 	// Load .env file
 	_ = godotenv.Load()
+
+	// Unset means internalauth.Require() fail-closes with 503 on every call to
+	// /auth/internal/revoke-tokens and /auth/status — surface it at boot.
+	if internalauth.Token() == "" {
+		zap.L().Warn("INTERNAL_SERVICE_TOKEN is not set — internal-only routes will reject all requests")
+	}
 
 	// Connect to the database (AutoMigrate for User/RefreshToken when ALLOW_AUTO_MIGRATE=true)
 	if err := database.Connect(); err != nil {
@@ -94,8 +101,7 @@ func main() {
 		c.Next()
 	})
 
-	// r.Use(middlewares.SecurityHeaders()) // Good to have
-	// r.Use(middlewares.RateLimitMiddleware()) // Good to have
+	r.Use(commonmw.SecurityHeaders())
 
 	// --- 4. Route Registration ---
 
@@ -107,15 +113,29 @@ func main() {
 	// Auth routes, now using the controller methods
 	authRoutes := r.Group("/auth")
 	{
-		authRoutes.POST("/register", authController.Register)
-		authRoutes.POST("/login", authController.Login)
+		// Defense-in-depth: api-gateway already rate-limits these paths, but
+		// auth-service enforces its own per-IP limit too, so brute-forcing
+		// login/register/refresh directly (bypassing the gateway) is also throttled.
+		bruteForceLimit := commonmw.RateLimitMiddleware()
+		authRoutes.POST("/register", bruteForceLimit, authController.Register)
+		authRoutes.POST("/login", bruteForceLimit, authController.Login)
 		authRoutes.POST("/verify-email", authController.VerifyEmail)
+		authRoutes.POST("/resend-verification", authController.ResendVerificationEmail)
 		authRoutes.POST("/logout", authController.Logout)
-		authRoutes.POST("/refresh", authController.Refresh)     // Added the refresh route
-		authRoutes.GET("/status", authController.GetAuthStatus) // Added the status route
+		authRoutes.POST("/refresh", bruteForceLimit, authController.Refresh) // Added the refresh route
+
+		// Reached only through api-gateway (which always attaches the internal
+		// mesh token when forwarding); reject direct hits so no one can spoof
+		// X-User-Role by talking to auth-service straight off the network.
+		authRoutes.GET("/status", internalauth.Require(), authController.GetAuthStatus)
 
 		// Admin routes (defense-in-depth; gateway also requires admin JWT)
 		authRoutes.POST("/admin/users", middlewares.AdminOnly(), authController.AdminCreateUser)
+
+		// Internal-only: called by user-service after a password change to
+		// revoke every outstanding refresh token for the account, so a
+		// stolen session can't outlive the password that issued it.
+		authRoutes.POST("/internal/revoke-tokens", internalauth.Require(), authController.RevokeUserTokens)
 	}
 
 	// --- 5. Graceful Shutdown ---
