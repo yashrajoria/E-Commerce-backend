@@ -9,6 +9,7 @@ import (
 	"github.com/yashrajoria/inventory-service/models"
 	"github.com/yashrajoria/inventory-service/repository"
 	"github.com/yashrajoria/inventory-service/services"
+	"go.uber.org/zap"
 )
 
 // InventoryController handles HTTP requests for inventory
@@ -51,6 +52,13 @@ func (ic *InventoryController) SetStock(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request", "details": err.Error()})
 		return
 	}
+
+	userID := c.GetHeader("X-User-ID")
+	zap.L().Info("[AUDIT] admin set stock",
+		zap.String("user_id", userID),
+		zap.String("product_id", req.ProductID),
+		zap.Int("stock", req.Stock),
+	)
 
 	inv, err := ic.service.SetStock(c.Request.Context(), &req)
 	if err != nil {

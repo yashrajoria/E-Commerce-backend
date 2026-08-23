@@ -62,7 +62,7 @@ func NewCouponService(
 
 // CreateCoupon creates a new coupon.
 func (s *couponServiceImpl) CreateCoupon(ctx context.Context, req *models.CreateCouponRequest) (*models.Coupon, *ServiceError) {
-	if req.ExpiresAt.Before(time.Now()) {
+	if req.ExpiresAt.UTC().Before(time.Now().UTC()) {
 		return nil, &ServiceError{StatusCode: 400, Message: "Expiry date must be in the future"}
 	}
 
@@ -104,7 +104,7 @@ func (s *couponServiceImpl) ValidateCoupon(ctx context.Context, req *models.Vali
 	}
 
 	// Check expiry
-	if time.Now().After(coupon.ExpiresAt) {
+	if time.Now().UTC().After(coupon.ExpiresAt.UTC()) {
 		return &models.ValidateCouponResponse{
 			Valid:   false,
 			Code:    req.Code,

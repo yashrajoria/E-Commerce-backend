@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"payment-service/models"
 	"payment-service/repository"
+	"regexp"
 	"strings"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	"github.com/yashrajoria/common/events"
 	"go.uber.org/zap"
 )
+
+var validIdempotencyKey = regexp.MustCompile(`^[a-zA-Z0-9_\-]{1,128}$`)
 
 type PaymentRequestConsumer struct {
 	sqsConsumer          *aws_pkg.SQSConsumer
@@ -62,6 +65,10 @@ func (c *PaymentRequestConsumer) Start(ctx context.Context) {
 		if req.IdempotencyKey == "" {
 			c.logger.Warn("Missing Idempotency-Key header")
 			return fmt.Errorf("missing Idempotency-Key header")
+		}
+		if !validIdempotencyKey.MatchString(req.IdempotencyKey) {
+			c.logger.Warn("Invalid Idempotency-Key format", zap.String("idempotency_key", req.IdempotencyKey))
+			return fmt.Errorf("invalid Idempotency-Key format: must match ^[a-zA-Z0-9_-]{1,128}$")
 		}
 
 		// Check if payment already exists for the idempotency key

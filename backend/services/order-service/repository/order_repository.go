@@ -123,6 +123,20 @@ func (r *GormOrderRepository) Update(ctx context.Context, order *models.Order) e
 	return r.db.WithContext(ctx).Save(order).Error
 }
 
+func (r *GormOrderRepository) UpdateOrderStatus(ctx context.Context, orderID uuid.UUID, fromStatus, toStatus string) error {
+	res := r.db.WithContext(ctx).
+		Model(&models.Order{}).
+		Where("id = ? AND status = ?", orderID, fromStatus).
+		Update("status", toStatus)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrStatusConflict
+	}
+	return nil
+}
+
 func (r *GormOrderRepository) FindByIdempotencyKey(ctx context.Context, key string) (*models.Order, error) {
 	var order models.Order
 	err := r.db.WithContext(ctx).Where("idempotency_key = ?", key).First(&order).Error

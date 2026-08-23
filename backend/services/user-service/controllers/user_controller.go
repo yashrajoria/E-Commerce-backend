@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"user-service/middleware"
 	"user-service/services"
@@ -79,6 +80,9 @@ func (ctrl *UserController) UpdateProfile(c *gin.Context) {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			logger.Warn(c.Request.Context(), "User not found for update", zap.String("user_id", userID))
 			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		} else if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "23505") || strings.Contains(err.Error(), "unique constraint") {
+			logger.Warn(c.Request.Context(), "Duplicate phone number or email on update", zap.Error(err), zap.String("user_id", userID))
+			c.JSON(http.StatusConflict, gin.H{"error": "phone number already in use"})
 		} else {
 			logger.Error(c.Request.Context(), "Failed to update profile", err, zap.String("user_id", userID))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user"})

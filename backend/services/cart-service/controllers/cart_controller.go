@@ -71,7 +71,7 @@ func (cc *CartController) GetCart(c *gin.Context) {
 type AddItemsRequest struct {
 	Items []struct {
 		ProductID string `json:"product_id" binding:"required,uuid"`
-		Quantity  int    `json:"quantity" binding:"required,min=1"`
+		Quantity  int    `json:"quantity" binding:"required,min=1,max=999"`
 	} `json:"items" binding:"required,dive"`
 }
 
