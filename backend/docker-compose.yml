@@ -1,6 +1,9 @@
 services:
   postgres:
-    image: postgres:latest
+    # Pinned (was postgres:latest) — an unpinned tag can jump major versions
+    # on a routine `docker compose pull`/rebuild and break wire compatibility
+    # or silently require a manual data migration.
+    image: postgres:16.4-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
@@ -16,13 +19,19 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g
     volumes:
       - postgres_data:/var/lib/postgresql
     networks:
       - ecommerce-network
 
   redis:
-    image: redis:7
+    # Pinned (was redis:7, major-version only) for reproducible rebuilds.
+    image: redis:7.4-alpine
     restart: unless-stopped
     ports:
       - "6379:6379"
@@ -32,6 +41,11 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
     volumes:
       - redis_data:/data
     networks:
@@ -42,15 +56,20 @@ services:
       context: .
       dockerfile: services/auth-service/Dockerfile
     restart: unless-stopped
-    volumes:
-      - ./services/auth-service:/app
-      - ./services/common:/common
+    # No source bind-mount here: the Dockerfile builds a static binary and
+    # ENTRYPOINT runs that binary directly, so mounting source over it would
+    # do nothing but mislead readers into thinking hot-reload works.
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/health/live"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256m
     env_file:
       - .env
     environment:
@@ -81,10 +100,20 @@ services:
       context: .
       dockerfile: services/user-service/Dockerfile
     restart: unless-stopped
-    volumes:
-      - ./services/user-service:/app
-      - ./services/common:/common
-      - ./pkg/aws:/pkg/aws
+    # No source bind-mount here: the Dockerfile builds a static binary and
+    # ENTRYPOINT runs that binary directly, so mounting source over it would
+    # do nothing but mislead readers into thinking hot-reload works.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8085/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256m
     env_file:
       - .env
     environment:
@@ -97,11 +126,14 @@ services:
       - USE_LOCALSTACK=true
       - LOCALSTACK_ENDPOINT=http://localstack:4566
       - ORDER_SNS_TOPIC_ARN=${ORDER_SNS_TOPIC_ARN:-arn:aws:sns:us-east-1:000000000000:order-events}
+      - AUTH_SERVICE_URL=http://auth-service:8081
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
     depends_on:
       postgres:
+        condition: service_healthy
+      auth-service:
         condition: service_healthy
     networks:
       - ecommerce-network
@@ -111,16 +143,18 @@ services:
       context: .
       dockerfile: services/product-service/Dockerfile
     restart: unless-stopped
-    volumes:
-      - ./services/product-service:/app
-      - ./services/common:/common
-      - ./pkg/aws:/pkg/aws
+    # No source bind-mount: static-binary image, ENTRYPOINT runs it directly.
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8082/health/live"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256m
     env_file:
       - .env
     environment:
@@ -152,10 +186,18 @@ services:
       context: .
       dockerfile: services/cart-service/Dockerfile
     restart: unless-stopped
-    volumes:
-      - ./services/cart-service:/app
-      - ./services/common:/common
-      - ./pkg/aws:/pkg/aws
+    # No source bind-mount: static-binary image, ENTRYPOINT runs it directly.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8086/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256m
     env_file:
       - .env
     environment:
@@ -184,10 +226,18 @@ services:
       context: .
       dockerfile: services/inventory-service/Dockerfile
     restart: unless-stopped
-    volumes:
-      - ./services/inventory-service:/app
-      - ./services/common:/common
-      - ./pkg/aws:/pkg/aws
+    # No source bind-mount: static-binary image, ENTRYPOINT runs it directly.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8084/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256m
     env_file:
       - .env
     environment:
@@ -211,16 +261,18 @@ services:
       context: .
       dockerfile: services/order-service/Dockerfile
     restart: unless-stopped
-    volumes:
-      - ./services/order-service:/app
-      - ./services/common:/common
-      - ./pkg/aws:/pkg/aws
+    # No source bind-mount: static-binary image, ENTRYPOINT runs it directly.
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8083/health/live"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256m
     env_file:
       - .env
     environment:
@@ -250,16 +302,18 @@ services:
       context: .
       dockerfile: services/payment-service/Dockerfile
     restart: unless-stopped
-    volumes:
-      - ./services/payment-service:/app
-      - ./services/common:/common
-      - ./pkg/aws:/pkg/aws
+    # No source bind-mount: static-binary image, ENTRYPOINT runs it directly.
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8087/health/live"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256m
     env_file:
       - .env
     environment:
@@ -290,10 +344,18 @@ services:
       context: .
       dockerfile: services/promotion-service/Dockerfile
     restart: unless-stopped
-    volumes:
-      - ./services/promotion-service:/app
-      - ./services/common:/common
-      - ./pkg/aws:/pkg/aws
+    # No source bind-mount: static-binary image, ENTRYPOINT runs it directly.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8090/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256m
     env_file:
       - .env
     environment:
@@ -322,8 +384,18 @@ services:
       context: .
       dockerfile: services/shipping-service/Dockerfile
     restart: unless-stopped
-    volumes:
-      - ./services/shipping-service:/app
+    # No source bind-mount: static-binary image, ENTRYPOINT runs it directly.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8091/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128m
     env_file:
       - .env
     environment:
@@ -338,16 +410,19 @@ services:
       context: .
       dockerfile: services/notification-service/Dockerfile
     restart: unless-stopped
-    volumes:
-      - ./services/notification-service:/app
-      - ./services/common:/common
-      - ./pkg/aws:/pkg/aws
+    # No source bind-mount: static-binary image (templates are baked in via
+    # the Dockerfile's COPY --from=builder), ENTRYPOINT runs it directly.
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8092/health/live"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256m
     env_file:
       - .env
     environment:
@@ -393,10 +468,14 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-    volumes:
-      - ./api-gateway:/app
-      - ./services/common:/common
-      - ./pkg/aws:/pkg/aws
+    # No source bind-mount here: the Dockerfile builds a static binary and
+    # ENTRYPOINT runs that binary directly, so mounting source over it would
+    # do nothing but mislead readers into thinking hot-reload works.
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256m
     env_file:
       - .env
     environment:
@@ -416,29 +495,35 @@ services:
       - RATE_LIMIT_GLOBAL=${RATE_LIMIT_GLOBAL:-1000}
       - RATE_LIMIT_STRICT=${RATE_LIMIT_STRICT:-30}
       - RATE_LIMIT_WINDOW_SECONDS=${RATE_LIMIT_WINDOW_SECONDS:-60}
+      # Comma-separated CIDRs of reverse proxies allowed to set
+      # X-Forwarded-For (e.g. an ALB/nginx in front of this container). Left
+      # unset here because nothing sits in front of the gateway in this
+      # compose stack — gin.ClientIP() then trusts no forwarded header at
+      # all, closing the IP-spoofing gap that made rate limiting bypassable.
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-}
     depends_on:
       redis:
         condition: service_healthy
       auth-service:
-        condition: service_started
+        condition: service_healthy
       product-service:
-        condition: service_started
+        condition: service_healthy
       inventory-service:
-        condition: service_started
+        condition: service_healthy
       order-service:
-        condition: service_started
+        condition: service_healthy
       user-service:
-        condition: service_started
+        condition: service_healthy
       cart-service:
-        condition: service_started
+        condition: service_healthy
       payment-service:
-        condition: service_started
+        condition: service_healthy
       promotion-service:
-        condition: service_started
+        condition: service_healthy
       shipping-service:
-        condition: service_started
+        condition: service_healthy
       notification-service:
-        condition: service_started
+        condition: service_healthy
     networks:
       - ecommerce-network
 
@@ -447,17 +532,24 @@ services:
       context: .
       dockerfile: services/bff-service/Dockerfile
     restart: unless-stopped
+    # ./docs is a real runtime dependency (main.go serves /docs/openapi.yaml
+    # from this path) — kept. The service-source/common/pkg mounts are not:
+    # the Dockerfile builds a static binary and ENTRYPOINT runs that binary
+    # directly, so they did nothing but mislead readers into thinking
+    # hot-reload works.
     volumes:
-      - ./services/bff-service:/app
       - ./docs:/docs:ro
-      - ./services/common:/common
-      - ./pkg/aws:/pkg/aws
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8088/health/live"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256m
     env_file:
       - .env
     environment:
@@ -478,7 +570,7 @@ services:
       - SHIPPING_SERVICE_URL=http://shipping-service:8091
     depends_on:
       api-gateway:
-        condition: service_started
+        condition: service_healthy
       redis:
         condition: service_healthy
     networks:
@@ -489,8 +581,16 @@ services:
       context: ./services/agent-service
       dockerfile: Dockerfile
     restart: unless-stopped
+    # Kept (unlike the Go services above): this image runs `uvicorn` directly
+    # against /app with no compile step, so the mount is a real dev
+    # convenience, not a vestigial leftover.
     volumes:
       - ./services/agent-service:/app
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
     env_file:
       - .env
     environment:
@@ -510,7 +610,8 @@ services:
       - LLM_TIMEOUT=30
       - CONCURRENT_TOOL_LIMIT=10
     depends_on:
-      - bff-service
+      bff-service:
+        condition: service_healthy
     networks:
       - ecommerce-network
 
