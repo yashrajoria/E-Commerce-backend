@@ -204,6 +204,16 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 
 	if err := c.orderRepo.Create(ctx, &order); err != nil {
 		log.Printf("❌ [CHECKOUT] Failed to create order record (will retry): %v", err)
+		// Compensate: release the stock we just reserved so it doesn't stay locked
+		// indefinitely if this message eventually dead-letters. Safe to re-reserve
+		// on retry since ReserveStock is idempotent via ClientRequestToken.
+		if c.inventoryClient != nil {
+			if relErr := c.inventoryClient.ReleaseStock(ctx, orderIDUUID.String(), inventoryItems); relErr != nil {
+				log.Printf("❌ [CHECKOUT] Failed to release reserved stock after order create failure for order=%s: %v", orderIDUUID.String(), relErr)
+			} else {
+				log.Printf("↩️  [CHECKOUT] Released reserved stock after order create failure for order=%s", orderIDUUID.String())
+			}
+		}
 		return err
 	}
 

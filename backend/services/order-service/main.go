@@ -21,6 +21,7 @@ import (
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	commondb "github.com/yashrajoria/common/db"
 	apperrors "github.com/yashrajoria/common/errors"
+	"github.com/yashrajoria/common/internalauth"
 	"go.uber.org/zap"
 )
 
@@ -31,6 +32,10 @@ func main() {
 	}
 	defer logger.Sync()
 	zap.ReplaceGlobals(logger)
+
+	if internalauth.Token() == "" {
+		logger.Warn("INTERNAL_SERVICE_TOKEN is not set — internal-only calls to/from order-service will be rejected")
+	}
 
 	cfg, err := LoadConfig()
 	if err != nil {
