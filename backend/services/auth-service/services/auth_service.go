@@ -169,10 +169,8 @@ func (s *AuthService) ProvisionUser(ctx context.Context, in ProvisionUserInput) 
 		}
 
 		verificationCode := ""
-		var verificationCodeExpiresAt time.Time
 		if !in.EmailVerified {
 			verificationCode = GenerateRandomCode(6)
-			verificationCodeExpiresAt = time.Now().Add(verificationCodeTTL)
 		}
 
 		newUser := &models.User{
