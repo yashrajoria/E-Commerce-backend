@@ -21,6 +21,7 @@ FROM alpine:3.19
 
 # Add timezone data
 RUN apk add --no-cache tzdata
+RUN addgroup -S app && adduser -S -G app app
 
 WORKDIR /app
 
@@ -28,5 +29,9 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /notification-service /notification-service
 COPY --from=builder /templates /app/templates
 
+USER app
 EXPOSE 8092
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD wget -q -O /dev/null http://127.0.0.1:8092/health/live || exit 1
+
 ENTRYPOINT ["/notification-service"]

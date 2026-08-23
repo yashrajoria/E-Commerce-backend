@@ -3,6 +3,7 @@ package services
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"html/template"
 	"notification-service/models"
@@ -126,7 +127,11 @@ func (s *notificationService) ProcessEvent(ctx context.Context, payload *models.
 	}
 	renderedBody := buf.String()
 
-	// Send on each configured channel
+	// Send on each configured channel. A channel that exhausts all retries is a
+	// delivery failure: return an error so the SQS consumer does not ack/delete
+	// the message, allowing a retry (and eventual DLQ) instead of silently
+	// dropping the notification.
+	var sendErrs []error
 	for _, channel := range cfg.channels {
 		toKey := cfg.toKeys[channel]
 		to, ok := payload.Data[toKey].(string)
@@ -142,7 +147,13 @@ func (s *notificationService) ProcessEvent(ctx context.Context, payload *models.
 			continue
 		}
 
-		s.sendWithRetry(ctx, channel, to, cfg.subject, renderedBody, payload)
+		if err := s.sendWithRetry(ctx, channel, to, cfg.subject, renderedBody, payload); err != nil {
+			sendErrs = append(sendErrs, fmt.Errorf("channel %s: %w", channel, err))
+		}
+	}
+
+	if len(sendErrs) > 0 {
+		return fmt.Errorf("notification delivery failed: %w", errors.Join(sendErrs...))
 	}
 
 	return nil
@@ -152,7 +163,7 @@ func (s *notificationService) sendWithRetry(
 	ctx context.Context,
 	channel, to, subject, body string,
 	payload *models.EventPayload,
-) {
+) error {
 	var lastErr error
 	var messageID string
 
@@ -171,7 +182,7 @@ func (s *notificationService) sendWithRetry(
 					zap.String("event", payload.EventType),
 					zap.String("recipient", to),
 				)
-				return
+				return nil
 			}
 			result, lastErr = s.smsSender.SendSMS(ctx, to, body)
 		}
@@ -215,6 +226,8 @@ func (s *notificationService) sendWithRetry(
 	if err := s.repo.SaveLog(ctx, logEntry); err != nil {
 		s.logger.Error("failed to save notification log", zap.Error(err))
 	}
+
+	return lastErr
 }
 
 func (s *notificationService) GetLogs(ctx context.Context, filter models.NotificationFilter) ([]models.NotificationLog, int64, error) {
