@@ -80,6 +80,11 @@ func registerProductRoutes(
 			internalauth.Require(),
 			productCtrl.GetProductByIDInternal,
 		)
+		products.POST(
+			"/internal/batch-validate",
+			internalauth.Require(),
+			productCtrl.BatchValidateInternal,
+		)
 	}
 }
 

@@ -19,6 +19,7 @@ import (
 	"github.com/go-redis/redis/v8"
 	"github.com/joho/godotenv"
 	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"github.com/yashrajoria/common/internalauth"
 	commonmw "github.com/yashrajoria/common/middleware"
 	"go.uber.org/zap"
 )
@@ -33,6 +34,10 @@ func main() {
 	}
 	defer logger.Sync()        // Flushes buffer, if any
 	zap.ReplaceGlobals(logger) // Set the global logger
+
+	if internalauth.Token() == "" {
+		logger.Warn("INTERNAL_SERVICE_TOKEN is not set — internal-only calls to/from product-service will be rejected")
+	}
 
 	// Load .env file (optional, falls back to system env)
 	_ = godotenv.Load()

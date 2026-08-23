@@ -424,6 +424,34 @@ func (s *ProductServiceDDB) GetProductInternal(ctx context.Context, id uuid.UUID
 	return dto, nil
 }
 
+// GetProductsInternal batch-loads internal product DTOs for the given IDs in a single
+// BatchGetItem call, avoiding a per-item round trip from callers like cart-service checkout.
+func (s *ProductServiceDDB) GetProductsInternal(ctx context.Context, ids []uuid.UUID) ([]*ProductInternalDTO, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	strIDs := make([]string, len(ids))
+	for i, id := range ids {
+		strIDs[i] = id.String()
+	}
+
+	products, err := s.productRepo.GetProductsByIDs(ctx, strIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	dtos := make([]*ProductInternalDTO, 0, len(products))
+	for _, p := range products {
+		dtos = append(dtos, &ProductInternalDTO{
+			ID:    p.ID,
+			Name:  p.Name,
+			Price: p.Price,
+			Stock: p.Quantity,
+		})
+	}
+	return dtos, nil
+}
+
 func (s *ProductServiceDDB) ValidateBulkImport(ctx context.Context, file multipart.File) (*models.BulkImportValidation, error) {
 	r := csv.NewReader(file)
 	headers, err := r.Read()

@@ -29,6 +29,10 @@ resource "aws_dynamodb_table" "products" {
     name = "created_at"
     type = "S"
   }
+  attribute {
+    name = "brand"
+    type = "S"
+  }
 
   global_secondary_index {
     name            = "sku-index"
@@ -39,6 +43,13 @@ resource "aws_dynamodb_table" "products" {
   global_secondary_index {
     name            = "featured-index"
     hash_key        = "is_featured"
+    range_key       = "created_at"
+    projection_type = "ALL"
+  }
+
+  global_secondary_index {
+    name            = "brand-index"
+    hash_key        = "brand"
     range_key       = "created_at"
     projection_type = "ALL"
   }

@@ -22,6 +22,7 @@ type ProductRepo interface {
 	DeleteMany(ctx context.Context, ids []uuid.UUID) error
 	FindBySKUs(ctx context.Context, skus []string) ([]models.Product, error)
 	EnsureIndexes(ctx context.Context) error
+	GetProductsByIDs(ctx context.Context, ids []string) ([]*models.Product, error)
 }
 
 // CategoryRepo defines the operations used for category management.

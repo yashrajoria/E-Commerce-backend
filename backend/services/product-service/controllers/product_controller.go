@@ -322,3 +322,57 @@ func (ctrl *ProductController) GetProductByIDInternal(c *gin.Context) {
 
 	c.JSON(http.StatusOK, productDTO)
 }
+
+// BatchValidateInternal validates a batch of product IDs in a single call, returning
+// which of the requested IDs actually exist. Used by callers (e.g. cart-service checkout)
+// that would otherwise validate cart items with one HTTP request per item.
+func (ctrl *ProductController) BatchValidateInternal(c *gin.Context) {
+	var req struct {
+		ProductIDs []string `json:"product_ids" binding:"required,min=1"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request", "details": err.Error()})
+		return
+	}
+
+	ids := make([]uuid.UUID, 0, len(req.ProductIDs))
+	invalid := make([]string, 0)
+	seen := make(map[string]bool, len(req.ProductIDs))
+	for _, raw := range req.ProductIDs {
+		if seen[raw] {
+			continue
+		}
+		seen[raw] = true
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			invalid = append(invalid, raw)
+			continue
+		}
+		ids = append(ids, id)
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), ctrl.config.ContextTimeout)
+	defer cancel()
+
+	found, err := ctrl.productService.GetProductsInternal(ctx, ids)
+	if err != nil {
+		zap.L().Error("Failed to batch validate products", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to validate products"})
+		return
+	}
+
+	foundIDs := make(map[string]bool, len(found))
+	for _, p := range found {
+		foundIDs[p.ID.String()] = true
+	}
+	for _, id := range ids {
+		if !foundIDs[id.String()] {
+			invalid = append(invalid, id.String())
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"products":            found,
+		"invalid_product_ids": invalid,
+	})
+}

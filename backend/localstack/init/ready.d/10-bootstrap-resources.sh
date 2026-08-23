@@ -74,7 +74,7 @@ create_products_table_if_missing() {
         return 0
     fi
 
-    echo "Creating DynamoDB table '$tbl_name' with sku-index and featured-index..."
+    echo "Creating DynamoDB table '$tbl_name' with sku-index, featured-index, and brand-index..."
 
     retry awslocal_cmd dynamodb create-table \
         --table-name "$tbl_name" \
@@ -83,6 +83,7 @@ create_products_table_if_missing() {
             AttributeName=sku,AttributeType=S \
             AttributeName=is_featured,AttributeType=S \
             AttributeName=created_at,AttributeType=S \
+            AttributeName=brand,AttributeType=S \
         --key-schema AttributeName=id,KeyType=HASH \
         --global-secondary-indexes \
             '[
@@ -95,6 +96,14 @@ create_products_table_if_missing() {
                 "IndexName": "featured-index",
                 "KeySchema": [
                   {"AttributeName":"is_featured","KeyType":"HASH"},
+                  {"AttributeName":"created_at","KeyType":"RANGE"}
+                ],
+                "Projection": {"ProjectionType":"ALL"}
+              },
+              {
+                "IndexName": "brand-index",
+                "KeySchema": [
+                  {"AttributeName":"brand","KeyType":"HASH"},
                   {"AttributeName":"created_at","KeyType":"RANGE"}
                 ],
                 "Projection": {"ProjectionType":"ALL"}

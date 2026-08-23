@@ -33,6 +33,7 @@ type ProductServiceAPI interface {
 	// BulkDeleteProducts supports deleting multiple products by IDs, by category IDs, or all products
 	BulkDeleteProducts(ctx context.Context, req services.BulkDeleteRequest) (int64, error)
 	GetProductInternal(ctx context.Context, id uuid.UUID) (*services.ProductInternalDTO, error)
+	GetProductsInternal(ctx context.Context, ids []uuid.UUID) ([]*services.ProductInternalDTO, error)
 	ValidateBulkImport(ctx context.Context, file multipart.File) (*models.BulkImportValidation, error)
 	ProcessBulkImport(ctx context.Context, file multipart.File, autoCreateCategories bool) (*models.BulkImportResult, error)
 	GeneratePresignedUpload(ctx context.Context, sku, filename, contentType string, expiresSeconds int64) (string, string, string, error)

@@ -35,6 +35,7 @@ func (d *DynamoAdapter) WithCategoryLinksTable(table string) *DynamoAdapter {
 const (
 	skuIndexName      = "sku-index"
 	featuredIndexName = "featured-index"
+	brandIndexName    = "brand-index"
 )
 
 type ddbProduct struct {
@@ -277,14 +278,48 @@ func isFeaturedOnlyFilter(filter map[string]interface{}) (bool, bool) {
 	return true, featured
 }
 
+// brandFromFilter extracts a brand filter value, if present.
+func brandFromFilter(filter map[string]interface{}) (string, bool) {
+	if filter == nil {
+		return "", false
+	}
+	v, ok := filter["brand"].(string)
+	if !ok || v == "" {
+		return "", false
+	}
+	return v, true
+}
+
+func filterWithoutBrand(filter map[string]interface{}) map[string]interface{} {
+	if filter == nil {
+		return nil
+	}
+	out := make(map[string]interface{}, len(filter))
+	for k, v := range filter {
+		if k == "brand" {
+			continue
+		}
+		out[k] = v
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // Find uses featured-index Query when filtering only by is_featured;
-// ProductCategories Query when filtering by category_ids; otherwise Scan.
+// ProductCategories Query when filtering by category_ids; brand-index Query
+// when filtering by brand (with or without price/stock/featured refinements);
+// otherwise falls back to a full table Scan.
 func (d *DynamoAdapter) Find(ctx context.Context, filter map[string]interface{}, limit, skip int) ([]*models.Product, error) {
 	if ok, featured := isFeaturedOnlyFilter(filter); ok {
 		return d.findFeatured(ctx, featured, limit, skip)
 	}
 	if catIDs, ok := categoryIDsFromFilter(filter); ok && d.categoryLinksTable != "" {
 		return d.findByCategories(ctx, catIDs, filterWithoutCategoryIDs(filter), limit, skip)
+	}
+	if brand, ok := brandFromFilter(filter); ok {
+		return d.findByBrand(ctx, brand, filterWithoutBrand(filter), limit, skip)
 	}
 
 	filterExpr, attrValues, attrNames := d.buildFilterExpression(filter)
@@ -346,6 +381,58 @@ func (d *DynamoAdapter) findByCategories(ctx context.Context, catIDs []string, r
 		results = append(results, p)
 		if limit > 0 && len(results) >= limit {
 			break
+		}
+	}
+	return results, nil
+}
+
+// findByBrand queries the brand-index GSI instead of scanning the whole table,
+// then applies any residual filters (price range, is_featured, in_stock) in memory.
+func (d *DynamoAdapter) findByBrand(ctx context.Context, brand string, residual map[string]interface{}, limit, skip int) ([]*models.Product, error) {
+	idx := brandIndexName
+	keyCond := "#brand = :brand"
+	filterExpr := "attribute_not_exists(#deleted_at)"
+	input := &dynamodb.QueryInput{
+		TableName:              &d.table,
+		IndexName:              &idx,
+		KeyConditionExpression: &keyCond,
+		FilterExpression:       &filterExpr,
+		ExpressionAttributeNames: map[string]string{
+			"#brand":      "brand",
+			"#deleted_at": "deleted_at",
+		},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":brand": &types.AttributeValueMemberS{Value: brand},
+		},
+		ScanIndexForward: ptrBool(false), // newest created_at first
+	}
+
+	var results []*models.Product
+	paginator := dynamodb.NewQueryPaginator(d.client, input)
+	seenMatches := 0
+
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("brand query failed: %w", err)
+		}
+		for _, it := range page.Items {
+			var dp ddbProduct
+			if err := attributevalue.UnmarshalMap(it, &dp); err != nil {
+				return nil, fmt.Errorf("unmarshal item: %w", err)
+			}
+			p := d.productFromDDB(&dp)
+			if !productMatchesResidualFilter(p, residual) {
+				continue
+			}
+			if skip > 0 && seenMatches < skip {
+				seenMatches++
+				continue
+			}
+			results = append(results, p)
+			if limit > 0 && len(results) >= limit {
+				return results, nil
+			}
 		}
 	}
 	return results, nil
@@ -421,6 +508,13 @@ func (d *DynamoAdapter) Count(ctx context.Context, filter map[string]interface{}
 			}
 		}
 		return n, nil
+	}
+	if brand, ok := brandFromFilter(filter); ok {
+		products, err := d.findByBrand(ctx, brand, filterWithoutBrand(filter), 0, 0)
+		if err != nil {
+			return 0, err
+		}
+		return int64(len(products)), nil
 	}
 
 	filterExpr, attrValues, attrNames := d.buildFilterExpression(filter)
