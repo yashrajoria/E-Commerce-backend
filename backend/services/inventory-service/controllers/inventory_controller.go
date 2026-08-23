@@ -57,7 +57,7 @@ func (ic *InventoryController) SetStock(c *gin.Context) {
 	zap.L().Info("[AUDIT] admin set stock",
 		zap.String("user_id", userID),
 		zap.String("product_id", req.ProductID),
-		zap.Int("stock", req.Stock),
+		zap.Int("stock", req.Available),
 	)
 
 	inv, err := ic.service.SetStock(c.Request.Context(), &req)
