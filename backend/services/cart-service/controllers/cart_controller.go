@@ -1,7 +1,10 @@
 package controllers
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -289,39 +292,22 @@ func (cc *CartController) Checkout(c *gin.Context) {
 		}
 	}
 
-	// Validate products exist via product-service internal API before publishing
-	invalid := []string{}
+	// Validate products exist via a single product-service batch-validate call before publishing
 	productServiceURL := os.Getenv("PRODUCT_SERVICE_URL")
 	if productServiceURL == "" {
 		productServiceURL = "http://product-service:8082"
 	}
-	// simple per-item check
-	httpClient := &http.Client{Timeout: 5 * time.Second}
-	for _, it := range cart.Items {
-		// GET /products/internal/:id
-		reqUrl := productServiceURL + "/products/internal/" + it.ProductID
-		req, err := http.NewRequestWithContext(ctx, "GET", reqUrl, nil)
-		if err != nil {
-			zap.L().Error("failed to create internal request", zap.Error(err))
-			continue
-		}
 
-		// Propagate Correlation ID
-		if corID := c.GetHeader("X-Correlation-ID"); corID != "" {
-			req.Header.Set("X-Correlation-ID", corID)
-		}
-		internalauth.Apply(req)
+	productIDs := make([]string, len(cart.Items))
+	for i, it := range cart.Items {
+		productIDs[i] = it.ProductID
+	}
 
-		resp, err := httpClient.Do(req)
-		if err != nil || resp.StatusCode != http.StatusOK {
-			invalid = append(invalid, it.ProductID)
-			if resp != nil {
-				_ = resp.Body.Close()
-			}
-			continue
-		}
-		// drain body
-		_ = resp.Body.Close()
+	invalid, err := cc.validateProductsBatch(ctx, c, productServiceURL, productIDs)
+	if err != nil {
+		zap.L().Error("[Checkout] Failed to batch-validate cart products", zap.Error(err))
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to validate cart items"})
+		return
 	}
 
 	if len(invalid) > 0 {
@@ -375,4 +361,44 @@ func (cc *CartController) Checkout(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"order_id": orderID, "status": "PENDING"})
+}
+
+// validateProductsBatch validates all given product IDs in a single call to
+// product-service's internal batch-validate endpoint, returning the IDs that
+// are missing/invalid. Replaces a per-item HTTP round trip.
+func (cc *CartController) validateProductsBatch(ctx context.Context, c *gin.Context, productServiceURL string, productIDs []string) ([]string, error) {
+	body, err := json.Marshal(map[string][]string{"product_ids": productIDs})
+	if err != nil {
+		return nil, err
+	}
+
+	reqUrl := productServiceURL + "/products/internal/batch-validate"
+	req, err := http.NewRequestWithContext(ctx, "POST", reqUrl, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if corID := c.GetHeader("X-Correlation-ID"); corID != "" {
+		req.Header.Set("X-Correlation-ID", corID)
+	}
+	internalauth.Apply(req)
+
+	httpClient := &http.Client{Timeout: 5 * time.Second}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("batch-validate returned status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		InvalidProductIDs []string `json:"invalid_product_ids"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return result.InvalidProductIDs, nil
 }

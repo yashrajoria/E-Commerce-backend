@@ -17,10 +17,14 @@ import (
 	"cart-service/routes"
 
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"github.com/yashrajoria/common/internalauth"
 	commonmw "github.com/yashrajoria/common/middleware"
 )
 
 func main() {
+	if internalauth.Token() == "" {
+		log.Println("WARNING: INTERNAL_SERVICE_TOKEN is not set — internal-only calls to/from cart-service will be rejected")
+	}
 
 	// Load environment configuration
 	cfg := config.Load()
