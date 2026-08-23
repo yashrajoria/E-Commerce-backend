@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"go.uber.org/zap"
 	"shipping-service/models"
 	"shipping-service/providers"
@@ -40,6 +41,10 @@ func NewShippingService(
 func (s *shippingServiceImpl) GetRates(ctx context.Context, req *models.ShippingRatesRequest) ([]models.ShippingRate, *ServiceError) {
 	rates, err := s.provider.GetRates(req.WeightKg, req.Destination)
 	if err != nil {
+		if errors.Is(err, providers.ErrUnserviceableDestination) {
+			s.logger.Warn("GetRates: unserviceable destination", zap.Error(err))
+			return nil, &ServiceError{StatusCode: 422, Message: err.Error()}
+		}
 		s.logger.Error("GetRates failed", zap.Error(err))
 		return nil, &ServiceError{StatusCode: 500, Message: "Failed to retrieve shipping rates: " + err.Error()}
 	}

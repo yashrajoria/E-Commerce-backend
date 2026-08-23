@@ -2,6 +2,7 @@ package providers
 
 import (
 	"fmt"
+	"regexp"
 	"shipping-service/models"
 	"strings"
 )
@@ -13,9 +14,20 @@ func NewInternalDynamicProvider() *InternalDynamicProvider {
 	return &InternalDynamicProvider{}
 }
 
+// ErrUnserviceableDestination signals a malformed/missing destination country
+// rather than a genuine (but uncommon) international destination.
+var ErrUnserviceableDestination = fmt.Errorf("unserviceable destination")
+
+var iso2CountryCode = regexp.MustCompile(`^[A-Z]{2}$`)
+
 func (p *InternalDynamicProvider) GetRates(weightKg float64, destination models.Address) ([]models.ShippingRate, error) {
 	if weightKg <= 0 {
 		return nil, fmt.Errorf("invalid weight: %f", weightKg)
+	}
+
+	country := strings.ToUpper(strings.TrimSpace(destination.Country))
+	if !iso2CountryCode.MatchString(country) {
+		return nil, fmt.Errorf("%w: invalid or missing country code %q", ErrUnserviceableDestination, destination.Country)
 	}
 
 	zone := p.determineZone(destination.Country)

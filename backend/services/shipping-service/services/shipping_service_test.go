@@ -3,7 +3,9 @@ package services_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"shipping-service/models"
+	"shipping-service/providers"
 	"shipping-service/services"
 	"testing"
 
@@ -48,6 +50,18 @@ func TestGetRates_ProviderError(t *testing.T) {
 	var se *services.ServiceError
 	if assert.ErrorAs(t, svcErr, &se) {
 		assert.Equal(t, 500, se.StatusCode)
+	}
+}
+
+func TestGetRates_UnserviceableDestination(t *testing.T) {
+	provider := &typedMockProvider{ratesErr: fmt.Errorf("%w: invalid or missing country code \"\"", providers.ErrUnserviceableDestination)}
+	svc := newTestService(provider)
+
+	_, svcErr := svc.GetRates(context.Background(), &models.ShippingRatesRequest{WeightKg: 1.0, Destination: models.Address{Country: ""}})
+	assert.NotNil(t, svcErr)
+	var se *services.ServiceError
+	if assert.ErrorAs(t, svcErr, &se) {
+		assert.Equal(t, 422, se.StatusCode)
 	}
 }
 
