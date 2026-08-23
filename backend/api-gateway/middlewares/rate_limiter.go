@@ -14,7 +14,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// rateLimiter is a helper function that implements the Redis sliding window pattern
+// rateLimiter is a helper function that implements a Redis fixed-window counter
 func rateLimiter(client *redis.Client, prefix string, limit int, duration time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Do not rate-limit CORS preflight requests.
@@ -29,8 +29,12 @@ func rateLimiter(client *redis.Client, prefix string, limit int, duration time.D
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
-		// Attempt to ping Redis to ensure availability before proceeding
-		if err := client.Ping(ctx).Err(); err != nil {
+		// Fixed window counter: increment, then set the expiry only on the
+		// first hit of a window so the TTL is not pushed forward on every
+		// request. Failure (including Redis being unreachable) fails open —
+		// availability is prioritized over strict rate limiting here.
+		count, err := client.Incr(ctx, key).Result()
+		if err != nil {
 			logger.Log.Warn("rate limiter: redis unavailable, failing open",
 				zap.String("ip", ip),
 				zap.String("key", key),
@@ -39,22 +43,11 @@ func rateLimiter(client *redis.Client, prefix string, limit int, duration time.D
 			c.Next()
 			return
 		}
-
-		// Sliding window pattern:
-		// 1. Increment the counter
-		// 2. Set expiry if this is the first hit
-		pipe := client.TxPipeline()
-		incr := pipe.Incr(ctx, key)
-		pipe.Expire(ctx, key, duration)
-
-		if _, err := pipe.Exec(ctx); err != nil {
-			logger.Log.Warn("rate limiter: pipeline execution failed, failing open", zap.Error(err))
-			c.Next()
-			return
+		if count == 1 {
+			if err := client.Expire(ctx, key, duration).Err(); err != nil {
+				logger.Log.Warn("rate limiter: failed to set window expiry", zap.String("key", key), zap.Error(err))
+			}
 		}
-
-		// Wait for the pipeline result
-		count := incr.Val()
 
 		// Allow request if under limit
 		if count <= int64(limit) {

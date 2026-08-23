@@ -45,6 +45,18 @@ func cookieSettings() (http.SameSite, bool) {
 	return http.SameSiteLaxMode, false
 }
 
+// clearAuthCookies expires all session/identity cookies on the client.
+func clearAuthCookies(c *gin.Context) {
+	domain := os.Getenv("COOKIE_DOMAIN")
+	sameSite, secure := cookieSettings()
+
+	c.SetSameSite(sameSite)
+	c.SetCookie("__session", "", -1, "/", domain, secure, true)
+	c.SetCookie("refresh_token", "", -1, "/", domain, secure, true)
+	c.SetCookie("user_id", "", -1, "/", domain, secure, false)
+	c.SetCookie("user_role", "", -1, "/", domain, secure, false)
+}
+
 func (ctrl *AuthController) Login(c *gin.Context) {
 	var req struct {
 		Email    string `json:"email" binding:"required,email"`
@@ -113,6 +125,12 @@ func (ctrl *AuthController) Register(c *gin.Context) {
 		return
 	}
 
+	// bcrypt silently truncates inputs longer than 72 bytes; reject early.
+	if len([]byte(req.Password)) > 72 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "password must not exceed 72 bytes"})
+		return
+	}
+
 	err := ctrl.service.Register(c.Request.Context(), req.Name, req.Email, req.Password, req.Role)
 	if err != nil {
 		if errors.Is(err, services.ErrEmailAlreadyExists) {
@@ -165,14 +183,7 @@ func (ctrl *AuthController) Logout(c *gin.Context) {
 		}
 	}
 
-	domain := os.Getenv("COOKIE_DOMAIN")
-	sameSite, secure := cookieSettings()
-
-	c.SetSameSite(sameSite)
-	c.SetCookie("__session", "", -1, "/", domain, secure, true)
-	c.SetCookie("refresh_token", "", -1, "/", domain, secure, true)
-	c.SetCookie("user_id", "", -1, "/", domain, secure, false)
-	c.SetCookie("user_role", "", -1, "/", domain, secure, false)
+	clearAuthCookies(c)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
 }
@@ -187,7 +198,13 @@ func (ctrl *AuthController) Refresh(c *gin.Context) {
 	newTokenPair, err := ctrl.service.RefreshTokens(c.Request.Context(), refreshToken)
 	if err != nil {
 		zap.L().Warn("refresh token rejected", zap.Error(err))
-		ctrl.Logout(c)
+		// Best-effort revoke of whatever refresh token was presented, then force the
+		// client to re-authenticate. Must be a real failure status (not 200) — the
+		// gateway's silent-refresh path relies on the status code alone to decide
+		// whether the refresh succeeded.
+		_ = ctrl.service.Logout(c.Request.Context(), refreshToken)
+		clearAuthCookies(c)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired refresh token"})
 		return
 	}
 
@@ -213,6 +230,9 @@ func (ctrl *AuthController) Refresh(c *gin.Context) {
 // (see forwarder.go) — never client cookies, which anyone reaching this service
 // directly could forge. Route is also gated by internalauth.Require() in main.go.
 func (ctrl *AuthController) GetAuthStatus(c *gin.Context) {
+	// Identity must come from the gateway-injected headers (backed by a validated JWT).
+	// Client-supplied cookies are not trusted here — see middleware/rbac.go's AdminOnly
+	// for the same pattern.
 	userID := c.GetHeader("X-User-ID")
 	email := c.GetHeader("X-User-Email")
 	role := c.GetHeader("X-User-Role")

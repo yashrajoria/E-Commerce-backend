@@ -2,6 +2,7 @@ package middlewares
 
 import (
 	"api-gateway/logger"
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -11,24 +12,22 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 )
 
 var (
-	secretKey    []byte
-	isProduction bool
-	cookieDomain string
-	authBaseURL  string
-	refreshHTTP  = &http.Client{Timeout: 5 * time.Second}
+	secretKey       []byte
+	authBaseURL     string
+	refreshHTTP     = &http.Client{Timeout: 5 * time.Second}
+	refreshInflight singleflight.Group
 )
 
 func InitJWTConfig() error {
-	isProduction = os.Getenv("ENV") == "production"
 	secret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
 	if secret == "" {
 		return fmt.Errorf("JWT_SECRET is not set in env")
 	}
 	secretKey = []byte(secret)
-	cookieDomain = os.Getenv("COOKIE_DOMAIN")
 	authBaseURL = strings.TrimRight(strings.TrimSpace(os.Getenv("AUTH_SERVICE_URL")), "/")
 	if authBaseURL == "" {
 		authBaseURL = "http://auth-service:8081"
@@ -125,34 +124,75 @@ func applyClaims(c *gin.Context, claims jwt.MapClaims) bool {
 	return true
 }
 
+// refreshResult carries everything trySilentRefresh's caller needs back out
+// of the (possibly shared, via singleflight) auth-service call.
+type refreshResult struct {
+	claims     jwt.MapClaims
+	setCookies []string
+}
+
 // trySilentRefresh calls auth-service refresh using the refresh_token cookie and
-// forwards rotated Set-Cookie headers to the browser.
+// forwards rotated Set-Cookie headers to the browser. Concurrent requests that
+// share the same refresh token are coalesced via singleflight so an expired
+// token shared across many in-flight requests doesn't trigger a thundering
+// herd of refresh calls (and doesn't race an auth-service that rotates/
+// single-uses refresh tokens).
 func trySilentRefresh(c *gin.Context) (jwt.MapClaims, bool) {
 	refreshToken, err := c.Cookie("refresh_token")
 	if err != nil || strings.TrimSpace(refreshToken) == "" {
 		return nil, false
 	}
 
-	req, err := http.NewRequest(http.MethodPost, authBaseURL+"/auth/refresh", nil)
+	correlationID := c.GetString("CorrelationID")
+	path := c.Request.URL.Path
+
+	v, err, _ := refreshInflight.Do(refreshToken, func() (any, error) {
+		return doRefresh(refreshToken, correlationID, path)
+	})
 	if err != nil {
 		return nil, false
 	}
+
+	result := v.(refreshResult)
+	for _, raw := range result.setCookies {
+		if raw != "" {
+			c.Writer.Header().Add("Set-Cookie", raw)
+		}
+	}
+	return result.claims, true
+}
+
+// doRefresh performs the actual HTTP call to auth-service. It intentionally
+// uses its own bounded context (not the initiating request's context) since
+// singleflight may share this call's result with other in-flight requests
+// whose own contexts must not cancel it.
+func doRefresh(refreshToken, correlationID, path string) (refreshResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, authBaseURL+"/auth/refresh", nil)
+	if err != nil {
+		return refreshResult{}, err
+	}
 	req.Header.Set("Content-Type", "application/json")
+	if correlationID != "" {
+		req.Header.Set("X-Correlation-ID", correlationID)
+	}
 	req.AddCookie(&http.Cookie{Name: "refresh_token", Value: refreshToken, Path: "/"})
 
 	resp, err := refreshHTTP.Do(req)
 	if err != nil {
 		logger.Log.Warn("silent refresh failed: auth-service unreachable", zap.Error(err))
-		return nil, false
+		return refreshResult{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
 		logger.Log.Warn("silent refresh rejected",
 			zap.Int("status", resp.StatusCode),
-			zap.String("path", c.Request.URL.Path),
+			zap.String("path", path),
 		)
-		return nil, false
+		return refreshResult{}, fmt.Errorf("silent refresh rejected: status %d", resp.StatusCode)
 	}
 
 	var accessToken string
@@ -161,23 +201,16 @@ func trySilentRefresh(c *gin.Context) (jwt.MapClaims, bool) {
 			accessToken = cookie.Value
 		}
 	}
-
-	// Forward rotated cookies to the browser (single source: raw Set-Cookie).
-	for _, raw := range resp.Header.Values("Set-Cookie") {
-		if raw != "" {
-			c.Writer.Header().Add("Set-Cookie", raw)
-		}
-	}
-
 	if accessToken == "" {
-		return nil, false
+		return refreshResult{}, fmt.Errorf("silent refresh response missing __session cookie")
 	}
 
 	claims, err := parseToken(accessToken, "access")
 	if err != nil {
-		return nil, false
+		return refreshResult{}, err
 	}
-	return claims, true
+
+	return refreshResult{claims: claims, setCookies: resp.Header.Values("Set-Cookie")}, nil
 }
 
 // AdminRoleMiddleware restricts access to users with role admin

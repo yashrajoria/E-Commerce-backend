@@ -2,12 +2,17 @@ package repositories
 
 import (
 	"context"
+	"errors"
 	"order-service/models"
 	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+// ErrStatusConflict is returned by UpdateOrderStatus when the order's current
+// status does not match the expected from_status (optimistic locking failure).
+var ErrStatusConflict = errors.New("order status conflict: current status does not match expected from_status")
 
 // OrderRepository defines the interface for order data access
 type OrderRepository interface {
@@ -17,6 +22,11 @@ type OrderRepository interface {
 	FindByIDAndUserID(ctx context.Context, order_id, userID uuid.UUID) (*models.Order, error)
 	Create(ctx context.Context, order *models.Order) error
 	Update(ctx context.Context, order *models.Order) error
+	// UpdateOrderStatus transitions an order's status from fromStatus to toStatus.
+	// It uses an optimistic-locking WHERE clause (AND status = fromStatus) so that
+	// concurrent updates on the same order surface as ErrStatusConflict rather than
+	// silently overwriting each other.
+	UpdateOrderStatus(ctx context.Context, orderID uuid.UUID, fromStatus, toStatus string) error
 	FindByIdempotencyKey(ctx context.Context, key string) (*models.Order, error)
 	GetRevenueAnalytics(ctx context.Context) (map[string]interface{}, error)
 }

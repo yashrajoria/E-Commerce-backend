@@ -1,6 +1,6 @@
 module api-gateway
 
-go 1.25
+go 1.25.0
 
 require (
 	github.com/gin-gonic/gin v1.10.1
@@ -10,6 +10,7 @@ require (
 	github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws v0.0.0
 	github.com/yashrajoria/common v0.0.0
 	go.uber.org/zap v1.27.1
+	golang.org/x/sync v0.22.0
 )
 
 replace github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws => ../pkg/aws

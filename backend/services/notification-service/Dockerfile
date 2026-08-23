@@ -14,7 +14,8 @@ RUN go mod download
 
 COPY services/notification-service ./
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
     go build -ldflags="-w -s" -o /notification-service .
 
 FROM alpine:3.19
