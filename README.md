@@ -26,7 +26,7 @@ ShopSwift backend is a Go (plus Python agent) microservices platform with an API
 | **Data** | Postgres (transactions), DynamoDB (catalog/inventory), Redis (cart/cache/locks), S3 (images) |
 | **Messaging** | SNS topics → SQS queues (checkout, payment, notifications) |
 
-See [backend/docs/architecture.md](backend/docs/architecture.md), [backend/docs/data-and-messaging.md](backend/docs/data-and-messaging.md), and [backend/docs/best-practices-and-gaps.md](backend/docs/best-practices-and-gaps.md).
+See [MICROSERVICE_ARCHITECTURE.md](MICROSERVICE_ARCHITECTURE.md), [SERVICES_AND_DATABASES.md](SERVICES_AND_DATABASES.md), [SERVICE_ISSUES_AND_AUDIT.md](SERVICE_ISSUES_AND_AUDIT.md), [CLAUDE.md](CLAUDE.md), [backend/docs/architecture.md](backend/docs/architecture.md), [backend/docs/data-and-messaging.md](backend/docs/data-and-messaging.md), and [backend/docs/best-practices-and-gaps.md](backend/docs/best-practices-and-gaps.md).
 
 ### Services and ports
 
