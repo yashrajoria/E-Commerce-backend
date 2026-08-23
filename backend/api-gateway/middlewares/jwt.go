@@ -18,7 +18,14 @@ import (
 var (
 	secretKey       []byte
 	authBaseURL     string
-	refreshHTTP     = &http.Client{Timeout: 5 * time.Second}
+	refreshHTTP     = &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 10,
+			IdleConnTimeout:     90 * time.Second,
+		},
+	}
 	refreshInflight singleflight.Group
 )
 

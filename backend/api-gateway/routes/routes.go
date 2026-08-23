@@ -121,7 +121,7 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	public.GET("/docs/*any", forwardTo(bffBase+"/docs"))
 
 	// Stripe webhook — Stripe calls this directly, no auth
-	public.POST("/stripe/webhook", forwardTo(paymentBase+"/payment"))
+	public.POST("/stripe/webhook", forwardTo(paymentBase+"/stripe/webhook"))
 
 	// Auth — sensitive public actions (strict rate limiting)
 	authStrict := public.Group("/auth")
