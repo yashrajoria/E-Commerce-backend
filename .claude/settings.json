@@ -1,0 +1,26 @@
+{
+  "project": {
+    "name": "ShopSwift E-Commerce Microservices Backend",
+    "primaryLanguage": "go",
+    "secondaryLanguages": ["python", "shell"],
+    "architecture": "microservices",
+    "docs": [
+      "MICROSERVICE_ARCHITECTURE.md",
+      "SERVICES_AND_DATABASES.md",
+      "SERVICE_ISSUES_AND_AUDIT.md",
+      "CLAUDE.md",
+      "README.md",
+      "backend/docs/architecture.md",
+      "backend/docs/data-and-messaging.md",
+      "backend/docs/openapi.yaml"
+    ]
+  },
+  "commands": {
+    "build": "cd backend && go build ./...",
+    "test": "cd backend && go test ./...",
+    "dev": "cd backend && ./scripts/dev-up.sh",
+    "migrate": "cd backend && ./scripts/migrate.sh up",
+    "seed": "cd backend && ./scripts/seed_demo_data.sh",
+    "lint": "cd backend && npx @stoplight/spectral-cli lint docs/openapi.yaml"
+  }
+}
