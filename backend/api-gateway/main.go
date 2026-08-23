@@ -21,6 +21,8 @@ import (
 	"github.com/joho/godotenv"
 	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	apperrors "github.com/yashrajoria/common/errors"
+	"github.com/yashrajoria/common/internalauth"
+	commonmw "github.com/yashrajoria/common/middleware"
 	"go.uber.org/zap"
 )
 
@@ -82,6 +84,13 @@ func main() {
 	defer logger.Sync()
 	logger.Log.Info("Starting API Gateway...")
 
+	// INTERNAL_SERVICE_TOKEN unset means internalauth.Apply() silently no-ops on
+	// every forwarded request — downstream services will then reject them at
+	// internalauth.Require(). Surface that misconfiguration at boot, not first request.
+	if internalauth.Token() == "" {
+		logger.Log.Warn("INTERNAL_SERVICE_TOKEN is not set — requests to internal-auth-gated downstream routes will be rejected")
+	}
+
 	if err := middlewares.InitJWTConfig(); err != nil {
 		logger.Log.Fatal("JWT middleware init failed", zap.Error(err))
 	}
@@ -103,9 +112,26 @@ func main() {
 	// Configure Gin to handle trailing slashes
 	r.RedirectTrailingSlash = true
 
+	// The gateway is the edge — trust X-Forwarded-For only from a configured
+	// reverse proxy (or nobody, by default). Without this, gin.ClientIP()
+	// trusts client-supplied X-Forwarded-For, letting anyone spoof the IP
+	// used for rate limiting and audit logging.
+	if proxies := strings.TrimSpace(os.Getenv("TRUSTED_PROXIES")); proxies != "" {
+		trusted := strings.Split(proxies, ",")
+		for i := range trusted {
+			trusted[i] = strings.TrimSpace(trusted[i])
+		}
+		if err := r.SetTrustedProxies(trusted); err != nil {
+			logger.Log.Fatal("invalid TRUSTED_PROXIES", zap.Error(err))
+		}
+	} else if err := r.SetTrustedProxies(nil); err != nil {
+		logger.Log.Fatal("failed to disable trusted proxies", zap.Error(err))
+	}
+
 	r.Use(middlewares.RequestIDMiddleware())
 	r.Use(CustomRecovery(logger.Log))
 	r.Use(CORSMiddleware())
+	r.Use(commonmw.SecurityHeaders())
 	r.Use(apperrors.ErrorMiddleware())
 	r.Use(middlewares.StructuredRequestLogger())
 
@@ -118,10 +144,16 @@ func main() {
 				mctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				dims := map[string]string{"Service": "api-gateway", "Method": method, "Path": path}
-				_ = metricsClient.RecordCount(mctx, awspkg.MetricHTTPRequests, dims)
-				_ = metricsClient.RecordLatency(mctx, awspkg.MetricHTTPLatency, dur, dims)
+				if err := metricsClient.RecordCount(mctx, awspkg.MetricHTTPRequests, dims); err != nil {
+					zap.L().Debug("metrics: record count failed", zap.Error(err))
+				}
+				if err := metricsClient.RecordLatency(mctx, awspkg.MetricHTTPLatency, dur, dims); err != nil {
+					zap.L().Debug("metrics: record latency failed", zap.Error(err))
+				}
 				if status >= 400 {
-					_ = metricsClient.RecordCount(mctx, awspkg.MetricHTTPErrors, dims)
+					if err := metricsClient.RecordCount(mctx, awspkg.MetricHTTPErrors, dims); err != nil {
+						zap.L().Debug("metrics: record error count failed", zap.Error(err))
+					}
 				}
 			}(c.Request.URL.Path, c.Request.Method, c.Writer.Status(), time.Since(start))
 		})

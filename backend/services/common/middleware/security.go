@@ -26,8 +26,11 @@ func SecurityHeaders() gin.HandlerFunc {
 		// Strict Transport Security
 		c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload")
 
-		// Content Security Policy
-		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'")
+		// Content Security Policy. script-src/style-src/font-src allow the
+		// Redoc CDN bundle and Google Fonts used by bff-service's /docs page;
+		// this is a no-op for JSON API responses (CSP only applies when a
+		// browser renders the response as a document).
+		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self' https://cdn.redoc.ly 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self'")
 
 		// Referrer Policy
 		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")

@@ -1,8 +1,10 @@
 package routes
 
 import (
+	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"api-gateway/middlewares"
 	"api-gateway/utils"
@@ -27,7 +29,9 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	})
 	r.GET("/health/ready", func(c *gin.Context) {
 		if redisClient != nil {
-			if err := redisClient.Ping(c.Request.Context()).Err(); err != nil {
+			ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+			defer cancel()
+			if err := redisClient.Ping(ctx).Err(); err != nil {
 				c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "error": err.Error()})
 				return
 			}

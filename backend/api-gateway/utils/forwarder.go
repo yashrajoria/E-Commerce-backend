@@ -3,6 +3,7 @@ package utils
 import (
 	"io"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 
@@ -12,6 +13,25 @@ import (
 	"github.com/yashrajoria/common/internalauth"
 	"go.uber.org/zap"
 )
+
+// securityHeaderKeys are set by the gateway's own SecurityHeaders middleware
+// and must not be duplicated from a downstream service's response.
+var securityHeaderKeys = map[string]bool{
+	"x-frame-options":           true,
+	"x-xss-protection":          true,
+	"x-content-type-options":    true,
+	"strict-transport-security": true,
+	"content-security-policy":   true,
+	"referrer-policy":           true,
+	"permissions-policy":        true,
+	"cache-control":             true,
+	"pragma":                    true,
+	"expires":                   true,
+}
+
+func isSecurityHeader(lowerKey string) bool {
+	return securityHeaderKeys[lowerKey]
+}
 
 type ForwardOptions struct {
 	TargetBase  string
@@ -60,6 +80,17 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 
 	if opts.StripPrefix != "" && strings.HasPrefix(targetPath, opts.StripPrefix) {
 		targetPath = strings.TrimPrefix(targetPath, opts.StripPrefix)
+	}
+
+	// Defense in depth: reject any ".." segments so a crafted wildcard path
+	// (e.g. "/products/../../internal/admin") can't escape TargetBase.
+	if targetPath != "" {
+		cleaned := path.Clean("/" + targetPath)
+		if cleaned == "/" {
+			targetPath = ""
+		} else {
+			targetPath = cleaned
+		}
 	}
 
 	targetURL := opts.TargetBase + targetPath
@@ -127,7 +158,7 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 	}
 	defer resp.Body.Close()
 
-	// Copy response headers (skip CORS and hop-by-hop headers from downstream)
+	// Copy response headers (skip CORS/security/hop-by-hop headers from downstream)
 	for k, v := range resp.Header {
 		lowerKey := strings.ToLower(k)
 
@@ -141,6 +172,15 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 			lowerKey == "proxy-authenticate" || lowerKey == "proxy-authorization" ||
 			lowerKey == "te" || lowerKey == "trailers" ||
 			lowerKey == "transfer-encoding" || lowerKey == "upgrade" {
+			continue
+		}
+
+		// Skip security headers — the gateway is the browser-facing edge and
+		// already sets these itself (SecurityHeaders middleware). Forwarding
+		// downstream's copy too would emit duplicate/conflicting header
+		// values (browsers intersect multiple CSP headers, which can be
+		// stricter than either service intended).
+		if isSecurityHeader(lowerKey) {
 			continue
 		}
 
