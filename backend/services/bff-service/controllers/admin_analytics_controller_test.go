@@ -55,6 +55,7 @@ func TestNewAdminAnalyticsController_UsesEnvAndDefaults(t *testing.T) {
 
 func TestAdminAnalyticsController_EndpointsForwardToExpectedPaths(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	t.Setenv("INTERNAL_SERVICE_TOKEN", "test-mesh-token")
 
 	tests := []struct {
 		name         string
@@ -111,6 +112,7 @@ func TestAdminAnalyticsController_EndpointsForwardToExpectedPaths(t *testing.T) 
 			req := httptest.NewRequest(http.MethodGet, "/report", nil)
 			req.Header.Set("X-User-ID", "admin-1")
 			req.Header.Set("X-User-Role", "admin")
+			req.Header.Set("X-Internal-Service-Token", "test-mesh-token")
 			resp := httptest.NewRecorder()
 			router.ServeHTTP(resp, req)
 

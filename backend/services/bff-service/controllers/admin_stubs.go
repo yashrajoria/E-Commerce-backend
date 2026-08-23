@@ -1,11 +1,15 @@
 package controllers
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"io"
 	"net/http"
 
+	"bff-service/utils"
+
 	"github.com/gin-gonic/gin"
+	"github.com/yashrajoria/common/internalauth"
 	"go.uber.org/zap"
 )
 
@@ -78,7 +82,21 @@ func (apc *AdminProductController) PostProductImagePresign(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create request"})
 		return
 	}
-	req.Header = c.Request.Header
+	req.Header = c.Request.Header.Clone()
+	for k := range req.Header {
+		if utils.IsHopByHopHeader(k) {
+			req.Header.Del(k)
+		}
+	}
+	// AdminAuthMiddleware already validated the internal mesh token + admin role
+	// upstream, but don't relay X-User-ID/X-User-Role on trust alone — only
+	// forward them if this request itself carries a valid mesh token, so this
+	// handler stays safe even if reached by a future caller that skips that middleware.
+	expected := internalauth.Token()
+	if expected == "" || subtle.ConstantTimeCompare([]byte(req.Header.Get(internalauth.Header)), []byte(expected)) != 1 {
+		req.Header.Del("X-User-ID")
+		req.Header.Del("X-User-Role")
+	}
 	resp, err := apc.httpClient.Do(req)
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "downstream unavailable"})

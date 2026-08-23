@@ -19,10 +19,16 @@ import (
 	"github.com/gin-gonic/gin"
 	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	apperrors "github.com/yashrajoria/common/errors"
+	"github.com/yashrajoria/common/internalauth"
+	commonmw "github.com/yashrajoria/common/middleware"
 	"go.uber.org/zap"
 )
 
 func main() {
+	if internalauth.Token() == "" {
+		log.Println("WARNING: INTERNAL_SERVICE_TOKEN is not set — internal-only calls to/from bff-service will be rejected")
+	}
+
 	cfg := config.Load()
 
 	// ── CloudWatch Logs + Metrics ──
@@ -70,6 +76,7 @@ func main() {
 
 	r := gin.New()
 	r.Use(gin.Recovery())
+	r.Use(commonmw.SecurityHeaders())
 	r.Use(apperrors.ErrorMiddleware())
 
 	// Initialize structured logger for request logging
@@ -111,10 +118,16 @@ func main() {
 				mctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				dims := map[string]string{"Service": "bff-service", "Method": method, "Path": path}
-				_ = metricsClient.RecordCount(mctx, awspkg.MetricHTTPRequests, dims)
-				_ = metricsClient.RecordLatency(mctx, awspkg.MetricHTTPLatency, dur, dims)
+				if err := metricsClient.RecordCount(mctx, awspkg.MetricHTTPRequests, dims); err != nil {
+					zap.L().Debug("metrics: record count failed", zap.Error(err))
+				}
+				if err := metricsClient.RecordLatency(mctx, awspkg.MetricHTTPLatency, dur, dims); err != nil {
+					zap.L().Debug("metrics: record latency failed", zap.Error(err))
+				}
 				if status >= 500 {
-					_ = metricsClient.RecordCount(mctx, awspkg.MetricHTTPErrors, dims)
+					if err := metricsClient.RecordCount(mctx, awspkg.MetricHTTPErrors, dims); err != nil {
+						zap.L().Debug("metrics: record error count failed", zap.Error(err))
+					}
 				}
 			}(c.Request.URL.Path, c.Request.Method, c.Writer.Status(), time.Since(start))
 		}
@@ -487,7 +500,9 @@ func main() {
   <span id="toast-msg">Copied!</span>
 </div>
 
-<script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>
+<!-- Pinned version (not "latest") so a CDN-side release can't silently change
+     what runs on this page; bump deliberately when upgrading Redoc. -->
+<script src="https://cdn.redoc.ly/redoc/2.1.3/bundles/redoc.standalone.js" crossorigin="anonymous"></script>
 <script>
   /* ── State ──────────────────────────────────────────────────────────────── */
   let activeFilters = new Set();

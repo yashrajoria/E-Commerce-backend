@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 )
 
 // pollInterval / pollTimeout control how long BFF waits for the async
@@ -246,13 +247,17 @@ func (b *BFFController) PaymentStatusByOrderID(c *gin.Context) {
 // Checkout orchestrates:
 //  1. Validate cart is non-empty.
 //  2. Publish checkout event via POST /cart/checkout (returns order_id immediately).
-//  3. Poll GET /payment/status/by-order/{order_id} until the async SQS consumer
-//     has created the payment record AND the Stripe checkout session, then return
-//     { order_id, session_id, checkout_url }.
+//  3. Respond 202 with the order_id right away, and hand the wait for the
+//     Stripe checkout session off to a background goroutine — the client is
+//     expected to poll GET /payment/status/by-order/{order_id} (or re-POST
+//     /checkout with the same Idempotency-Key) until checkout_url appears.
 //
-// The Stripe session is created by the payment-service SQS consumer, so we must
-// wait for it rather than calling /payment/create-checkout directly (which would
-// race against the async consumer and always return 404).
+// Steps 1-2 are synchronous (fast, single-shot calls). Step 3 used to block
+// the request goroutine for up to checkoutPollTimeout polling the async SQS
+// consumer that creates the payment record + Stripe session; under a
+// checkout burst that ties up this service's connection pool to api-gateway
+// for the whole poll window per request. Moving it to a detached goroutine
+// keeps the synchronous request path fast regardless of load.
 func (b *BFFController) Checkout(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -351,88 +356,100 @@ func (b *BFFController) Checkout(c *gin.Context) {
 		return
 	}
 
-	// 3) Poll payment status until checkout_url is ready (set by SQS consumer).
+	// 3) Hand the wait for the Stripe checkout session off to a background
+	//    goroutine and respond immediately. Clone the headers we still need
+	//    (Authorization/cookies/X-User-*) since c.Request is invalid once
+	//    this handler returns.
+	downstreamHeaders := c.Request.Header.Clone()
+	go b.finishCheckoutAsync(cacheKey, cartResp.OrderID, downstreamHeaders)
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"order_id": cartResp.OrderID,
+		"status":   "PENDING_PAYMENT",
+		"message":  "checkout session is being prepared; poll GET /payment/status/by-order/" + cartResp.OrderID,
+	})
+}
+
+// finishCheckoutAsync polls payment status until checkout_url is ready (set
+// by the payment-service SQS consumer), falling back to a direct
+// /payment/create-checkout call on timeout, then writes the final result
+// into the idempotency cache so a duplicate request (same Idempotency-Key)
+// or a client polling GET /payment/status/by-order/{id} sees it. Runs
+// detached from the original request, so it uses its own context/deadline.
+func (b *BFFController) finishCheckoutAsync(cacheKey, orderID string, headers http.Header) {
+	ctx, cancel := context.WithTimeout(context.Background(), checkoutPollTimeout)
+	defer cancel()
+
 	type payStatus struct {
 		OrderID     string  `json:"order_id"`
 		Status      string  `json:"status"`
 		CheckoutURL *string `json:"checkout_url"`
 		SessionID   *string `json:"session_id"`
 	}
-	deadline := time.Now().Add(checkoutPollTimeout)
 	var finalStatus payStatus
-	for time.Now().Before(deadline) {
+	ready := false
+pollLoop:
+	for {
 		statusResp, err := b.gateway.Do(ctx, http.MethodGet,
-			"/payment/status/by-order/"+cartResp.OrderID, nil, c.Request.Header, nil)
+			"/payment/status/by-order/"+orderID, nil, headers, nil)
 		if err == nil {
 			var ps payStatus
 			if decErr := clients.DecodeJSON(statusResp, &ps); decErr == nil {
 				if ps.CheckoutURL != nil && *ps.CheckoutURL != "" {
 					finalStatus = ps
-					break
+					ready = true
+					break pollLoop
 				}
 			}
 		}
 		select {
 		case <-ctx.Done():
-			b.releasePendingKey(ctx, cacheKey)
-			c.JSON(http.StatusGatewayTimeout, gin.H{"error": "request cancelled"})
-			return
+			break pollLoop
 		case <-time.After(checkoutPollInterval):
 		}
+	}
+
+	if ready {
+		sessionID := ""
+		if finalStatus.SessionID != nil {
+			sessionID = *finalStatus.SessionID
+		}
+		out, _ := json.Marshal(map[string]string{
+			"order_id":     orderID,
+			"session_id":   sessionID,
+			"checkout_url": *finalStatus.CheckoutURL,
+		})
+		b.cacheCheckoutResult(context.Background(), cacheKey, out)
+		return
 	}
 
 	// Timeout — try calling payment/create-checkout directly as a fallback.
 	// This handles the case where the SQS consumer created the payment record but
 	// Stripe session creation failed, leaving checkout_url unset.
-	if finalStatus.CheckoutURL == nil || *finalStatus.CheckoutURL == "" {
-		bodyPayload, _ := json.Marshal(map[string]string{"order_id": cartResp.OrderID})
-		createResp, err := b.gateway.Do(ctx, http.MethodPost, "/payment/create-checkout",
-			nil, c.Request.Header, clients.BodyFromBytes(bodyPayload))
-		if err == nil {
-			var createResult struct {
-				CheckoutURL string `json:"checkout_url"`
-				SessionID   string `json:"session_id"`
-			}
-			if decErr := clients.DecodeJSON(createResp, &createResult); decErr == nil && createResult.CheckoutURL != "" {
-				out, _ := json.Marshal(map[string]string{
-					"order_id":     cartResp.OrderID,
-					"session_id":   createResult.SessionID,
-					"checkout_url": createResult.CheckoutURL,
-				})
-				b.cacheCheckoutResult(ctx, cacheKey, out)
-				c.Data(http.StatusOK, "application/json", out)
-				return
-			}
+	bodyPayload, _ := json.Marshal(map[string]string{"order_id": orderID})
+	createResp, err := b.gateway.Do(context.Background(), http.MethodPost, "/payment/create-checkout",
+		nil, headers, clients.BodyFromBytes(bodyPayload))
+	if err == nil {
+		var createResult struct {
+			CheckoutURL string `json:"checkout_url"`
+			SessionID   string `json:"session_id"`
 		}
-
-		// All attempts exhausted — release the pending lock so the client can retry,
-		// and return 202 so the frontend can poll for the payment status.
-		b.releasePendingKey(ctx, cacheKey)
-		c.JSON(http.StatusAccepted, gin.H{
-			"order_id":     cartResp.OrderID,
-			"status":       "PENDING_PAYMENT",
-			"checkout_url": nil,
-			"message":      "checkout session is being prepared; poll GET /payment/status/by-order/" + cartResp.OrderID,
-		})
-		return
+		if decErr := clients.DecodeJSON(createResp, &createResult); decErr == nil && createResult.CheckoutURL != "" {
+			out, _ := json.Marshal(map[string]string{
+				"order_id":     orderID,
+				"session_id":   createResult.SessionID,
+				"checkout_url": createResult.CheckoutURL,
+			})
+			b.cacheCheckoutResult(context.Background(), cacheKey, out)
+			return
+		}
 	}
 
-	sessionID := ""
-	if finalStatus.SessionID != nil {
-		sessionID = *finalStatus.SessionID
-	}
-
-	out, _ := json.Marshal(map[string]string{
-		"order_id":     cartResp.OrderID,
-		"session_id":   sessionID,
-		"checkout_url": *finalStatus.CheckoutURL,
-	})
-
-	// Replace the "pending" sentinel with the final response so future duplicate
-	// requests return the cached result immediately.
-	b.cacheCheckoutResult(ctx, cacheKey, out)
-
-	c.Data(http.StatusOK, "application/json", out)
+	// All attempts exhausted — release the pending lock so a retried request
+	// (or the client re-POSTing /checkout with the same Idempotency-Key)
+	// starts over instead of being stuck behind a "pending" sentinel that
+	// will never resolve.
+	b.releasePendingKey(context.Background(), cacheKey)
 }
 
 // releasePendingKey deletes the idempotency "pending" sentinel from Redis on error
@@ -457,7 +474,9 @@ func (b *BFFController) cacheCheckoutResult(ctx context.Context, cacheKey string
 	if b.redisClient == nil {
 		return
 	}
-	_ = b.redisClient.Set(ctx, cacheKey, data, 15*time.Minute).Err()
+	if err := b.redisClient.Set(ctx, cacheKey, data, 15*time.Minute).Err(); err != nil {
+		zap.L().Warn("cache checkout result write failed", zap.String("cache_key", cacheKey), zap.Error(err))
+	}
 }
 
 func errorString(err error) string {

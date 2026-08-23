@@ -3,14 +3,39 @@ package utils
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/yashrajoria/common/internalauth"
 )
 
 func NewHTTPClient() *http.Client {
 	return &http.Client{Timeout: 10 * time.Second}
+}
+
+// hopByHopHeaders describe the inbound connection, not the request, and must
+// never be re-sent to an upstream (e.g. a stale Content-Length after the body
+// has already been read, or a Host that doesn't match the upstream).
+var hopByHopHeaders = map[string]bool{
+	"Connection":          true,
+	"Keep-Alive":          true,
+	"Proxy-Authenticate":  true,
+	"Proxy-Authorization": true,
+	"Te":                  true,
+	"Trailer":             true,
+	"Transfer-Encoding":   true,
+	"Upgrade":             true,
+	"Content-Length":      true,
+	"Host":                true,
+}
+
+// IsHopByHopHeader reports whether key (any case) must be stripped before
+// forwarding a request or response to another hop.
+func IsHopByHopHeader(key string) bool {
+	return hopByHopHeaders[http.CanonicalHeaderKey(key)]
 }
 
 func ForwardGet(ctx context.Context, client *http.Client, url string, headers http.Header) ([]byte, int, error) {
@@ -75,16 +100,30 @@ func forwardRequest(ctx context.Context, client *http.Client, method, url string
 	return respBody, resp.StatusCode, nil
 }
 
+// copyForwardHeaders copies identity/routing headers from an inbound request
+// onto an outbound one. X-User-ID/X-User-Role are only carried over when src
+// also carries a valid internal mesh token — proof the inbound request itself
+// transited api-gateway (the only party that sets X-Internal-Service-Token)
+// rather than a caller that reached this service directly with forged identity
+// headers. Without this check, any code path that ever calls forwardRequest
+// against a downstream service directly (bypassing gateway re-validation)
+// would blindly relay attacker-controlled identity headers.
 func copyForwardHeaders(dst, src http.Header) {
 	if src == nil {
 		return
 	}
 
-	if v := src.Get("X-User-ID"); v != "" {
-		dst.Set("X-User-ID", v)
-	}
-	if v := src.Get("X-User-Role"); v != "" {
-		dst.Set("X-User-Role", v)
+	expected := internalauth.Token()
+	trustedIdentity := expected != "" &&
+		subtle.ConstantTimeCompare([]byte(src.Get(internalauth.Header)), []byte(expected)) == 1
+
+	if trustedIdentity {
+		if v := src.Get("X-User-ID"); v != "" {
+			dst.Set("X-User-ID", v)
+		}
+		if v := src.Get("X-User-Role"); v != "" {
+			dst.Set("X-User-Role", v)
+		}
 	}
 	if v := src.Get("Authorization"); v != "" {
 		dst.Set("Authorization", v)

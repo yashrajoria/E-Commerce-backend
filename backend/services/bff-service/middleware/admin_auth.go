@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/yashrajoria/common/internalauth"
 )
 
 const (
@@ -12,10 +13,20 @@ const (
 	AdminUserRoleContextKey = "user_role"
 )
 
-// AdminAuthMiddleware allows requests only when user role is admin.
-// Trusts gateway-injected X-User-Role only (no cookie fallback).
+// AdminAuthMiddleware allows requests only when they carry both a valid
+// internal mesh token (proving the call came through api-gateway, which is
+// the only party that sets INTERNAL_SERVICE_TOKEN on outbound requests) and
+// an X-User-Role of admin. The mesh-token check is defense in depth: without
+// it, X-User-Role alone would grant admin access to anyone able to reach this
+// service directly (e.g. a compose network misconfiguration).
 func AdminAuthMiddleware() gin.HandlerFunc {
+	requireInternal := internalauth.Require()
 	return func(c *gin.Context) {
+		requireInternal(c)
+		if c.IsAborted() {
+			return
+		}
+
 		userRole := strings.ToLower(strings.TrimSpace(c.GetHeader("X-User-Role")))
 		if userRole != "admin" {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{

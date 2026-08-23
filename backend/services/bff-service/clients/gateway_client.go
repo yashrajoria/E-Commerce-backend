@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"bff-service/utils"
 )
 
 type GatewayClient struct {
@@ -17,9 +19,19 @@ type GatewayClient struct {
 }
 
 func NewGatewayClient(baseURL string, timeout time.Duration) *GatewayClient {
+	// Raise idle-connection limits above net/http's default (2 per host):
+	// the checkout status poll (finishCheckoutAsync) and ordinary request
+	// traffic both hit api-gateway repeatedly; the default forces a fresh
+	// TCP handshake per request under any concurrency instead of reusing
+	// connections.
+	transport := &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 50,
+		IdleConnTimeout:     90 * time.Second,
+	}
 	return &GatewayClient{
 		baseURL: baseURL,
-		client: &http.Client{Timeout: timeout},
+		client:  &http.Client{Timeout: timeout, Transport: transport},
 	}
 }
 
@@ -35,6 +47,9 @@ func (g *GatewayClient) Do(ctx context.Context, method, path string, query url.V
 	}
 
 	for k, v := range headers {
+		if utils.IsHopByHopHeader(k) {
+			continue
+		}
 		for _, vv := range v {
 			req.Header.Add(k, vv)
 		}

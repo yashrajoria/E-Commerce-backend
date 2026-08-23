@@ -15,7 +15,8 @@ import (
 )
 
 func TestForwardGet_ForwardsAllowedHeaders(t *testing.T) {
-	t.Parallel()
+	// Not t.Parallel(): mutates the process-wide INTERNAL_SERVICE_TOKEN env var.
+	t.Setenv("INTERNAL_SERVICE_TOKEN", "test-mesh-token")
 
 	var gotHeader http.Header
 	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -28,6 +29,7 @@ func TestForwardGet_ForwardsAllowedHeaders(t *testing.T) {
 	headers := http.Header{}
 	headers.Set("X-User-ID", "u-1")
 	headers.Set("X-User-Role", "admin")
+	headers.Set("X-Internal-Service-Token", "test-mesh-token")
 	headers.Set("Authorization", "Bearer abc")
 	headers.Set("X-Request-ID", "req-1")
 	headers.Set("Accept", "application/json")
@@ -46,6 +48,32 @@ func TestForwardGet_ForwardsAllowedHeaders(t *testing.T) {
 	assert.Equal(t, "application/json", gotHeader.Get("Accept"))
 	assert.Equal(t, "a=b", gotHeader.Get("Cookie"))
 	assert.Equal(t, "", gotHeader.Get("X-Not-Forwarded"))
+}
+
+func TestForwardGet_DropsIdentityHeadersWithoutValidMeshToken(t *testing.T) {
+	// Not t.Parallel(): mutates the process-wide INTERNAL_SERVICE_TOKEN env var.
+	t.Setenv("INTERNAL_SERVICE_TOKEN", "test-mesh-token")
+
+	var gotHeader http.Header
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Clone()
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	defer downstream.Close()
+
+	headers := http.Header{}
+	headers.Set("X-User-ID", "attacker-forged")
+	headers.Set("X-User-Role", "admin")
+	// No (or wrong) X-Internal-Service-Token — this request didn't transit
+	// api-gateway, so identity headers must not be trusted or relayed.
+
+	_, statusCode, err := ForwardGet(context.Background(), downstream.Client(), downstream.URL, headers)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, "", gotHeader.Get("X-User-ID"))
+	assert.Equal(t, "", gotHeader.Get("X-User-Role"))
 }
 
 func TestForwardPost_SetsJSONContentTypeWhenMissing(t *testing.T) {
