@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"user-service/clients"
 	"user-service/models"
 	"user-service/repository"
 
@@ -9,14 +10,21 @@ import (
 	"go.uber.org/zap"
 )
 
+// tokenRevoker is the subset of clients.AuthClient that UserService depends
+// on, so tests can substitute a fake without spinning up an HTTP server.
+type tokenRevoker interface {
+	RevokeUserTokens(ctx context.Context, userID string) error
+}
+
 // UserService handles business logic for user operations
 type UserService struct {
-	repo repository.UserRepository
+	repo       repository.UserRepository
+	authClient tokenRevoker
 }
 
 // NewUserService creates a new UserService
 func NewUserService(repo repository.UserRepository) *UserService {
-	return &UserService{repo: repo}
+	return &UserService{repo: repo, authClient: clients.NewAuthClient()}
 }
 
 func (s *UserService) GetUserProfile(ctx context.Context, userID string) (*models.User, error) {
@@ -53,11 +61,23 @@ func (s *UserService) ChangeUserPassword(ctx context.Context, userID string, has
 	}
 
 	user.Password = hashedPassword
-	err = s.repo.Update(ctx, user)
-	if err == nil {
-		logger.Info(ctx, "User password changed successfully", zap.String("user_id", userID))
+	if err := s.repo.Update(ctx, user); err != nil {
+		return err
 	}
-	return err
+	logger.Info(ctx, "User password changed successfully", zap.String("user_id", userID))
+
+	// Revoke every outstanding refresh token so a session stolen before the
+	// password change can't keep using it afterward. Best-effort: the
+	// password change itself already succeeded, so a revoke failure here is
+	// logged, not surfaced as a failed password change (old access tokens
+	// still expire naturally within 15 minutes).
+	if s.authClient != nil {
+		if err := s.authClient.RevokeUserTokens(ctx, userID); err != nil {
+			logger.Error(ctx, "Failed to revoke refresh tokens after password change", err, zap.String("user_id", userID))
+		}
+	}
+
+	return nil
 }
 
 func (s *UserService) ListUsers(ctx context.Context, page, pageSize int) ([]models.User, int64, error) {

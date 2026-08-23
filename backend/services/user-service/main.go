@@ -18,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"github.com/yashrajoria/common/internalauth"
 	commonlog "github.com/yashrajoria/common/logger"
 	commonmw "github.com/yashrajoria/common/middleware"
 	"go.uber.org/zap"
@@ -29,6 +30,10 @@ func main() {
 
 	// Initialize common logger to avoid nil pointer panics in sub-packages
 	commonlog.Log = logger
+
+	if internalauth.Token() == "" {
+		logger.Warn("INTERNAL_SERVICE_TOKEN is not set — internal-only calls to/from user-service will be rejected")
+	}
 
 	log.Println("Starting User Service...")
 

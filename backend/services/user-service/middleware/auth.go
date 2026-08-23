@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/yashrajoria/common/internalauth"
 )
 
 const UserContextKey = "userID"
@@ -27,9 +28,16 @@ func AuthMiddleware() gin.HandlerFunc {
 	}
 }
 
-// AdminOnly rejects the request unless X-User-Role is "admin".
+// AdminOnly rejects the request unless it carries a valid internal mesh
+// token (proving it came through api-gateway) and X-User-Role is "admin".
 func AdminOnly() gin.HandlerFunc {
+	requireInternal := internalauth.Require()
 	return func(c *gin.Context) {
+		requireInternal(c)
+		if c.IsAborted() {
+			return
+		}
+
 		role := c.GetHeader("X-User-Role")
 		if role != "admin" {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Forbidden: admin access required"})

@@ -8,8 +8,9 @@ import (
 	"user-service/middleware"
 	"user-service/services"
 
-	"github.com/yashrajoria/common/logger"
 	"github.com/gin-gonic/gin"
+	"github.com/yashrajoria/common/logger"
+	"github.com/yashrajoria/common/password"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -126,7 +127,7 @@ func (ctrl *UserController) ChangePassword(c *gin.Context) {
 		return
 	}
 
-	validator := services.NewPasswordValidator()
+	validator := password.NewValidator()
 	if err := validator.ValidatePassword(req.NewPassword); err != nil {
 		logger.Warn(c.Request.Context(), "Weak password provided", zap.Error(err), zap.String("user_id", userID))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Weak password", "details": err.Error()})
