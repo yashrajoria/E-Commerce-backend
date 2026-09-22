@@ -12,6 +12,8 @@ Related: [architecture.md](./architecture.md) · [data-and-messaging.md](./data-
 - OpenAPI + Spectral lint in CI
 - Terraform / OIDC deploy scaffolding under `infrastructure/aws`
 - Order/payment SQS consumers with `idempotency_key` columns
+- Payment webhook redelivery is race-safe: status transition is an atomic conditional `UPDATE ... WHERE status NOT IN (terminal)`, not a read-then-write check, so two concurrent deliveries of the same event cannot double-publish (`payment-service/repository/payment_repository.go` `UpdateIfStatusNotIn`; covered by `payment-service/controllers/payment_webhook_redelivery_test.go`)
+- Order-service payment consumer redelivery is likewise race-safe: `updateOrderStatusWithTime()` returns whether it won the conditional status transition, and inventory confirm/release + the `order_confirmed` notification are gated on that so a redelivered SQS `payment_succeeded`/`payment_failed` message can't repeat them (`order-service/services/sqs_payment_consumer.go`; covered by `order-service/services/sqs_payment_consumer_redelivery_test.go`)
 
 ## Shipped in the P0/P1 pass
 

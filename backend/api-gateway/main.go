@@ -211,7 +211,13 @@ func main() {
 	if redisURL == "" {
 		redisURL = "redis:6379"
 	}
-	redisClient := redis.NewClient(&redis.Options{Addr: redisURL})
+	var redisClient *redis.Client
+	if opts, err := redis.ParseURL(redisURL); err == nil {
+		redisClient = redis.NewClient(opts)
+	} else {
+		// Not a redis:// URI (e.g. plain "host:port") — use it as Addr directly.
+		redisClient = redis.NewClient(&redis.Options{Addr: redisURL})
+	}
 	defer redisClient.Close()
 
 	routes.RegisterAllRoutes(r, redisClient)

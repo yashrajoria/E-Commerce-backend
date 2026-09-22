@@ -251,13 +251,12 @@ sequenceDiagram
 
   Stripe->>GW: POST /stripe/webhook
   GW->>Payment: Forward Webhook Payload
-  Payment->>PG: Check stripe_processed_events (event.id)
-  alt Event Already Processed
-    Payment-->>Stripe: 200 OK (Ignored duplicate)
-  else New Event
-    Payment->>PG: Update Payment status = PAID
-    Payment->>PG: Insert event.id into stripe_processed_events
+  Payment->>PG: UPDATE payments SET status='succeeded' WHERE order_id=? AND status NOT IN (terminal)
+  alt 0 rows updated (already terminal — duplicate/concurrent delivery)
+    Payment-->>Stripe: 200 OK (Ignored duplicate, no publish)
+  else 1 row updated (this delivery won the transition)
     Payment->>SNS: Publish payment.succeeded
+    Payment->>PG: Insert event.id into stripe_processed_events (audit only, post-fulfillment)
     Payment-->>Stripe: 200 OK ACK
     
     par Order Fulfillment
@@ -273,6 +272,8 @@ sequenceDiagram
   end
 ```
 
+The dedup guard is the conditional `UPDATE` (`status NOT IN (terminal)`), not the `stripe_processed_events` lookup — that table is written only after fulfillment for audit/traceability and is never queried before processing. Two concurrent deliveries of the same event race on the same conditional `UPDATE`; only the winner publishes. See `payment-service/repository/payment_repository.go` (`UpdateIfStatusNotIn`) and the regression test `payment-service/controllers/payment_webhook_redelivery_test.go`.
+
 ---
 
 ## 7. Security, Authorization & Idempotency
@@ -286,7 +287,7 @@ sequenceDiagram
 1. **API Level**: Client sends `Idempotency-Key` header to `/bff/checkout`. BFF uses Redis `SetNX` to lock concurrent requests.
 2. **Order Creation**: Order Service verifies unique `idempotency_key` constraint on PostgreSQL `orders` table.
 3. **Inventory Management**: Inventory Service utilizes DynamoDB conditional updates with `ClientRequestToken` for idempotent stock reservation and release.
-4. **Stripe Webhooks**: Payment Service tracks processed Stripe event IDs in `stripe_processed_events` table before executing downstream event dispatch.
+4. **Stripe Webhooks**: Payment Service guards the terminal status transition with an atomic conditional `UPDATE ... WHERE status NOT IN (terminal)`, so a redelivered event that loses the race is a no-op and never re-publishes. `stripe_processed_events` records the event ID for audit/traceability after fulfillment; it is not the dedup mechanism.
 
 ---
 

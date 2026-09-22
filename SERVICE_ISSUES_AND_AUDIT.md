@@ -8,7 +8,7 @@ Detailed technical audit report identifying potential bugs, security vulnerabili
 
 | Severity | Definition | Count Identified |
 |:---:|:---|:---:|
-| **HIGH** | Security vulnerabilities, data corruption, stock race conditions, or unhandled transaction rollbacks. | 14 |
+| **HIGH** | Security vulnerabilities, data corruption, stock race conditions, or unhandled transaction rollbacks. | 15 |
 | **MEDIUM** | Performance bottlenecks (N+1 queries, full table scans), missing input validation, or missing retry policies. | 14 |
 | **LOW** | Minor edge cases, missing log correlation IDs, or unoptimized pool settings. | 13 |
 
@@ -100,11 +100,12 @@ Detailed technical audit report identifying potential bugs, security vulnerabili
 - **Problem**: If `inventory-service` successfully reserves stock for an order, but `order-service` fails to save the order record to PostgreSQL (e.g. database timeout or constraint error), the stock remains reserved indefinitely without an automatic rollback call to `inventory-service/release`.
 - **Recommended Fix**: Wrap order creation in a try/catch block that triggers `inventoryClient.ReleaseStock(...)` on database write failure.
 
-#### 🟡 Issue 4.2: Lack of Optimistic Locking on Order Status Transitions [MEDIUM]
-- **File**: `backend/services/order-service/repository/order_repository.go`
-- **Location**: `UpdateOrderStatus()`
+#### 🟡 Issue 4.2: Lack of Optimistic Locking on Order Status Transitions [MEDIUM] — ✅ RESOLVED
+`UpdateOrderStatus()` already issues the conditional `UPDATE ... WHERE id = ? AND status = ?` and returns `ErrStatusConflict` when the row doesn't match (`order-service/repository/order_repository.go`). The gap was on the caller side: `SQSPaymentConsumer.handleMessage()` ran `confirmInventory`/`releaseInventory`/`publishOrderConfirmedNotification` unconditionally even when the status update lost the race on a duplicate/redelivered SQS message. `updateOrderStatusWithTime()` now returns a `bool` and all three call sites are gated on it, so a redelivered `payment_succeeded`/`payment_failed` event that finds the order already transitioned skips inventory confirm/release and the notification entirely (`order-service/services/sqs_payment_consumer.go`). Verified by `TestSQSPaymentConsumer_DuplicateDeliverySkipsSideEffects` (`order-service/services/sqs_payment_consumer_redelivery_test.go`), which replays the same `payment_succeeded` event twice and asserts inventory confirm and the SNS notification each fire exactly once.
+- **File**: `backend/services/order-service/repository/order_repository.go`, `backend/services/order-service/services/sqs_payment_consumer.go`
+- **Location**: `UpdateOrderStatus()`, `handleMessage()`
 - **Problem**: Concurrent webhooks or cancellation calls can cause race conditions when transitioning order status from `pending_payment` to `paid` or `cancelled`.
-- **Recommended Fix**: Add a `version` column to `orders` table or enforce conditional SQL updates: `UPDATE orders SET status = 'paid' WHERE id = ? AND status = 'pending_payment'`.
+- **Recommended Fix**: Applied — conditional `UPDATE ... WHERE id = ? AND status = ?` (already present) plus gating side effects on whether the caller actually won that transition.
 
 #### 🟢 Issue 4.3: Hardcoded SQS Queue Name Fallbacks [LOW]
 - **File**: `backend/services/order-service/main.go`
@@ -136,6 +137,13 @@ Detailed technical audit report identifying potential bugs, security vulnerabili
 - **Location**: `CreateCheckoutSession()`
 - **Problem**: Direct calls to Stripe API lack exponential backoff retries for transient network timeouts.
 - **Recommended Fix**: Enable Stripe SDK automatic retry configuration (`params.SetAppInfo(...)` and `stripe.DefaultLeveledLogger`).
+
+#### 🔴 Issue 5.4: Duplicate `payment.succeeded` Publish on Concurrent Webhook Redelivery [HIGH] — ✅ RESOLVED
+`handleCheckoutCompleted()` / `handlePaymentIntentStatus()` now gate the payment status UPDATE itself on `status NOT IN (terminal)` via `PaymentRepository.UpdateIfStatusNotIn` and skip `publishPaymentEvent` when the update affects zero rows (`payment-service/repository/payment_repository.go`, `payment-service/controllers/payment_webhook.go`). Verified by `TestStripeWebhook_ConcurrentRedelivery` (`payment-service/controllers/payment_webhook_redelivery_test.go`), which fires two goroutines through the same webhook event and asserts exactly one SNS publish.
+- **File**: `backend/services/payment-service/controllers/payment_webhook.go`
+- **Location**: `handleCheckoutCompleted()`, `handlePaymentIntentStatus()`
+- **Problem**: Stripe explicitly documents at-least-once webhook delivery, so the same event can arrive twice in close succession. The old code read `payment.Status`, checked it against `terminalStatuses` in Go, then issued a separate `UPDATE` — a classic TOCTOU gap. Two near-simultaneous deliveries could both pass the read check before either wrote, so both would update the row and both would call `publishPaymentEvent`, double-publishing `payment.succeeded`/`payment.failed` to SNS even though `stripe_processed_events` records only one event_id (that table is written *after* fulfillment and its `inserted` return value was never checked, so it never actually deduped).
+- **Recommended Fix**: Applied — replace the read-then-write pair with a single atomic `UPDATE ... WHERE order_id = ? AND status NOT IN (terminal)`, and only publish when it reports a row was actually updated.
 
 ---
 
