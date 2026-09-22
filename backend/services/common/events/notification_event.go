@@ -1,6 +1,7 @@
 package events
 
 type NotificationEvent struct {
+	EventID   string                 `json:"event_id,omitempty"`
 	EventType string                 `json:"event_type"`
 	UserID    string                 `json:"user_id"`
 	Recipient string                 `json:"recipient"`

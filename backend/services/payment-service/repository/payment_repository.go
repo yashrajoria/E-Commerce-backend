@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type PaymentRepository interface {
@@ -23,6 +24,10 @@ type PaymentRepository interface {
 	MarkStripeEventProcessed(ctx context.Context, eventID, eventType string) (inserted bool, err error)
 }
 
+type PaymentRequestClaimer interface {
+	ClaimPaymentRequest(ctx context.Context, payment *models.Payment) (bool, error)
+}
+
 type gormPaymentRepo struct {
 	db *gorm.DB
 }
@@ -33,6 +38,11 @@ func NewGormPaymentRepo(db *gorm.DB) PaymentRepository {
 
 func (r *gormPaymentRepo) CreatePayment(ctx context.Context, payment *models.Payment) error {
 	return r.db.WithContext(ctx).Create(payment).Error
+}
+
+func (r *gormPaymentRepo) ClaimPaymentRequest(ctx context.Context, payment *models.Payment) (bool, error) {
+	tx := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(payment)
+	return tx.RowsAffected > 0, tx.Error
 }
 
 func (r *gormPaymentRepo) GetPaymentByOrderID(ctx context.Context, orderID uuid.UUID) (*models.Payment, error) {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stripe/stripe-go/v80"
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"github.com/yashrajoria/common/events"
 	"go.uber.org/zap"
@@ -23,10 +24,14 @@ type PaymentRequestConsumer struct {
 	snsPublisher         *aws_pkg.SNSClient
 	paymentTopicArn      string
 	notificationTopicArn string
-	stripeSvc            *StripeService
+	stripeSvc            StripeCheckoutCreator
 	defaultCurrency      string
 	logger               *zap.Logger
 	repo                 repository.PaymentRepository
+}
+
+type StripeCheckoutCreator interface {
+	CreateCheckoutSession(amount int64, currency, orderID, userID string) (*stripe.CheckoutSession, error)
 }
 
 func NewPaymentRequestConsumer(
@@ -34,7 +39,7 @@ func NewPaymentRequestConsumer(
 	snsPublisher *aws_pkg.SNSClient,
 	paymentTopicArn string,
 	notificationTopicArn string,
-	stripeSvc *StripeService,
+	stripeSvc StripeCheckoutCreator,
 	defaultCurrency string,
 	repo repository.PaymentRepository,
 	logger *zap.Logger,
@@ -55,127 +60,141 @@ func (c *PaymentRequestConsumer) Start(ctx context.Context) {
 	c.logger.Info("Starting PaymentRequestConsumer (SQS)")
 
 	err := c.sqsConsumer.StartPolling(ctx, func(ctx context.Context, body string) error {
-		var req models.PaymentRequest
-		if err := json.Unmarshal([]byte(body), &req); err != nil {
-			c.logger.Warn("Invalid payment request JSON", zap.Error(err))
-			return err
-		}
-
-		// Validate Idempotency Key
-		if req.IdempotencyKey == "" {
-			c.logger.Warn("Missing Idempotency-Key header")
-			return fmt.Errorf("missing Idempotency-Key header")
-		}
-		if !validIdempotencyKey.MatchString(req.IdempotencyKey) {
-			c.logger.Warn("Invalid Idempotency-Key format", zap.String("idempotency_key", req.IdempotencyKey))
-			return fmt.Errorf("invalid Idempotency-Key format: must match ^[a-zA-Z0-9_-]{1,128}$")
-		}
-
-		// Check if payment already exists for the idempotency key
-		if existing, err := c.repo.GetPaymentByIdempotencyKey(ctx, req.IdempotencyKey); err == nil && existing != nil {
-			c.logger.Info("Payment already exists for idempotency key, skipping", zap.String("idempotency_key", req.IdempotencyKey), zap.String("payment_id", existing.Payment_ID.String()))
-			return nil
-		}
-
-		orderID, err := uuid.Parse(req.OrderID)
-		if err != nil {
-			c.logger.Warn("Invalid order_id format", zap.String("order_id", req.OrderID), zap.Error(err))
-			return err
-		}
-
-		userID, err := uuid.Parse(req.UserID)
-		if err != nil {
-			c.logger.Warn("Invalid user_id format", zap.String("user_id", req.UserID), zap.Error(err))
-			return err
-		}
-
-		currency := normalizeCurrency(req.Currency)
-		if currency == "" {
-			currency = c.defaultCurrency
-		}
-
-		// Create payment record
-		payment := models.Payment{
-			Payment_ID: uuid.New(),
-			OrderID:    orderID,
-			UserID:     userID,
-			Amount:     req.Amount,
-			Currency:   currency,
-			Status:     "pending",
-			CreatedAt:  time.Now().UTC(),
-		}
-		if req.IdempotencyKey != "" {
-			payment.IdempotencyKey = &req.IdempotencyKey
-		}
-
-		if err := c.repo.CreatePayment(ctx, &payment); err != nil {
-			c.logger.Error("Failed to create payment record", zap.Error(err))
-			return err
-		}
-
-		c.logger.Info("Payment record created", zap.String("payment_id", payment.Payment_ID.String()))
-
-		// Create Stripe Checkout Session (provides a hosted URL for the user to complete payment)
-		// Amount is already in the smallest currency unit for the configured store currency.
-		// Do NOT multiply by 100 here; prices are stored and passed in cents throughout the system.
-		sess, err := c.stripeSvc.CreateCheckoutSession(int64(req.Amount), currency, req.OrderID, req.UserID)
-		if err != nil {
-			c.logger.Error("Failed to create Stripe Checkout Session", zap.Error(err))
-			payment.Status = "failed"
-			// Update the existing payment record instead of attempting to create it again
-			if updateErr := c.repo.UpdatePaymentByOrderID(ctx, orderID, "failed", nil, nil); updateErr != nil {
-				c.logger.Warn("Failed to mark payment as failed", zap.Error(updateErr))
-			}
-
-			// Publish failure event
-			eventMsg := models.PaymentEvent{
-				Type:      "payment_failed",
-				OrderID:   orderID.String(),
-				UserID:    userID.String(),
-				PaymentID: payment.Payment_ID.String(),
-				Amount:    payment.Amount,
-				Currency:  payment.Currency,
-				Timestamp: time.Now().UTC(),
-			}
-			eventBytes, _ := json.Marshal(eventMsg)
-			c.snsPublisher.Publish(ctx, c.paymentTopicArn, eventBytes)
-
-			notificationEvent := events.NewPaymentFailedEvent(
-				userID.String(),
-				"",
-				"",
-				"",
-				orderID.String(),
-				float64(payment.Amount),
-			)
-			notificationBytes, nerr := json.Marshal(notificationEvent)
-			if nerr != nil {
-				c.logger.Warn("Failed to marshal payment_failed notification event", zap.Error(nerr))
-			} else if perr := c.snsPublisher.Publish(ctx, c.notificationTopicArn, notificationBytes); perr != nil {
-				c.logger.Warn("Failed to publish payment_failed notification event", zap.Error(perr))
-			}
-			return err
-		}
-
-		checkoutURL := sess.URL
-		payment.StripePaymentID = &sess.ID
-		// Update existing payment record with Stripe session ID and checkout URL
-		if err := c.repo.UpdatePaymentByOrderID(ctx, orderID, "pending", &checkoutURL, &sess.ID); err != nil {
-			c.logger.Warn("Failed to save payment with Stripe session ID", zap.Error(err))
-		}
-
-		c.logger.Info("Payment request processed",
-			zap.String("order_id", req.OrderID),
-			zap.String("payment_id", payment.Payment_ID.String()),
-			zap.String("checkout_url", checkoutURL),
-		)
-
-		return nil
+		return c.handleMessage(ctx, body)
 	})
 
 	if err != nil && err != context.Canceled {
 		c.logger.Error("SQS consumer error", zap.Error(err))
 	}
+}
+
+func (c *PaymentRequestConsumer) handleMessage(ctx context.Context, body string) error {
+	var req models.PaymentRequest
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		c.logger.Warn("Invalid payment request JSON", zap.Error(err))
+		return err
+	}
+
+	// Validate Idempotency Key
+	if req.IdempotencyKey == "" {
+		c.logger.Warn("Missing Idempotency-Key header")
+		return fmt.Errorf("missing Idempotency-Key header")
+	}
+	if !validIdempotencyKey.MatchString(req.IdempotencyKey) {
+		c.logger.Warn("Invalid Idempotency-Key format", zap.String("idempotency_key", req.IdempotencyKey))
+		return fmt.Errorf("invalid Idempotency-Key format: must match ^[a-zA-Z0-9_-]{1,128}$")
+	}
+
+	orderID, err := uuid.Parse(req.OrderID)
+	if err != nil {
+		c.logger.Warn("Invalid order_id format", zap.String("order_id", req.OrderID), zap.Error(err))
+		return err
+	}
+
+	userID, err := uuid.Parse(req.UserID)
+	if err != nil {
+		c.logger.Warn("Invalid user_id format", zap.String("user_id", req.UserID), zap.Error(err))
+		return err
+	}
+
+	currency := normalizeCurrency(req.Currency)
+	if currency == "" {
+		currency = c.defaultCurrency
+	}
+
+	// Create payment record
+	payment := models.Payment{
+		Payment_ID: uuid.New(),
+		OrderID:    orderID,
+		UserID:     userID,
+		Amount:     req.Amount,
+		Currency:   currency,
+		Status:     "pending",
+		CreatedAt:  time.Now().UTC(),
+	}
+	eventID := req.EventID
+	if eventID == "" {
+		eventID = req.IdempotencyKey
+	}
+	payment.EventID = &eventID
+	if req.IdempotencyKey != "" {
+		payment.IdempotencyKey = &req.IdempotencyKey
+	}
+
+	claimed := true
+	var claimErr error
+	if claimer, ok := c.repo.(repository.PaymentRequestClaimer); ok {
+		claimed, claimErr = claimer.ClaimPaymentRequest(ctx, &payment)
+	} else {
+		claimErr = c.repo.CreatePayment(ctx, &payment)
+	}
+	if claimErr != nil {
+		c.logger.Error("Failed to create payment record", zap.Error(claimErr))
+		return claimErr
+	}
+	if !claimed {
+		c.logger.Info("Payment request already claimed, skipping external side effects", zap.String("event_id", eventID))
+		return nil
+	}
+
+	c.logger.Info("Payment record created", zap.String("payment_id", payment.Payment_ID.String()))
+
+	// Create Stripe Checkout Session (provides a hosted URL for the user to complete payment)
+	// Amount is already in the smallest currency unit for the configured store currency.
+	// Do NOT multiply by 100 here; prices are stored and passed in cents throughout the system.
+	sess, err := c.stripeSvc.CreateCheckoutSession(int64(req.Amount), currency, req.OrderID, req.UserID)
+	if err != nil {
+		c.logger.Error("Failed to create Stripe Checkout Session", zap.Error(err))
+		payment.Status = "failed"
+		// Update the existing payment record instead of attempting to create it again
+		if updateErr := c.repo.UpdatePaymentByOrderID(ctx, orderID, "failed", nil, nil); updateErr != nil {
+			c.logger.Warn("Failed to mark payment as failed", zap.Error(updateErr))
+		}
+
+		// Publish failure event
+		eventMsg := models.PaymentEvent{
+			Type:      "payment_failed",
+			OrderID:   orderID.String(),
+			UserID:    userID.String(),
+			PaymentID: payment.Payment_ID.String(),
+			Amount:    payment.Amount,
+			Currency:  payment.Currency,
+			Timestamp: time.Now().UTC(),
+		}
+		eventBytes, _ := json.Marshal(eventMsg)
+		c.snsPublisher.Publish(ctx, c.paymentTopicArn, eventBytes)
+
+		notificationEvent := events.NewPaymentFailedEvent(
+			userID.String(),
+			"",
+			"",
+			"",
+			orderID.String(),
+			float64(payment.Amount),
+		)
+		notificationBytes, nerr := json.Marshal(notificationEvent)
+		if nerr != nil {
+			c.logger.Warn("Failed to marshal payment_failed notification event", zap.Error(nerr))
+		} else if perr := c.snsPublisher.Publish(ctx, c.notificationTopicArn, notificationBytes); perr != nil {
+			c.logger.Warn("Failed to publish payment_failed notification event", zap.Error(perr))
+		}
+		return err
+	}
+
+	checkoutURL := sess.URL
+	payment.StripePaymentID = &sess.ID
+	// Update existing payment record with Stripe session ID and checkout URL
+	if err := c.repo.UpdatePaymentByOrderID(ctx, orderID, "pending", &checkoutURL, &sess.ID); err != nil {
+		c.logger.Warn("Failed to save payment with Stripe session ID", zap.Error(err))
+	}
+
+	c.logger.Info("Payment request processed",
+		zap.String("order_id", req.OrderID),
+		zap.String("payment_id", payment.Payment_ID.String()),
+		zap.String("checkout_url", checkoutURL),
+	)
+
+	return nil
 }
 
 func normalizeCurrency(value string) string {

@@ -15,6 +15,7 @@ type PaymentEvent struct {
 }
 
 type PaymentRequest struct {
+	EventID        string `json:"event_id,omitempty"`
 	OrderID        string `json:"order_id"`
 	UserID         string `json:"user_id"`
 	Amount         int    `json:"amount"`

@@ -113,7 +113,23 @@ func NewNotificationService(
 	}, nil
 }
 
-func (s *notificationService) ProcessEvent(ctx context.Context, payload *models.EventPayload) error {
+func (s *notificationService) ProcessEvent(ctx context.Context, payload *models.EventPayload) (err error) {
+	if payload.EventID != "" {
+		claimed, claimErr := s.repo.ClaimEvent(ctx, payload.EventID)
+		if claimErr != nil {
+			return fmt.Errorf("claim notification event: %w", claimErr)
+		}
+		if !claimed {
+			return nil
+		}
+		defer func() {
+			if err != nil {
+				if releaseErr := s.repo.ReleaseEvent(ctx, payload.EventID); releaseErr != nil {
+					s.logger.Warn("failed to release notification event", zap.String("event_id", payload.EventID), zap.Error(releaseErr))
+				}
+			}
+		}()
+	}
 	cfg, ok := eventConfigs[payload.EventType]
 	if !ok {
 		return fmt.Errorf("unsupported event type: %s", payload.EventType)
@@ -154,6 +170,11 @@ func (s *notificationService) ProcessEvent(ctx context.Context, payload *models.
 
 	if len(sendErrs) > 0 {
 		return fmt.Errorf("notification delivery failed: %w", errors.Join(sendErrs...))
+	}
+	if payload.EventID != "" {
+		if markErr := s.repo.MarkEventDelivered(ctx, payload.EventID); markErr != nil {
+			return fmt.Errorf("mark notification event delivered: %w", markErr)
+		}
 	}
 
 	return nil

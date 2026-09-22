@@ -3,6 +3,7 @@ package aws
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
@@ -15,6 +16,36 @@ type SQSConsumer struct {
 	client   *sqs.Client
 	queueURL string
 	logger   *zap.Logger
+}
+
+// SQSOutboxPublisher publishes to a queue URL or resolves a queue name first.
+type SQSOutboxPublisher struct {
+	client sqsOutboxClient
+}
+
+type sqsOutboxClient interface {
+	GetQueueUrl(context.Context, *sqs.GetQueueUrlInput, ...func(*sqs.Options)) (*sqs.GetQueueUrlOutput, error)
+	SendMessage(context.Context, *sqs.SendMessageInput, ...func(*sqs.Options)) (*sqs.SendMessageOutput, error)
+}
+
+func NewSQSOutboxPublisher(cfg aws.Config) *SQSOutboxPublisher {
+	return &SQSOutboxPublisher{client: sqs.NewFromConfig(cfg)}
+}
+
+func (p *SQSOutboxPublisher) Publish(ctx context.Context, destination string, message []byte) error {
+	queueURL := destination
+	if !strings.HasPrefix(destination, "http://") && !strings.HasPrefix(destination, "https://") {
+		result, err := p.client.GetQueueUrl(ctx, &sqs.GetQueueUrlInput{QueueName: &destination})
+		if err != nil {
+			return fmt.Errorf("failed to resolve queue %q: %w", destination, err)
+		}
+		queueURL = *result.QueueUrl
+	}
+	_, err := p.client.SendMessage(ctx, &sqs.SendMessageInput{QueueUrl: &queueURL, MessageBody: aws.String(string(message))})
+	if err != nil {
+		return fmt.Errorf("failed to publish to queue %q: %w", destination, err)
+	}
+	return nil
 }
 
 // NewSQSConsumer creates a new SQS consumer for the given queue URL

@@ -93,14 +93,6 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		return nil
 	}
 
-	// Idempotency: if CheckoutEvent contains an idempotency key, check DB for existing order
-	if evt.IdempotencyKey != "" {
-		if existing, err := c.orderRepo.FindByIdempotencyKey(ctx, evt.IdempotencyKey); err == nil {
-			log.Printf("⚠️  [IDEMPOTENCY] Order already exists for key=%s order_id=%s user=%s (skipping creation)", evt.IdempotencyKey, existing.ID.String(), existing.UserID.String())
-			return nil
-		}
-	}
-
 	orderItems := make([]models.OrderItem, 0, len(evt.Items))
 	totalAmount := 0
 	validItems := 0
@@ -202,8 +194,68 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		order.IdempotencyKey = &evt.IdempotencyKey
 	}
 
-	if err := c.orderRepo.Create(ctx, &order); err != nil {
+	idemKey := evt.IdempotencyKey
+	if idemKey == "" {
+		idemKey = order.ID.String()
+	}
+
+	notifEvent := events.NewOrderCreatedEvent(
+		evt.UserID, evt.Email, "", "", order.ID.String(), order.CouponCode,
+		float64(order.Amount), notificationItems,
+	)
+	notifEvent.EventID = uuid.New().String()
+	notifBytes, err := json.Marshal(notifEvent)
+	if err != nil {
+		return err
+	}
+
+	req := models.PaymentRequest{
+		EventID:        uuid.New().String(),
+		OrderID:        order.ID.String(),
+		UserID:         order.UserID.String(),
+		Email:          evt.Email,
+		Amount:         order.Amount,
+		Currency:       c.storeCurrency,
+		IdempotencyKey: idemKey,
+	}
+	reqBytes, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+
+	outboxEvents := []models.OutboxEvent{
+		{
+			ID:              uuid.MustParse(req.EventID),
+			AggregateType:   "order",
+			AggregateID:     order.ID,
+			EventType:       "payment_request",
+			DestinationType: models.OutboxDestinationSQS,
+			Destination:     "payment-request-queue",
+			Payload:         reqBytes,
+			Status:          models.OutboxStatusPending,
+			AvailableAt:     time.Now().UTC(),
+		},
+		{
+			ID:              uuid.MustParse(notifEvent.EventID),
+			AggregateType:   "order",
+			AggregateID:     order.ID,
+			EventType:       "order_created",
+			DestinationType: models.OutboxDestinationSNS,
+			Destination:     c.notificationTopicArn,
+			Payload:         notifBytes,
+			Status:          models.OutboxStatusPending,
+			AvailableAt:     time.Now().UTC(),
+		},
+	}
+
+	if err := c.orderRepo.CreateWithOutbox(ctx, &order, outboxEvents); err != nil {
 		log.Printf("❌ [CHECKOUT] Failed to create order record (will retry): %v", err)
+		if evt.IdempotencyKey != "" {
+			if existing, findErr := c.orderRepo.FindByIdempotencyKey(ctx, evt.IdempotencyKey); findErr == nil && existing != nil {
+				log.Printf("⚠️  [IDEMPOTENCY] Order already exists for key=%s order_id=%s user=%s (skipping creation)", evt.IdempotencyKey, existing.ID.String(), existing.UserID.String())
+				return nil
+			}
+		}
 		// Compensate: release the stock we just reserved so it doesn't stay locked
 		// indefinitely if this message eventually dead-letters. Safe to re-reserve
 		// on retry since ReserveStock is idempotent via ClientRequestToken.
@@ -220,22 +272,6 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 	log.Printf("✅ order created id=%s user=%s items=%d total_amount=%d",
 		order.ID.String(), order.UserID.String(), validItems, order.Amount)
 
-	// Publish order_created notification with correct total and items
-	if c.snsClient != nil && c.notificationTopicArn != "" {
-		notifEvent := events.NewOrderCreatedEvent(
-			evt.UserID, evt.Email, "", "", order.ID.String(), order.CouponCode,
-			float64(order.Amount), notificationItems,
-		)
-		notifBytes, err := json.Marshal(notifEvent)
-		if err != nil {
-			log.Printf("⚠️ failed to marshal order_created notification: %v", err)
-		} else if err := c.snsClient.Publish(ctx, c.notificationTopicArn, notifBytes); err != nil {
-			log.Printf("⚠️ failed to publish order_created notification: %v", err)
-		} else {
-			log.Printf("✅ order_created notification published for order=%s", order.ID.String())
-		}
-	}
-
 	// Emit metrics
 	if c.metricsClient != nil && c.metricsClient.IsEnabled() {
 		go func() {
@@ -245,28 +281,6 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 			_ = c.metricsClient.RecordCount(metricCtx, aws_pkg.MetricOrdersCreated, dims)
 			_ = c.metricsClient.RecordValue(metricCtx, "OrderAmount", float64(order.Amount), dims)
 		}()
-	}
-
-	// Send payment request to SQS
-	idemKey := evt.IdempotencyKey
-	if idemKey == "" {
-		idemKey = order.ID.String()
-	}
-
-	req := models.PaymentRequest{
-		OrderID:        order.ID.String(),
-		UserID:         order.UserID.String(),
-		Email:          evt.Email,
-		Amount:         order.Amount,
-		Currency:       c.storeCurrency,
-		IdempotencyKey: idemKey,
-	}
-	reqBytes, _ := json.Marshal(req)
-	if err := c.sqsPublisher.SendMessage(ctx, string(reqBytes)); err != nil {
-		log.Printf("❌ failed to publish payment-request for order=%s: %v", order.ID.String(), err)
-		// Don't return error - order is created, payment request can be retried
-	} else {
-		log.Printf("✅ payment-request sent for order=%s", order.ID.String())
 	}
 
 	return nil

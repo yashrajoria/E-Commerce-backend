@@ -21,6 +21,7 @@ type OrderRepository interface {
 	FindByID(ctx context.Context, orderID uuid.UUID) (*models.Order, error)
 	FindByIDAndUserID(ctx context.Context, order_id, userID uuid.UUID) (*models.Order, error)
 	Create(ctx context.Context, order *models.Order) error
+	CreateWithOutbox(ctx context.Context, order *models.Order, events []models.OutboxEvent) error
 	Update(ctx context.Context, order *models.Order) error
 	// UpdateOrderStatus transitions an order's status from fromStatus to toStatus,
 	// optionally setting extra columns (e.g. completed_at) in the same update.
@@ -119,6 +120,20 @@ func (r *GormOrderRepository) Create(ctx context.Context, order *models.Order) e
 	return r.db.WithContext(ctx).Create(order).Error
 }
 
+func (r *GormOrderRepository) CreateWithOutbox(ctx context.Context, order *models.Order, events []models.OutboxEvent) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(order).Error; err != nil {
+			return err
+		}
+		for index := range events {
+			if err := tx.Create(&events[index]).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // Update updates an existing order
 func (r *GormOrderRepository) Update(ctx context.Context, order *models.Order) error {
 	return r.db.WithContext(ctx).Save(order).Error
@@ -176,10 +191,10 @@ func (r *GormOrderRepository) GetRevenueAnalytics(ctx context.Context) (map[stri
 		Select("SUM(amount), COUNT(*)").Row().Scan(&revenueYesterday, &countYesterday)
 
 	return map[string]interface{}{
-		"total_revenue":            totalRevenue,
-		"revenue_today":            revenueToday,
-		"revenue_yesterday":        revenueYesterday,
-		"total_orders_today":       countToday,
-		"total_orders_yesterday":   countYesterday,
+		"total_revenue":          totalRevenue,
+		"revenue_today":          revenueToday,
+		"revenue_yesterday":      revenueYesterday,
+		"total_orders_today":     countToday,
+		"total_orders_yesterday": countYesterday,
 	}, nil
 }

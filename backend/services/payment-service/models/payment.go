@@ -9,6 +9,7 @@ import (
 
 type Payment struct {
 	Payment_ID         uuid.UUID `gorm:"type:uuid;json default:gen_random_uuid();primaryKey"`
+	EventID            *string   `gorm:"type:varchar(128);uniqueIndex"`
 	IdempotencyKey     *string   `gorm:"type:varchar(128);uniqueIndex"` // Ensures idempotent operations for retries
 	OrderID            uuid.UUID `gorm:"type:uuid;index;not null"`
 	UserID             uuid.UUID `gorm:"type:uuid;index;not null"`

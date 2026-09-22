@@ -21,6 +21,7 @@ type CheckoutItem struct {
 
 // order-service → payment-service
 type PaymentRequest struct {
+	EventID        string `json:"event_id,omitempty"`
 	OrderID        string `json:"order_id"`
 	UserID         string `json:"user_id"`
 	Email          string `json:"email,omitempty"`
