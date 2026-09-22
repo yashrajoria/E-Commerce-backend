@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"io/ioutil"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/stripe/stripe-go/v80/checkout/session"
 
@@ -11,6 +13,19 @@ import (
 	"github.com/stripe/stripe-go/v80/paymentintent"
 	"github.com/stripe/stripe-go/v80/webhook"
 )
+
+// frontendURL returns the storefront base URL used for Stripe success/cancel
+// redirects. Mirrors controllers.PaymentController.frontendURL() — kept in
+// sync here since the async SQS checkout path builds sessions independently
+// of that handler.
+func frontendURL() string {
+	for _, key := range []string{"FRONTEND_URL", "STOREFRONT_URL"} {
+		if url := strings.TrimRight(strings.TrimSpace(os.Getenv(key)), "/"); url != "" {
+			return url
+		}
+	}
+	return "http://localhost:3001"
+}
 
 type StripeService struct {
 	SecretKey  string
@@ -35,11 +50,12 @@ func (s *StripeService) CreatePaymentIntent(amount int64, currency string) (*str
 }
 
 func (s *StripeService) CreateCheckoutSession(amount int64, currency, orderID, userID string) (*stripe.CheckoutSession, error) {
+	frontend := frontendURL()
 	params := &stripe.CheckoutSessionParams{
 		PaymentMethodTypes: stripe.StringSlice([]string{"card"}),
 		Mode:               stripe.String(string(stripe.CheckoutSessionModePayment)),
-		SuccessURL:         stripe.String("http://localhost:3001/payment/success?session_id={CHECKOUT_SESSION_ID}"),
-		CancelURL:          stripe.String("http://localhost:3001/payment/cancel"),
+		SuccessURL:         stripe.String(frontend + "/payment/success?session_id={CHECKOUT_SESSION_ID}"),
+		CancelURL:          stripe.String(frontend + "/payment/cancel"),
 		LineItems: []*stripe.CheckoutSessionLineItemParams{
 			{
 				PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{

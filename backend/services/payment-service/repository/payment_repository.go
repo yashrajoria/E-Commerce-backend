@@ -15,6 +15,10 @@ type PaymentRepository interface {
 	GetPaymentByStripeID(ctx context.Context, stripeID string) (*models.Payment, error)
 	UpdatePaymentByOrderID(ctx context.Context, orderID uuid.UUID, status string, checkoutURL *string, stripePaymentID *string) error
 	Update(ctx context.Context, orderID uuid.UUID, updates map[string]interface{}) error
+	// UpdateIfStatusNotIn applies updates only when the current status is not in excludeStatuses,
+	// atomically at the SQL level. Returns false (no error) if another writer already claimed
+	// the terminal transition — callers must skip side effects (e.g. event publish) in that case.
+	UpdateIfStatusNotIn(ctx context.Context, orderID uuid.UUID, excludeStatuses []string, updates map[string]interface{}) (updated bool, err error)
 	// MarkStripeEventProcessed inserts event_id; returns false if already processed.
 	MarkStripeEventProcessed(ctx context.Context, eventID, eventType string) (inserted bool, err error)
 }
@@ -73,6 +77,16 @@ func (r *gormPaymentRepo) UpdatePaymentByOrderID(ctx context.Context, orderID uu
 
 func (r *gormPaymentRepo) Update(ctx context.Context, orderID uuid.UUID, updates map[string]interface{}) error {
 	return r.db.WithContext(ctx).Model(&models.Payment{}).Where("order_id = ?", orderID).Updates(updates).Error
+}
+
+func (r *gormPaymentRepo) UpdateIfStatusNotIn(ctx context.Context, orderID uuid.UUID, excludeStatuses []string, updates map[string]interface{}) (bool, error) {
+	tx := r.db.WithContext(ctx).Model(&models.Payment{}).
+		Where("order_id = ? AND status NOT IN ?", orderID, excludeStatuses).
+		Updates(updates)
+	if tx.Error != nil {
+		return false, tx.Error
+	}
+	return tx.RowsAffected > 0, nil
 }
 
 func (r *gormPaymentRepo) MarkStripeEventProcessed(ctx context.Context, eventID, eventType string) (bool, error) {

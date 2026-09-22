@@ -22,11 +22,12 @@ type OrderRepository interface {
 	FindByIDAndUserID(ctx context.Context, order_id, userID uuid.UUID) (*models.Order, error)
 	Create(ctx context.Context, order *models.Order) error
 	Update(ctx context.Context, order *models.Order) error
-	// UpdateOrderStatus transitions an order's status from fromStatus to toStatus.
+	// UpdateOrderStatus transitions an order's status from fromStatus to toStatus,
+	// optionally setting extra columns (e.g. completed_at) in the same update.
 	// It uses an optimistic-locking WHERE clause (AND status = fromStatus) so that
 	// concurrent updates on the same order surface as ErrStatusConflict rather than
 	// silently overwriting each other.
-	UpdateOrderStatus(ctx context.Context, orderID uuid.UUID, fromStatus, toStatus string) error
+	UpdateOrderStatus(ctx context.Context, orderID uuid.UUID, fromStatus, toStatus string, extra map[string]interface{}) error
 	FindByIdempotencyKey(ctx context.Context, key string) (*models.Order, error)
 	GetRevenueAnalytics(ctx context.Context) (map[string]interface{}, error)
 }
@@ -123,11 +124,15 @@ func (r *GormOrderRepository) Update(ctx context.Context, order *models.Order) e
 	return r.db.WithContext(ctx).Save(order).Error
 }
 
-func (r *GormOrderRepository) UpdateOrderStatus(ctx context.Context, orderID uuid.UUID, fromStatus, toStatus string) error {
+func (r *GormOrderRepository) UpdateOrderStatus(ctx context.Context, orderID uuid.UUID, fromStatus, toStatus string, extra map[string]interface{}) error {
+	updates := map[string]interface{}{"status": toStatus}
+	for k, v := range extra {
+		updates[k] = v
+	}
 	res := r.db.WithContext(ctx).
 		Model(&models.Order{}).
 		Where("id = ? AND status = ?", orderID, fromStatus).
-		Update("status", toStatus)
+		Updates(updates)
 	if res.Error != nil {
 		return res.Error
 	}

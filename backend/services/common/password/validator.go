@@ -11,6 +11,7 @@ import (
 
 var (
 	ErrPasswordTooShort   = errors.New("password must be at least 8 characters long")
+	ErrPasswordTooLong    = errors.New("password must be at most 72 bytes long")
 	ErrPasswordNoUpper    = errors.New("password must contain at least one uppercase letter")
 	ErrPasswordNoLower    = errors.New("password must contain at least one lowercase letter")
 	ErrPasswordNoNumber   = errors.New("password must contain at least one number")
@@ -23,6 +24,7 @@ var (
 // Validator validates passwords against security requirements.
 type Validator struct {
 	minLength       int
+	maxLength       int
 	requireUpper    bool
 	requireLower    bool
 	requireNumber   bool
@@ -34,6 +36,7 @@ type Validator struct {
 func NewValidator() *Validator {
 	return &Validator{
 		minLength:      8,
+		maxLength:      72, // bcrypt silently ignores/errors past 72 bytes
 		requireUpper:   true,
 		requireLower:   true,
 		requireNumber:  true,
@@ -68,6 +71,9 @@ func charClass(r rune) int {
 func (pv *Validator) ValidatePassword(password string) error {
 	if len(password) < pv.minLength {
 		return ErrPasswordTooShort
+	}
+	if len(password) > pv.maxLength {
+		return ErrPasswordTooLong
 	}
 
 	var hasUpper, hasLower, hasNumber, hasSpecial bool

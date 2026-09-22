@@ -26,10 +26,19 @@ var terminalStatuses = map[string]bool{
 	"failed":    true,
 }
 
+// terminalStatusList returns terminalStatuses' keys for use in SQL NOT IN clauses.
+func terminalStatusList() []string {
+	statuses := make([]string, 0, len(terminalStatuses))
+	for status := range terminalStatuses {
+		statuses = append(statuses, status)
+	}
+	return statuses
+}
+
 // PaymentController handles all payment-related HTTP and webhook logic.
 type PaymentController struct {
 	Stripe               *services.StripeService
-	SNS                  *aws_pkg.SNSClient
+	SNS                  aws_pkg.SNSPublisher
 	TopicArn             string
 	NotificationTopicArn string
 	DefaultCurrency      string

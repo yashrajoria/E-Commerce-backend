@@ -3,6 +3,8 @@ package controllers
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -281,10 +283,13 @@ func (cc *CartController) Checkout(c *gin.Context) {
 	}
 	// support idempotency: if Idempotency-Key header present, check Redis for existing order.
 	// Scope by user so two different users never collide on the same header value.
+	// Hash the raw key so an arbitrarily long/odd client-supplied header can't
+	// produce an unbounded or malformed Redis key.
 	rawIdemKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
 	scopedIdemKey := ""
 	if rawIdemKey != "" {
-		scopedIdemKey = userID + ":" + rawIdemKey
+		hash := sha256.Sum256([]byte(rawIdemKey))
+		scopedIdemKey = userID + ":" + hex.EncodeToString(hash[:])
 		if existing, err := cc.Repo.GetIdempotency(ctx, scopedIdemKey); err == nil && existing != "" {
 			zap.L().Info("[Checkout] Returning cached order_id (same request retried)", zap.String("order_id", existing), zap.String("scoped_idempotency_key", scopedIdemKey))
 			c.JSON(http.StatusOK, gin.H{"order_id": existing, "status": "PENDING"})

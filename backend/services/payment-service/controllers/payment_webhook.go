@@ -111,19 +111,29 @@ func (pc *PaymentController) handleCheckoutCompleted(event stripe.Event, rawPayl
 	}
 
 	now := time.Now()
-	// Write stripe_payment_id here too — in case setStripePaymentID in
-	// CreateCheckoutSession lost the race against this webhook.
-	if err := pc.updatePaymentStatus(payment.OrderID, map[string]interface{}{
+	// Atomic conditional update: two near-simultaneous webhook deliveries for the same
+	// event can both pass the terminalStatuses read above before either writes. Gating
+	// the UPDATE itself on status NOT IN (terminal) makes only one writer win the
+	// transition, so publishPaymentEvent below cannot fire twice for one payment.
+	updated, err := pc.Repo.UpdateIfStatusNotIn(context.Background(), payment.OrderID, terminalStatusList(), map[string]interface{}{
 		"status":               "succeeded",
 		"stripe_event_payload": string(rawPayload),
 		"succeeded_at":         &now,
 		"stripe_payment_id":    sess.ID,
-	}); err != nil {
+		"updated_at":           now,
+	})
+	if err != nil {
 		pc.Logger.Error("Failed to update payment status",
 			zap.String("payment_id", payment.Payment_ID.String()),
 			zap.Error(err),
 		)
 		return fmt.Errorf("update payment status: %w", err)
+	}
+	if !updated {
+		pc.Logger.Info("Skipping duplicate checkout webhook (lost race to terminal transition)",
+			zap.String("payment_id", payment.Payment_ID.String()),
+		)
+		return nil
 	}
 	pc.publishPaymentEvent(models.PaymentEvent{
 		Type:      "payment_succeeded",
@@ -186,6 +196,7 @@ func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, statu
 	updates := map[string]interface{}{
 		"status":               status,
 		"stripe_event_payload": string(rawPayload),
+		"updated_at":           now,
 	}
 	switch status {
 	case "succeeded":
@@ -194,12 +205,21 @@ func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, statu
 		updates["failed_at"] = &now
 	}
 
-	if err := pc.updatePaymentStatus(payment.OrderID, updates); err != nil {
+	// Atomic conditional update — see handleCheckoutCompleted for why the terminal-status
+	// gate must live inside the UPDATE, not just the read above.
+	updated, err := pc.Repo.UpdateIfStatusNotIn(context.Background(), payment.OrderID, terminalStatusList(), updates)
+	if err != nil {
 		pc.Logger.Error("Failed to update payment status",
 			zap.String("payment_id", payment.Payment_ID.String()),
 			zap.Error(err),
 		)
 		return fmt.Errorf("update payment status: %w", err)
+	}
+	if !updated {
+		pc.Logger.Info("Skipping duplicate payment webhook (lost race to terminal transition)",
+			zap.String("payment_id", payment.Payment_ID.String()),
+		)
+		return nil
 	}
 
 	pc.publishPaymentEvent(models.PaymentEvent{

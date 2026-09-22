@@ -2,6 +2,8 @@ package controllers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -276,7 +278,10 @@ func (b *BFFController) Checkout(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing user identity"})
 		return
 	}
-	cacheKey := "idem:bff:" + userID + ":" + idemKey
+	// Hash the raw key so an arbitrarily long/odd client-supplied header can't
+	// produce an unbounded or malformed Redis key.
+	idemHash := sha256.Sum256([]byte(idemKey))
+	cacheKey := "idem:bff:" + userID + ":" + hex.EncodeToString(idemHash[:])
 
 	if b.redisClient != nil {
 		// FIX: Use SetNX as an atomic lock from the very start.

@@ -77,38 +77,41 @@ func (c *SQSPaymentConsumer) handleMessage(ctx context.Context, body string) err
 	now := time.Now()
 	switch evt.Type {
 	case "payment_succeeded":
-		c.updateOrderStatusWithTime(ctx, evt.OrderID, "paid", &now, nil)
-		c.confirmInventory(ctx, evt.OrderID)
-		// Send order_confirmed notification with product details
-		c.publishOrderConfirmedNotification(ctx, evt)
-		// Emit metrics
-		if c.metricsClient != nil && c.metricsClient.IsEnabled() {
-			go func() {
-				metricCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				dims := map[string]string{"Service": "order-service"}
-				_ = c.metricsClient.RecordCount(metricCtx, aws_pkg.MetricPaymentSucceeded, dims)
-				_ = c.metricsClient.RecordCount(metricCtx, aws_pkg.MetricOrdersCompleted, dims)
-			}()
+		// Gate side effects on the update actually applying: a duplicate/redelivered
+		// event that loses the atomic status race must not re-confirm inventory or
+		// re-send the order_confirmed email.
+		if c.updateOrderStatusWithTime(ctx, evt.OrderID, "paid", &now, nil) {
+			c.confirmInventory(ctx, evt.OrderID)
+			c.publishOrderConfirmedNotification(ctx, evt)
+			if c.metricsClient != nil && c.metricsClient.IsEnabled() {
+				go func() {
+					metricCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					dims := map[string]string{"Service": "order-service"}
+					_ = c.metricsClient.RecordCount(metricCtx, aws_pkg.MetricPaymentSucceeded, dims)
+					_ = c.metricsClient.RecordCount(metricCtx, aws_pkg.MetricOrdersCompleted, dims)
+				}()
+			}
 		}
 	case "payment_failed":
-		c.updateOrderStatusWithTime(ctx, evt.OrderID, "payment_failed", nil, &now)
-		c.releaseInventory(ctx, evt.OrderID)
-		// Emit metrics
-		if c.metricsClient != nil && c.metricsClient.IsEnabled() {
-			go func() {
-				metricCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				dims := map[string]string{"Service": "order-service"}
-				_ = c.metricsClient.RecordCount(metricCtx, aws_pkg.MetricPaymentFailed, dims)
-				_ = c.metricsClient.RecordCount(metricCtx, aws_pkg.MetricOrdersFailed, dims)
-			}()
+		if c.updateOrderStatusWithTime(ctx, evt.OrderID, "payment_failed", nil, &now) {
+			c.releaseInventory(ctx, evt.OrderID)
+			if c.metricsClient != nil && c.metricsClient.IsEnabled() {
+				go func() {
+					metricCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					dims := map[string]string{"Service": "order-service"}
+					_ = c.metricsClient.RecordCount(metricCtx, aws_pkg.MetricPaymentFailed, dims)
+					_ = c.metricsClient.RecordCount(metricCtx, aws_pkg.MetricOrdersFailed, dims)
+				}()
+			}
 		}
 	case "checkout_session_created":
 		log.Printf("ℹ️  [OrderService][SQSPaymentConsumer] checkout session created for order=%s", evt.OrderID)
 	case "checkout_session_failed":
-		c.updateOrderStatusWithTime(ctx, evt.OrderID, "payment_failed", nil, &now)
-		c.releaseInventory(ctx, evt.OrderID)
+		if c.updateOrderStatusWithTime(ctx, evt.OrderID, "payment_failed", nil, &now) {
+			c.releaseInventory(ctx, evt.OrderID)
+		}
 	default:
 		log.Printf("⚠️  [OrderService][SQSPaymentConsumer] unknown event type: %s", evt.Type)
 	}
@@ -116,48 +119,52 @@ func (c *SQSPaymentConsumer) handleMessage(ctx context.Context, body string) err
 	return nil
 }
 
-func (c *SQSPaymentConsumer) updateOrderStatusWithTime(ctx context.Context, orderID string, status string, completedAt, canceledAt *time.Time) {
+// updateOrderStatusWithTime transitions an order to status using an atomic
+// conditional UPDATE (status = 'pending_payment' -> status) instead of a
+// read-modify-write, so concurrent/duplicate payment webhooks can't race each
+// other into an inconsistent status. Returns true only when this call performed
+// the transition — callers must gate side effects (inventory confirm/release,
+// notification emails, metrics) on this so a duplicate delivery that loses the
+// race doesn't repeat them.
+func (c *SQSPaymentConsumer) updateOrderStatusWithTime(ctx context.Context, orderID string, status string, completedAt, canceledAt *time.Time) bool {
 	orderUUID, err := uuid.Parse(orderID)
 	if err != nil {
 		log.Printf("❌ [OrderService][SQSPaymentConsumer] invalid order ID: %s", orderID)
-		return
+		return false
 	}
 
-	order, err := c.orderRepo.FindByID(ctx, orderUUID)
-	if err != nil {
-		log.Printf("❌ [OrderService][SQSPaymentConsumer] failed to find order=%s: %v", orderID, err)
-		return
-	}
-
-	if order.Status == status {
-		needsUpdate := false
-		if completedAt != nil && order.CompletedAt == nil {
-			order.CompletedAt = completedAt
-			needsUpdate = true
-		}
-		if canceledAt != nil && order.CanceledAt == nil {
-			order.CanceledAt = canceledAt
-			needsUpdate = true
-		}
-		if !needsUpdate {
-			log.Printf("ℹ️  [OrderService][SQSPaymentConsumer] order=%s already %s; skipping", orderID, status)
-			return
-		}
-	}
-
-	order.Status = status
+	extra := map[string]interface{}{}
 	if completedAt != nil {
-		order.CompletedAt = completedAt
+		extra["completed_at"] = completedAt
 	}
 	if canceledAt != nil {
-		order.CanceledAt = canceledAt
+		extra["canceled_at"] = canceledAt
 	}
 
-	if err := c.orderRepo.Update(ctx, order); err != nil {
-		log.Printf("❌ [OrderService][SQSPaymentConsumer] failed to update order=%s: %v", orderID, err)
-	} else {
+	err = c.orderRepo.UpdateOrderStatus(ctx, orderUUID, "pending_payment", status, extra)
+	if err == nil {
 		log.Printf("✅ [OrderService][SQSPaymentConsumer] order=%s updated to %s", orderID, status)
+		return true
 	}
+	if err != repositories.ErrStatusConflict {
+		log.Printf("❌ [OrderService][SQSPaymentConsumer] failed to update order=%s: %v", orderID, err)
+		return false
+	}
+
+	// Status didn't match "pending_payment" — either a duplicate delivery of
+	// this same event (already applied) or the order is in some other
+	// terminal state. Either way, don't overwrite it; just log which.
+	order, ferr := c.orderRepo.FindByID(ctx, orderUUID)
+	if ferr != nil {
+		log.Printf("❌ [OrderService][SQSPaymentConsumer] failed to find order=%s after status conflict: %v", orderID, ferr)
+		return false
+	}
+	if order.Status == status {
+		log.Printf("ℹ️  [OrderService][SQSPaymentConsumer] order=%s already %s; skipping", orderID, status)
+		return false
+	}
+	log.Printf("⚠️  [OrderService][SQSPaymentConsumer] order=%s status conflict: current=%s target=%s; skipping", orderID, order.Status, status)
+	return false
 }
 
 // loadOrderItems fetches order items from the DB for inventory operations
