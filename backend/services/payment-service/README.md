@@ -10,6 +10,7 @@ The payment service owns payment records, Stripe Checkout session creation, webh
 - Validate Stripe webhook signatures and process terminal transitions once.
 - Publish payment success/failure events for order and notification consumers.
 - Retry SQS payment requests without creating duplicate payment sessions.
+- Deduplicate payment requests by stable `event_id`; legacy messages fall back to `idempotency_key`.
 
 ## Architecture
 

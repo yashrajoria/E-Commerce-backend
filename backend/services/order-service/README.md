@@ -1,4 +1,10 @@
-# Order Service
+# Order Service Outbox
+
+The order service persists payment-request and order-created events in `outbox_events` in the same transaction as the order. An in-process publisher claims pending events with a lease, sends them to their destination, and marks them published only after AWS confirms the send.
+
+Claims whose lease expires are reclaimable. Publish failures return events to `pending` with exponential backoff. A process crash after AWS accepts a message but before the database update can therefore publish the event again; consumers must remain idempotent because delivery is at least once.
+
+The publisher resolves SQS queue names as needed and supports SNS topic ARNs. It starts with order-service and stops through the service shutdown context.# Order Service
 
 The order service owns order state, order items, checkout consumption, stock orchestration, and payment dispatch. It is a Go/Gin service on port `8083` with PostgreSQL persistence and SQS consumers.
 

@@ -2,6 +2,10 @@
 
 Source of truth for local/prod data stores and async messaging. Aligns with Compose + LocalStack bootstrap.
 
+## Order-service outbox delivery
+
+Order creation writes downstream events to the Postgres `outbox_events` table transactionally. The order-service publisher claims rows with a process lease, routes each row by `destination_type` to SQS or SNS, and marks it `published` only after the AWS publish succeeds. Failed sends return to `pending` with backoff. Expired leases are reclaimed, so a crash after publishing but before the status update can produce a duplicate; downstream consumers must use their existing idempotency controls.
+
 ## Ownership summary
 
 | Concern | Owner service | Store |
@@ -101,6 +105,8 @@ Run: `./scripts/migrate.sh up` from `backend/`.
 | `payment-request-queue` | order-service → payment-service |
 | `notification-queue` | SNS notification-events → notification-service |
 | `promotion-order-queue` | SNS (order-related) → promotion-service usage |
+
+Each source queue has a matching `<source>-dlq` and a default `maxReceiveCount` of `3`. LocalStack reconciles this redrive policy on every bootstrap; Terraform exposes queue names and receive counts as variables.
 
 ## Env naming
 

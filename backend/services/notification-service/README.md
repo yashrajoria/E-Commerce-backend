@@ -8,6 +8,7 @@ The notification service consumes asynchronous notification events, sends email,
 - Render and send transactional email through the configured SMTP sender.
 - Persist successful and failed delivery attempts in `notification_logs`.
 - Retry failed messages by leaving them available to SQS retry/DLQ policy.
+- Deduplicate delivered notification events by stable `event_id`; failed deliveries release their claim and remain retryable.
 - Expose an admin-only log inspection endpoint.
 
 ## Architecture

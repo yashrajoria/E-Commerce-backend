@@ -28,6 +28,8 @@ ShopSwift backend is a Go (plus Python agent) microservices platform with an API
 
 See [MICROSERVICE_ARCHITECTURE.md](MICROSERVICE_ARCHITECTURE.md), [SERVICES_AND_DATABASES.md](SERVICES_AND_DATABASES.md), [SERVICE_ISSUES_AND_AUDIT.md](SERVICE_ISSUES_AND_AUDIT.md), [CLAUDE.md](CLAUDE.md), [backend/docs/architecture.md](backend/docs/architecture.md), [backend/docs/data-and-messaging.md](backend/docs/data-and-messaging.md), and [backend/docs/best-practices-and-gaps.md](backend/docs/best-practices-and-gaps.md).
 
+The order-service outbox publisher and its at-least-once delivery behavior are documented in [backend/services/order-service/README.md](backend/services/order-service/README.md).
+
 ### Services and ports
 
 | Service | Port | Stack | Primary storage |
@@ -131,6 +133,9 @@ Set `ALLOW_AUTO_MIGRATE=false` in production so schema comes only from SQL migra
 - [Data & messaging](backend/docs/data-and-messaging.md)
 - [API docs index](backend/docs/api/README.md)
 - [Best practices & gaps](backend/docs/best-practices-and-gaps.md)
+- [AWS queue infrastructure](backend/infrastructure/aws/terraform/README.md)
+
+LocalStack bootstraps five source SQS queues and five explicit DLQs. Existing source queues are reconciled with their redrive policy on startup. Run `backend/scripts/verify_sqs_dlq.sh` for policy checks, or pass `--exercise` to verify end-to-end redrive in a disposable environment.
 
 ## Security
 

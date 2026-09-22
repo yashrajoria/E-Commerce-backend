@@ -4,6 +4,7 @@ Active migrations use [golang-migrate](https://github.com/golang-migrate/migrate
 
 - `000001_baseline.up.sql` / `000001_baseline.down.sql`
 - `000002_soft_delete_indexes.up.sql` / `000002_soft_delete_indexes.down.sql`
+- `000007_order_outbox_events.up.sql` / `000007_order_outbox_events.down.sql`
 
 Apply:
 
@@ -24,7 +25,7 @@ All active and historical SQL in this folder is written to be **re-runnable**:
 | `DROP … IF EXISTS` (+ `CASCADE` on downs) | Teardown |
 | `DO $$ … EXCEPTION WHEN duplicate_object` | FKs / CHECKs |
 
-Unique constraints are enforced via **named unique indexes**, not inline `UNIQUE` column attrs, so a re-run still creates them if a prior AutoMigrate left the table without them.
+Unique constraints are enforced via **named unique indexes**, not inline `UNIQUE` column attrs, so a re-run still creates them if a prior AutoMigrate left the table without them. Phase 1 outbox and consumer-deduplication changes are intentionally combined in one migration so their schema is applied and rolled back as one unit.
 
 Historical one-off scripts (`20260125_*.sql`, etc.) are kept for reference; they are **not** executed by golang-migrate. Prefer the baseline + new versioned files going forward.
 
