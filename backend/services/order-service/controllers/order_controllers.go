@@ -172,6 +172,35 @@ func (oc *OrderController) GetOrderByID(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"order": order})
 }
 
+// CancelOrder handles admin cancellation of an order.
+func (oc *OrderController) CancelOrder(ctx *gin.Context) {
+	adminID, err := middleware.GetUserID(ctx)
+	if err != nil {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	orderID := ctx.Param("id")
+	orderUUID, err := uuid.Parse(orderID)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid order ID format"})
+		return
+	}
+
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	_ = ctx.ShouldBindJSON(&body) // reason is optional; ignore malformed/empty body
+
+	order, serviceErr := oc.orderService.CancelOrder(ctx.Request.Context(), orderUUID, adminID, body.Reason)
+	if serviceErr != nil {
+		ctx.JSON(serviceErr.StatusCode, gin.H{"error": serviceErr.Message})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"order": order})
+}
+
 // parsePaginationParams extracts and validates pagination parameters
 func parsePaginationParams(ctx *gin.Context) (int, int) {
 	const MaxLimit = 100

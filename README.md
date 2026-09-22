@@ -30,6 +30,12 @@ See [MICROSERVICE_ARCHITECTURE.md](MICROSERVICE_ARCHITECTURE.md), [SERVICES_AND_
 
 The order-service outbox publisher and its at-least-once delivery behavior are documented in [backend/services/order-service/README.md](backend/services/order-service/README.md).
 
+### Request correlation and reliability
+
+The gateway normalizes `X-Request-ID` and `X-Correlation-ID` to one value. BFF and downstream HTTP calls forward both headers; checkout, payment, and notification events carry optional `correlation_id` metadata through SNS/SQS retries and outbox delivery. Payment records persist the value so Stripe webhook events retain the original checkout correlation. Missing IDs are generated only at the gateway or legacy event entry points.
+
+Phase 1 integrity protections are covered by regression tests: coupon usage increments are atomic, order persistence failures compensate inventory reservations, cart checkout validates products in one batch, and internal service authentication fails closed. User address ownership is currently N/A because no address CRUD routes are registered.
+
 ### Services and ports
 
 | Service | Port | Stack | Primary storage |

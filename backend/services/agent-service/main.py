@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 from uuid import uuid4
 from contextlib import asynccontextmanager
 from app.core.config import settings
+from app.core.db import close_pool, get_pool
 from app.core.logging import logger
 from app.api.routes import router
 from app.tools.executor import close_http_client
@@ -11,7 +12,9 @@ from app.tools.executor import get_http_client
 async def lifespan(application: FastAPI):
     logger.info(f"Starting {settings.APP_NAME}")
     await get_http_client()
+    await get_pool()
     yield
+    await close_pool()
     await close_http_client()
     logger.info(f"Shutting down {settings.APP_NAME}")
 

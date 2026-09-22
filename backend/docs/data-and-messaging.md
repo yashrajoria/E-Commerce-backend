@@ -1,3 +1,7 @@
+## Correlation metadata
+
+The API gateway normalizes `X-Request-ID` and `X-Correlation-ID` to the same value. BFF and internal HTTP clients forward both headers. Existing checkout, payment, and notification event payloads optionally include `correlation_id`; consumers preserve it across outbox, SNS, SQS retry, and failure paths. Payment rows persist the value so webhook-triggered payment events retain the original checkout correlation. Consumers generate a fallback only when accepting a legacy event without correlation metadata.
+
 # Data and messaging
 
 Source of truth for local/prod data stores and async messaging. Aligns with Compose + LocalStack bootstrap.

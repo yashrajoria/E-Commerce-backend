@@ -11,6 +11,7 @@ The payment service owns payment records, Stripe Checkout session creation, webh
 - Publish payment success/failure events for order and notification consumers.
 - Retry SQS payment requests without creating duplicate payment sessions.
 - Deduplicate payment requests by stable `event_id`; legacy messages fall back to `idempotency_key`.
+- Preserve `correlation_id` from the payment request through the payment row, payment event, and failure notification; the field is optional for legacy messages.
 
 ## Architecture
 
@@ -61,7 +62,7 @@ sequenceDiagram
 
 ## Persistence and webhook safety
 
-`payments` is the service's payment state; `stripe_processed_events` records Stripe event IDs for audit and deduplication. The payment row transition is guarded so concurrent or repeated webhook deliveries cannot publish fulfillment events twice. The webhook returns an acknowledgement only after signature and processing rules have been applied.
+`payments` is the service's payment state; `stripe_processed_events` records Stripe event IDs for audit and deduplication. The payment row transition is guarded so concurrent or repeated webhook deliveries cannot publish fulfillment events twice. The optional `payments.correlation_id` column bridges the asynchronous payment request to later Stripe webhooks. The webhook returns an acknowledgement only after signature and processing rules have been applied.
 
 ## Configuration
 

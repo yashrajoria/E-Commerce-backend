@@ -14,6 +14,7 @@ func RegisterOrderRoutes(r *gin.Engine, controllers *controllers.OrderController
 	// User routes
 	orderRoutes.GET("/", controllers.GetOrders)
 	orderRoutes.GET("/:id", controllers.GetOrderByID)
+	orderRoutes.PUT("/:id/cancel", middleware.AdminOnly(), controllers.CancelOrder)
 
 	// Admin-only routes
 	adminRoutes := orderRoutes.Group("/admin")

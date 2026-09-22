@@ -9,6 +9,7 @@ The notification service consumes asynchronous notification events, sends email,
 - Persist successful and failed delivery attempts in `notification_logs`.
 - Retry failed messages by leaving them available to SQS retry/DLQ policy.
 - Deduplicate delivered notification events by stable `event_id`; failed deliveries release their claim and remain retryable.
+- Extract and log the event `correlation_id` on success, failure, and retry paths. Legacy messages without one receive a consumer-entry fallback ID.
 - Expose an admin-only log inspection endpoint.
 
 ## Architecture

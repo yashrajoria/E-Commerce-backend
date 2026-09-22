@@ -5,6 +5,7 @@ Active migrations use [golang-migrate](https://github.com/golang-migrate/migrate
 - `000001_baseline.up.sql` / `000001_baseline.down.sql`
 - `000002_soft_delete_indexes.up.sql` / `000002_soft_delete_indexes.down.sql`
 - `000007_order_outbox_events.up.sql` / `000007_order_outbox_events.down.sql`
+- `000010_payment_correlation_id.up.sql` / `000010_payment_correlation_id.down.sql`
 
 Apply:
 
@@ -30,3 +31,5 @@ Unique constraints are enforced via **named unique indexes**, not inline `UNIQUE
 Historical one-off scripts (`20260125_*.sql`, etc.) are kept for reference; they are **not** executed by golang-migrate. Prefer the baseline + new versioned files going forward.
 
 Shipments table is included for future use; shipping-service does not use Postgres at runtime today.
+
+Migration `000010_payment_correlation_id` adds the nullable, indexed `payments.correlation_id` column used to preserve checkout correlation IDs through Stripe webhook publication.

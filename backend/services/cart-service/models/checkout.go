@@ -10,4 +10,5 @@ type CheckoutEvent struct {
 	Timestamp      time.Time  `json:"timestamp"`
 	OrderID        string     `json:"order_id"`
 	CouponCode     string     `json:"coupon_code,omitempty"`
+	CorrelationID  string     `json:"correlation_id,omitempty"`
 }

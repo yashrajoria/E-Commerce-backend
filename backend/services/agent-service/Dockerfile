@@ -1,22 +1,29 @@
-FROM python:3.11-slim
+FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
-# Install system dependencies
+# Install compiler tooling only while building dependencies.
 RUN apt-get update && apt-get install -y \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install dependencies into a self-contained prefix for the runtime image.
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
-# Copy application code
 COPY . .
 
-RUN useradd -r -g root -u 1001 app && chown -R app:root /app
+FROM python:3.11-slim AS runtime
+
+WORKDIR /app
+
+COPY --from=builder /install /usr/local
+COPY . .
+
+RUN groupadd --system app && \
+    useradd --system --uid 1001 --gid app --home-dir /app --shell /usr/sbin/nologin app && \
+    chown -R app:app /app
 USER app
 
 # Health check

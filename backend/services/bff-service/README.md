@@ -4,11 +4,7 @@ The backend-for-frontend (BFF) is the storefront orchestration layer on port `80
 
 ## Responsibilities
 
-- Provide storefront-shaped home, product, profile, cart, order, payment, and promotion views.
-- Proxy simple calls to the appropriate downstream service through the gateway client.
-- Acquire a Redis `SetNX` lock for every idempotent checkout request.
-- Poll payment state until a checkout URL is available or the operation fails.
-- Expose separate admin aggregation and proxy routes.
+- Forward `X-Request-ID` and `X-Correlation-ID` together on downstream HTTP calls.
 
 ## Architecture
 

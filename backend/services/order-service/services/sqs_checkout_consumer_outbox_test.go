@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -57,7 +58,7 @@ func TestCheckoutOutboxFailureReleasesReservedStock(t *testing.T) {
 
 	repo := &checkoutOutboxRepo{createErr: errors.New("transaction rolled back")}
 	consumer := NewSQSCheckoutConsumer(nil, nil, repo, NewInventoryClient(inventoryServer.URL), nil, productServer.URL, nil, "", nil, "usd")
-	body := `{"event":"checkout.requested","user_id":"` + uuid.NewString() + `","order_id":"` + orderID.String() + `","idempotency_key":"checkout-1","items":[{"product_id":"` + productID.String() + `","quantity":1}]}`
+	body := `{"event":"checkout.requested","user_id":"` + uuid.NewString() + `","order_id":"` + orderID.String() + `","idempotency_key":"checkout-1","correlation_id":"corr-1","items":[{"product_id":"` + productID.String() + `","quantity":1}]}`
 
 	if err := consumer.handleMessage(context.Background(), body); err == nil {
 		t.Fatal("expected outbox transaction error")
@@ -67,5 +68,16 @@ func TestCheckoutOutboxFailureReleasesReservedStock(t *testing.T) {
 	}
 	if atomic.LoadInt32(&repo.createCall) != 1 || len(repo.events) != 2 {
 		t.Fatalf("expected one transactional create with two outbox events, calls=%d events=%d", repo.createCall, len(repo.events))
+	}
+	for _, event := range repo.events {
+		var payload struct {
+			CorrelationID string `json:"correlation_id"`
+		}
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.CorrelationID != "corr-1" {
+			t.Fatalf("event %s correlation_id=%q", event.EventType, payload.CorrelationID)
+		}
 	}
 }

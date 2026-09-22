@@ -18,6 +18,7 @@ import (
 	"order-service/services"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	commondb "github.com/yashrajoria/common/db"
 	apperrors "github.com/yashrajoria/common/errors"
@@ -122,12 +123,18 @@ func main() {
 	})
 
 	orderRepository := repositories.NewGormOrderRepository(database.DB)
+	outboxRepository := repositories.NewGormOutboxRepository(database.DB)
+
+	// Inventory client for stock management (also used by OrderService to
+	// release reservations on admin cancellation).
+	inventoryClient := services.NewInventoryClient(cfg.InventoryServiceURL)
 
 	orderService := services.NewOrderServiceSQS(
 		orderRepository,
 		snsClient,
 		cfg.OrderSNSTopicARN,
 		cfg.NotificationSNSTopicARN,
+		inventoryClient,
 	)
 	orderController := controllers.NewOrderController(orderService)
 	routes.RegisterOrderRoutes(r, orderController)
@@ -170,13 +177,26 @@ func main() {
 		}
 	}
 
+	if paymentRequestQueueURL != "" || cfg.NotificationSNSTopicARN != "" {
+		outboxPublisher := services.NewOutboxPublisher(
+			outboxRepository,
+			aws_pkg.NewSQSOutboxPublisher(awsCfg),
+			snsClient,
+			"order-service-"+uuid.NewString(),
+		)
+		go outboxPublisher.Run(shutdownCtx)
+		logger.Info("Started outbox publisher", zap.String("payment_queue", paymentRequestQueueURL))
+	} else {
+		logger.Warn("Outbox publisher not started - payment request queue URL is missing")
+	}
+
 	// Inventory client for stock management
-	inventoryClient := services.NewInventoryClient(cfg.InventoryServiceURL)
+	inventoryClient = services.NewInventoryClient(cfg.InventoryServiceURL)
 
 	// CloudWatch Metrics
-	cwLogsClient, err := aws_pkg.NewCloudWatchLogsClient(context.Background(), "order-service")
-	if err != nil {
-		logger.Warn("CloudWatch logs client init failed (non-fatal)", zap.Error(err))
+	cwLogsClient, cloudwatchErr := aws_pkg.NewCloudWatchLogsClient(context.Background(), "order-service")
+	if cloudwatchErr != nil {
+		logger.Warn("CloudWatch logs client init failed (non-fatal)", zap.Error(cloudwatchErr))
 	}
 	_ = cwLogsClient
 

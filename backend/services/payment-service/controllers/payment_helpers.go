@@ -81,6 +81,7 @@ func (pc *PaymentController) publishPaymentEvent(event models.PaymentEvent) {
 		pc.Logger.Error("Failed to publish payment event to SNS",
 			zap.String("event_type", event.Type),
 			zap.String("order_id", event.OrderID),
+			zap.String("correlation_id", event.CorrelationID),
 			zap.Error(err),
 		)
 		return
@@ -88,5 +89,6 @@ func (pc *PaymentController) publishPaymentEvent(event models.PaymentEvent) {
 	pc.Logger.Info("Payment event published to SNS",
 		zap.String("event_type", event.Type),
 		zap.String("order_id", event.OrderID),
+		zap.String("correlation_id", event.CorrelationID),
 	)
 }

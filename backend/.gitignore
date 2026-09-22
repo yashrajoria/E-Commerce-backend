@@ -76,6 +76,7 @@ node_modules/
 # docker-compose.yml), so this is the only .dockerignore Docker actually
 # reads — keep it tracked.
 !/.dockerignore
+!services/*/.dockerignore
 *.toml
 docker-compose.prod.yml
 .air.toml

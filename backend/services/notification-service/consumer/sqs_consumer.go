@@ -10,6 +10,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/google/uuid"
 	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"go.uber.org/zap"
 )
@@ -103,11 +104,15 @@ func (c *SQSConsumer) processMessage(ctx context.Context, body *string, receiptH
 		c.deleteMessage(ctx, receiptHandle)
 		return
 	}
+	payload.CorrelationID = ensureCorrelationID(payload.CorrelationID, payload.EventID)
+	correlationFields := zap.String("correlation_id", payload.CorrelationID)
+	c.logger.Info("notification event received", zap.String("event_type", payload.EventType), correlationFields)
 
 	// Step 3: process — do NOT delete on failure, let SQS retry
 	if err := c.service.ProcessEvent(ctx, &payload); err != nil {
 		c.logger.Error("failed to process event",
 			zap.String("event_type", payload.EventType),
+			correlationFields,
 			zap.Error(err),
 		)
 		return // SQS will retry after visibility timeout
@@ -115,6 +120,17 @@ func (c *SQSConsumer) processMessage(ctx context.Context, body *string, receiptH
 
 	// Step 4: delete only on success
 	c.deleteMessage(ctx, receiptHandle)
+	c.logger.Info("notification event acknowledged", zap.String("event_type", payload.EventType), correlationFields)
+}
+
+func ensureCorrelationID(correlationID, eventID string) string {
+	if correlationID != "" {
+		return correlationID
+	}
+	if eventID != "" {
+		return uuid.NewSHA1(uuid.NameSpaceOID, []byte("notification:"+eventID)).String()
+	}
+	return uuid.NewString()
 }
 
 func (c *SQSConsumer) deleteMessage(ctx context.Context, receiptHandle *string) {

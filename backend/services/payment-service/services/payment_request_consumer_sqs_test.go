@@ -68,3 +68,12 @@ func TestPaymentRequestClaimErrorStopsProcessing(t *testing.T) {
 		t.Fatal("expected payment request claim error")
 	}
 }
+
+func TestEnsureCorrelationIDIsStableForLegacyPaymentRequest(t *testing.T) {
+	first := ensureCorrelationID("", "event-1", "idem-1", "order-1")
+	second := ensureCorrelationID("", "event-1", "idem-1", "order-1")
+
+	if first == "" || first != second {
+		t.Fatalf("expected stable fallback correlation ID, first=%q second=%q", first, second)
+	}
+}

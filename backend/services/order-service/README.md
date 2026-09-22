@@ -1,10 +1,4 @@
-# Order Service Outbox
-
-The order service persists payment-request and order-created events in `outbox_events` in the same transaction as the order. An in-process publisher claims pending events with a lease, sends them to their destination, and marks them published only after AWS confirms the send.
-
-Claims whose lease expires are reclaimable. Publish failures return events to `pending` with exponential backoff. A process crash after AWS accepts a message but before the database update can therefore publish the event again; consumers must remain idempotent because delivery is at least once.
-
-The publisher resolves SQS queue names as needed and supports SNS topic ARNs. It starts with order-service and stops through the service shutdown context.# Order Service
+# Order Service
 
 The order service owns order state, order items, checkout consumption, stock orchestration, and payment dispatch. It is a Go/Gin service on port `8083` with PostgreSQL persistence and SQS consumers.
 
@@ -16,6 +10,7 @@ The order service owns order state, order items, checkout consumption, stock orc
 - Dispatch payment requests and consume payment events.
 - Confirm or cancel orders and release inventory when payment fails.
 - Expose customer order history and admin order/revenue views.
+- Preserve checkout correlation IDs in payment and notification outbox payloads, including retry/redelivery paths.
 
 ## Architecture
 
@@ -56,6 +51,8 @@ sequenceDiagram
   PaymentQ->>Payment: Create checkout session
   Payment-->>Order: payment.succeeded via payment-events
   Order->>DB: Mark paid and confirm inventory
+
+  Checkout correlation metadata is optional for backward compatibility. When order persistence fails after a successful reservation, the consumer releases the reservation before returning the error for retry.
 ```
 
 ## HTTP surface
@@ -64,12 +61,21 @@ sequenceDiagram
 | --- | --- | --- |
 | `GET /orders/` | List the current user's orders | Authenticated |
 | `GET /orders/:id` | Read one owned order | Authenticated |
+| `PUT /orders/:id/cancel` | Cancel an order | Admin |
 | `GET /orders/admin/` | List all orders | Admin |
 | `GET /orders/admin/stats` | Read revenue/order statistics | Admin |
 
 ## Persistence and idempotency
 
 PostgreSQL tables `orders` and `order_items` belong exclusively to this service. Checkout consumers deduplicate on the order idempotency key. Inventory operations are tokenized; payment-event handling checks order state before applying a terminal transition. SQS consumers must be safe to retry because acknowledgement happens only after successful processing.
+
+## Outbox publisher
+
+The order service persists payment-request and order-created events in `outbox_events` in the same transaction as the order. An in-process publisher claims pending events with a lease, sends them to their destination, and marks them published only after AWS confirms the send.
+
+Claims whose lease expires are reclaimable. Publish failures return events to `pending` with exponential backoff. A process crash after AWS accepts a message but before the database update can therefore publish the event again; consumers must remain idempotent because delivery is at least once.
+
+The publisher resolves SQS queue names as needed and supports SNS topic ARNs. It starts with order-service and stops through the service shutdown context.
 
 ## Configuration
 

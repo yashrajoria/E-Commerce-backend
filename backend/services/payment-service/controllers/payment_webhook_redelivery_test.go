@@ -71,10 +71,12 @@ func (m *mockPaymentRepo) MarkStripeEventProcessed(context.Context, string, stri
 
 type countingSNSPublisher struct {
 	calls int32
+	last  []byte
 }
 
-func (c *countingSNSPublisher) Publish(context.Context, string, []byte) error {
+func (c *countingSNSPublisher) Publish(_ context.Context, _ string, payload []byte) error {
 	atomic.AddInt32(&c.calls, 1)
+	c.last = append([]byte(nil), payload...)
 	return nil
 }
 
@@ -87,12 +89,13 @@ func TestStripeWebhook_ConcurrentRedelivery(t *testing.T) {
 	userID := uuid.New()
 
 	repo := &mockPaymentRepo{payment: models.Payment{
-		Payment_ID: uuid.New(),
-		OrderID:    orderID,
-		UserID:     userID,
-		Amount:     4999,
-		Currency:   "usd",
-		Status:     "pending",
+		Payment_ID:    uuid.New(),
+		OrderID:       orderID,
+		UserID:        userID,
+		Amount:        4999,
+		Currency:      "usd",
+		Status:        "pending",
+		CorrelationID: "corr-webhook",
 	}}
 	sns := &countingSNSPublisher{}
 
@@ -141,5 +144,12 @@ func TestStripeWebhook_ConcurrentRedelivery(t *testing.T) {
 	}
 	if repo.payment.Status != "succeeded" {
 		t.Fatalf("expected payment status succeeded, got %q", repo.payment.Status)
+	}
+	var published models.PaymentEvent
+	if err := json.Unmarshal(sns.last, &published); err != nil {
+		t.Fatal(err)
+	}
+	if published.CorrelationID != "corr-webhook" {
+		t.Fatalf("published correlation_id=%q", published.CorrelationID)
 	}
 }

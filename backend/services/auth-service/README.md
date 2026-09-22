@@ -58,7 +58,7 @@ sequenceDiagram
 | `POST /auth/logout` | Revoke the presented refresh token and clear cookies | Public/session |
 | `GET /auth/status` | Return the current authenticated identity | Authenticated |
 | `POST /auth/admin/users` | Provision an administrator | Admin |
-| `POST /auth/internal/revoke-user-tokens` | Revoke tokens after a password change | Internal service token |
+| `POST /auth/internal/revoke-tokens` | Revoke tokens after a password change | Internal service token |
 
 ## Persistence and security
 

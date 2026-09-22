@@ -5,6 +5,7 @@ import (
 	"promotion-service/models"
 	"promotion-service/repository"
 	"promotion-service/services"
+	"sync"
 	"testing"
 	"time"
 
@@ -66,6 +67,30 @@ func (m *mockRepo) FindAll(_ context.Context, _, _ int) ([]models.Coupon, int64,
 type mockNotFoundError struct{}
 
 func (e *mockNotFoundError) Error() string { return "record not found" }
+
+type concurrentCouponRepo struct {
+	*mockRepo
+	mu sync.Mutex
+}
+
+func (r *concurrentCouponRepo) FindByCode(ctx context.Context, code string) (*models.Coupon, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.mockRepo.FindByCode(ctx, code)
+}
+
+func (r *concurrentCouponRepo) IncrementUsedCount(ctx context.Context, code string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	coupon, err := r.mockRepo.FindByCode(ctx, code)
+	if err != nil {
+		return err
+	}
+	if coupon.UsageLimit > 0 && coupon.UsedCount >= coupon.UsageLimit {
+		return repository.ErrUsageLimitReached
+	}
+	return r.mockRepo.IncrementUsedCount(ctx, code)
+}
 
 // --- Mock SNS Publisher ---
 

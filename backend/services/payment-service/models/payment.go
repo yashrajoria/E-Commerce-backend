@@ -11,6 +11,7 @@ type Payment struct {
 	Payment_ID         uuid.UUID `gorm:"type:uuid;json default:gen_random_uuid();primaryKey"`
 	EventID            *string   `gorm:"type:varchar(128);uniqueIndex"`
 	IdempotencyKey     *string   `gorm:"type:varchar(128);uniqueIndex"` // Ensures idempotent operations for retries
+	CorrelationID      string    `gorm:"type:varchar(128);index"`
 	OrderID            uuid.UUID `gorm:"type:uuid;index;not null"`
 	UserID             uuid.UUID `gorm:"type:uuid;index;not null"`
 	Amount             int       `gorm:"not null"` // in cents/paise

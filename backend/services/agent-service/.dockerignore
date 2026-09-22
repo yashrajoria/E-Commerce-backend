@@ -1,0 +1,23 @@
+# Keep local and generated files out of the build context.
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.coverage
+htmlcov/
+.pytest_cache/
+tests/
+*.log
+*.tmp
+*.bak
+.DS_Store
+README.md
+apply_*.py

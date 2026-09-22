@@ -325,16 +325,12 @@ func (cc *CartController) Checkout(c *gin.Context) {
 	}
 
 	orderID := uuid.New().String()
-	// Build SNS payload
-	event := models.CheckoutEvent{
-		Event:          "checkout.requested",
-		UserID:         userID,
-		Items:          cart.Items,
-		IdempotencyKey: scopedIdemKey,
-		Timestamp:      time.Now(),
-		OrderID:        orderID,
-		CouponCode:     cart.CouponCode,
+	correlationID := strings.TrimSpace(c.GetHeader("X-Correlation-ID"))
+	if correlationID == "" {
+		correlationID = uuid.NewString()
 	}
+	// Build SNS payload
+	event := buildCheckoutEvent(userID, cart, orderID, scopedIdemKey, correlationID)
 
 	eventBytes, err := json.Marshal(event)
 	if err != nil {
@@ -350,7 +346,7 @@ func (cc *CartController) Checkout(c *gin.Context) {
 	// zap.L().Debug("[CHECKOUT] publishing SNS", zap.String("topicArn", topicArn), zap.Int("payload_len", len(eventBytes)), zap.String("userID", userID))
 
 	if err := cc.SNSClient.Publish(ctx, topicArn, eventBytes); err != nil {
-		zap.L().Error("[Checkout] Failed to send SNS event", zap.String("userID", userID), zap.String("topic", topicArn), zap.Error(err))
+		zap.L().Error("[Checkout] Failed to send SNS event", zap.String("userID", userID), zap.String("topic", topicArn), zap.String("correlation_id", correlationID), zap.Error(err))
 
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to publish checkout event"})
 		return
@@ -368,6 +364,19 @@ func (cc *CartController) Checkout(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"order_id": orderID, "status": "PENDING"})
 }
 
+func buildCheckoutEvent(userID string, cart *models.Cart, orderID, idempotencyKey, correlationID string) models.CheckoutEvent {
+	return models.CheckoutEvent{
+		Event:          "checkout.requested",
+		UserID:         userID,
+		Items:          cart.Items,
+		IdempotencyKey: idempotencyKey,
+		Timestamp:      time.Now(),
+		OrderID:        orderID,
+		CouponCode:     cart.CouponCode,
+		CorrelationID:  correlationID,
+	}
+}
+
 // validateProductsBatch validates all given product IDs in a single call to
 // product-service's internal batch-validate endpoint, returning the IDs that
 // are missing/invalid. Replaces a per-item HTTP round trip.
@@ -383,8 +392,10 @@ func (cc *CartController) validateProductsBatch(ctx context.Context, c *gin.Cont
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if corID := c.GetHeader("X-Correlation-ID"); corID != "" {
-		req.Header.Set("X-Correlation-ID", corID)
+	for _, header := range []string{"X-Request-ID", "X-Correlation-ID"} {
+		if value := c.GetHeader(header); value != "" {
+			req.Header.Set(header, value)
+		}
 	}
 	internalauth.Apply(req)
 

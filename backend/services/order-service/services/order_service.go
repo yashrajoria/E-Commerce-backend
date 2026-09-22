@@ -3,6 +3,8 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"order-service/models"
 	repositories "order-service/repository"
 
@@ -47,20 +49,37 @@ func (e *ServiceError) Error() string {
 	return e.Message
 }
 
+// InventoryReleaser is the subset of InventoryClient's behavior OrderService
+// needs to release reserved stock on cancellation. Defined here (rather than
+// depending on the concrete *InventoryClient) so tests can supply a fake.
+type InventoryReleaser interface {
+	ReleaseStock(ctx context.Context, orderID string, items []ReserveItem) error
+}
+
+// cancellableStatuses are the order statuses an admin may cancel from.
+// Anything else (already cancelled, completed, payment_failed, etc.) is a
+// terminal or non-cancellable state.
+var cancellableStatuses = map[string]bool{
+	"pending_payment": true,
+	"paid":            true,
+}
+
 type OrderService struct {
 	orderRepo            repositories.OrderRepository
 	snsClient            aws_pkg.SNSPublisher
 	snsTopicArn          string
 	notificationTopicArn string
+	inventoryClient      InventoryReleaser
 }
 
 // NewOrderServiceSQS creates an OrderService that uses SNS/SQS instead of Kafka
-func NewOrderServiceSQS(orderRepo repositories.OrderRepository, snsClient aws_pkg.SNSPublisher, snsTopicArn, notificationTopicArn string) *OrderService {
+func NewOrderServiceSQS(orderRepo repositories.OrderRepository, snsClient aws_pkg.SNSPublisher, snsTopicArn, notificationTopicArn string, inventoryClient InventoryReleaser) *OrderService {
 	return &OrderService{
 		orderRepo:            orderRepo,
 		snsClient:            snsClient,
 		snsTopicArn:          snsTopicArn,
 		notificationTopicArn: notificationTopicArn,
+		inventoryClient:      inventoryClient,
 	}
 }
 
@@ -218,6 +237,59 @@ func (s *OrderService) GetOrderByID(ctx context.Context, userID string, order_id
 		}
 	}
 
+	return order, nil
+}
+
+// CancelOrder transitions an order to "cancelled" (admin action) and releases
+// any reserved inventory for it. Only pending_payment/paid orders can be
+// cancelled; anything else (already cancelled, completed, payment_failed) is
+// rejected with 409 so the caller doesn't silently no-op on a terminal order.
+func (s *OrderService) CancelOrder(ctx context.Context, orderID uuid.UUID, adminID, reason string) (*models.Order, *ServiceError) {
+	order, err := s.orderRepo.FindByID(ctx, orderID)
+	if err != nil {
+		if err.Error() == "record not found" {
+			return nil, &ServiceError{StatusCode: 404, Message: "Order not found"}
+		}
+		zap.L().Error("failed to fetch order for cancellation", zap.String("order_id", orderID.String()), zap.Error(err))
+		return nil, &ServiceError{StatusCode: 500, Message: "Failed to fetch order"}
+	}
+
+	if !cancellableStatuses[order.Status] {
+		return nil, &ServiceError{
+			StatusCode: 409,
+			Message:    fmt.Sprintf("order cannot be cancelled from status %q", order.Status),
+		}
+	}
+
+	now := time.Now()
+	if err := s.orderRepo.UpdateOrderStatus(ctx, orderID, order.Status, "cancelled", map[string]interface{}{"canceled_at": now}); err != nil {
+		if errors.Is(err, repositories.ErrStatusConflict) {
+			return nil, &ServiceError{StatusCode: 409, Message: "order status changed concurrently, please retry"}
+		}
+		zap.L().Error("failed to update order status to cancelled", zap.String("order_id", orderID.String()), zap.Error(err))
+		return nil, &ServiceError{StatusCode: 500, Message: "Failed to cancel order"}
+	}
+
+	if s.inventoryClient != nil && len(order.OrderItems) > 0 {
+		items := make([]ReserveItem, 0, len(order.OrderItems))
+		for _, item := range order.OrderItems {
+			items = append(items, ReserveItem{ProductID: item.ProductID.String(), Quantity: item.Quantity})
+		}
+		// Best-effort: a release failure shouldn't undo the cancellation (mirrors
+		// the existing release-on-payment-failure behavior in sqs_payment_consumer.go).
+		if relErr := s.inventoryClient.ReleaseStock(ctx, orderID.String(), items); relErr != nil {
+			zap.L().Error("failed to release inventory for cancelled order",
+				zap.String("order_id", orderID.String()), zap.Error(relErr))
+		}
+	}
+
+	order.Status = "cancelled"
+	order.CanceledAt = &now
+	zap.L().Info("[AUDIT] admin cancelled order",
+		zap.String("order_id", orderID.String()),
+		zap.String("admin_id", adminID),
+		zap.String("reason", reason),
+	)
 	return order, nil
 }
 

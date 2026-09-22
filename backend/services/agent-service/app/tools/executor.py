@@ -56,6 +56,7 @@ async def _request(
     path: str,
     *,
     params: Optional[Dict[str, Any]] = None,
+    json_body: Optional[Dict[str, Any]] = None,
     auth_header: Optional[str] = None,
     cookie_header: Optional[str] = None,
     correlation_id: Optional[str] = None,
@@ -71,6 +72,7 @@ async def _request(
         method=method,
         url=url,
         params=req_params,
+        json=json_body,
         headers=_headers(auth_header, cookie_header, correlation_id, user_id, user_role),
     )
     duration_ms = int((time.perf_counter() - start) * 1000)
@@ -497,19 +499,82 @@ async def search_products(
     return {"products": filtered}
 
 
-_ToolHandler = Callable[..., Coroutine[Any, Any, Dict[str, Any]]]
+async def cancel_order(
+    params: Dict[str, Any],
+    auth_header: Optional[str] = None,
+    cookie_header: Optional[str] = None,
+    correlation_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    user_role: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Mutating tool: cancels an order via the admin cancel endpoint.
 
-_TOOL_HANDLERS: Dict[str, _ToolHandler] = {
-    "get_sales": get_sales,
-    "get_top_products": get_top_products,
-    "get_low_stock": get_low_stock,
-    "get_failed_payments": get_failed_payments,
-    "get_orders": get_orders,
-    "get_customers": get_customers,
-    "get_revenue_breakdown": get_revenue_breakdown,
-    "search_products": search_products,
-    "get_product_count": get_product_count,
-}
+    Only ever invoked after admin confirmation — see
+    app/agent/executor.py's read/mutating branch and
+    POST /agent/mutations/{request_id}/confirm.
+    """
+    order_id = params["order_id"]
+    body: Dict[str, Any] = {}
+    if params.get("reason"):
+        body["reason"] = params["reason"]
+
+    payload = await _request(
+        "PUT",
+        f"/bff/admin/orders/{order_id}/cancel",
+        json_body=body,
+        auth_header=auth_header,
+        cookie_header=cookie_header,
+        correlation_id=correlation_id,
+        user_id=user_id,
+        user_role=user_role,
+    )
+    return _extract_data(payload)
+
+
+async def create_restock_request(
+    params: Dict[str, Any],
+    auth_header: Optional[str] = None,
+    cookie_header: Optional[str] = None,
+    correlation_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    user_role: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Mutating tool: increases a product's available stock.
+
+    Reuses the existing admin `PUT /inventory/:productId` endpoint (absolute
+    `available`, not a delta) — reads current stock first, then adds the
+    requested restock quantity on top.
+    """
+    product_id = params["product_id"]
+    quantity = params["quantity"]
+
+    current = await _request(
+        "GET",
+        f"/inventory/{product_id}",
+        auth_header=auth_header,
+        cookie_header=cookie_header,
+        correlation_id=correlation_id,
+        user_id=user_id,
+        user_role=user_role,
+    )
+    current_available = 0
+    if isinstance(current, dict):
+        current_available = int(current.get("available") or current.get("Available") or 0)
+
+    new_available = current_available + quantity
+    return await _request(
+        "PUT",
+        f"/inventory/{product_id}",
+        json_body={"available": new_available},
+        auth_header=auth_header,
+        cookie_header=cookie_header,
+        correlation_id=correlation_id,
+        user_id=user_id,
+        user_role=user_role,
+    )
+
+
+_ToolHandler = Callable[..., Coroutine[Any, Any, Dict[str, Any]]]
 
 
 async def execute_tool(
@@ -521,7 +586,14 @@ async def execute_tool(
     user_id: Optional[str] = None,
     user_role: Optional[str] = None,
 ) -> Dict[str, Any]:
-    handler = _TOOL_HANDLERS.get(tool_name)
+    # Deferred import: app.tools.registry imports this module's handler
+    # functions at module load time, so importing it back at module scope
+    # here would be circular. TOOL_REGISTRY is the single source of truth
+    # for tool -> handler mapping (see app/tools/registry.py).
+    from app.tools.registry import TOOL_REGISTRY
+
+    spec = TOOL_REGISTRY.get(tool_name)
+    handler = spec.handler if spec else None
     if not handler:
         return {
             "tool": tool_name,

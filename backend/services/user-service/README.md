@@ -6,7 +6,7 @@ The user service owns customer profile and address data. It is a Go/Gin service 
 
 - Read and update the authenticated user's profile.
 - Manage profile password changes by requesting auth-service token revocation.
-- Manage customer address records.
+- Address CRUD routes are not currently registered; address ownership checks are therefore not an active HTTP path.
 - Provide an admin-only user listing.
 - Enforce gateway-injected identity rather than trusting client-selected user IDs.
 
@@ -54,4 +54,4 @@ sequenceDiagram
 
 ## Persistence and configuration
 
-The service uses GORM with PostgreSQL `users` profile columns and `addresses`. It must not directly perform auth credential operations. Configure `POSTGRES_*`, auth-service URL, `INTERNAL_SERVICE_TOKEN`, and `ALLOW_AUTO_MIGRATE`; production deployments should use migrations.
+The service uses GORM with PostgreSQL `users` profile columns; the `addresses` table is reserved for a future registered API. It must not directly perform auth credential operations. Configure `POSTGRES_*`, auth-service URL, `INTERNAL_SERVICE_TOKEN`, and `ALLOW_AUTO_MIGRATE`; production deployments should use migrations.

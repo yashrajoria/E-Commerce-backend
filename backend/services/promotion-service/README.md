@@ -7,7 +7,7 @@ The promotion service owns coupon definitions, validation, usage limits, and dea
 - Validate a coupon against cart total, dates, status, and usage limits.
 - Return a coupon for authenticated checkout flows.
 - Create, list, and deactivate coupons for administrators.
-- Atomically consume coupon usage when an order event is finalized.
+- Atomically consume coupon usage when an order event is finalized; concurrent attempts cannot exceed `usage_limit`.
 - Publish promotion-related notification events when configured.
 
 ## Architecture

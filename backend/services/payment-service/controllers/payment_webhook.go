@@ -136,13 +136,14 @@ func (pc *PaymentController) handleCheckoutCompleted(event stripe.Event, rawPayl
 		return nil
 	}
 	pc.publishPaymentEvent(models.PaymentEvent{
-		Type:      "payment_succeeded",
-		OrderID:   orderID,
-		UserID:    userID,
-		PaymentID: payment.Payment_ID.String(),
-		Amount:    payment.Amount,
-		Currency:  payment.Currency,
-		Timestamp: now.UTC(),
+		Type:          "payment_succeeded",
+		OrderID:       orderID,
+		UserID:        userID,
+		PaymentID:     payment.Payment_ID.String(),
+		Amount:        payment.Amount,
+		Currency:      payment.Currency,
+		Timestamp:     now.UTC(),
+		CorrelationID: payment.CorrelationID,
 	})
 	return nil
 }
@@ -223,13 +224,14 @@ func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, statu
 	}
 
 	pc.publishPaymentEvent(models.PaymentEvent{
-		Type:      "payment_" + status,
-		OrderID:   payment.OrderID.String(),
-		UserID:    payment.UserID.String(),
-		PaymentID: payment.Payment_ID.String(),
-		Amount:    payment.Amount,
-		Currency:  payment.Currency,
-		Timestamp: now.UTC(),
+		Type:          "payment_" + status,
+		OrderID:       payment.OrderID.String(),
+		UserID:        payment.UserID.String(),
+		PaymentID:     payment.Payment_ID.String(),
+		Amount:        payment.Amount,
+		Currency:      payment.Currency,
+		Timestamp:     now.UTC(),
+		CorrelationID: payment.CorrelationID,
 	})
 
 	if status == "failed" {
@@ -242,6 +244,7 @@ func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, statu
 			payment.OrderID.String(),
 			float64(payment.Amount),
 		)
+		notificationEvent.CorrelationID = payment.CorrelationID
 		payload, err := json.Marshal(notificationEvent)
 		if err != nil {
 			pc.Logger.Warn("Failed to marshal payment_failed notification event", zap.Error(err))

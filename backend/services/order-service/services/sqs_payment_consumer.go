@@ -8,6 +8,7 @@ import (
 	"order-service/models"
 	repositories "order-service/repository"
 	"time"
+
 	"github.com/google/uuid"
 
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
@@ -268,6 +269,7 @@ func (c *SQSPaymentConsumer) publishOrderConfirmedNotification(ctx context.Conte
 	notifEvent := events.NewOrderConfirmedEvent(
 		evt.UserID, evt.Email, "", evt.OrderID, float64(order.Amount), notifItems,
 	)
+	notifEvent.CorrelationID = evt.CorrelationID
 	notifBytes, err := json.Marshal(notifEvent)
 	if err != nil {
 		log.Printf("⚠️ [OrderService][SQSPaymentConsumer] failed to marshal order_confirmed notification: %v", err)

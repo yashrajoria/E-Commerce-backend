@@ -76,6 +76,14 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		log.Printf("❌ invalid JSON: %v payload=%s", err, body)
 		return nil // Don't retry invalid JSON
 	}
+	if evt.CorrelationID == "" {
+		if evt.OrderID != "" {
+			evt.CorrelationID = uuid.NewSHA1(uuid.NameSpaceOID, []byte("checkout:"+evt.OrderID)).String()
+		} else {
+			evt.CorrelationID = uuid.NewString()
+		}
+	}
+	log.Printf("[CHECKOUT] received order=%s correlation_id=%s", evt.OrderID, evt.CorrelationID)
 
 	userUUID, err := uuid.Parse(evt.UserID)
 	if err != nil {
@@ -204,6 +212,7 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		float64(order.Amount), notificationItems,
 	)
 	notifEvent.EventID = uuid.New().String()
+	notifEvent.CorrelationID = evt.CorrelationID
 	notifBytes, err := json.Marshal(notifEvent)
 	if err != nil {
 		return err
@@ -217,6 +226,7 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		Amount:         order.Amount,
 		Currency:       c.storeCurrency,
 		IdempotencyKey: idemKey,
+		CorrelationID:  evt.CorrelationID,
 	}
 	reqBytes, err := json.Marshal(req)
 	if err != nil {

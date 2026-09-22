@@ -131,6 +131,9 @@ func copyForwardHeaders(dst, src http.Header) {
 	if v := src.Get("X-Request-ID"); v != "" {
 		dst.Set("X-Request-ID", v)
 	}
+	if v := src.Get("X-Correlation-ID"); v != "" {
+		dst.Set("X-Correlation-ID", v)
+	}
 	if v := src.Get("Accept"); v != "" {
 		dst.Set("Accept", v)
 	}

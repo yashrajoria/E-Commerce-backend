@@ -74,6 +74,8 @@ func (c *PaymentRequestConsumer) handleMessage(ctx context.Context, body string)
 		c.logger.Warn("Invalid payment request JSON", zap.Error(err))
 		return err
 	}
+	req.CorrelationID = ensureCorrelationID(req.CorrelationID, req.EventID, req.IdempotencyKey, req.OrderID)
+	c.logger.Info("payment request consumed", zap.String("event_id", req.EventID), zap.String("correlation_id", req.CorrelationID))
 
 	// Validate Idempotency Key
 	if req.IdempotencyKey == "" {
@@ -104,13 +106,14 @@ func (c *PaymentRequestConsumer) handleMessage(ctx context.Context, body string)
 
 	// Create payment record
 	payment := models.Payment{
-		Payment_ID: uuid.New(),
-		OrderID:    orderID,
-		UserID:     userID,
-		Amount:     req.Amount,
-		Currency:   currency,
-		Status:     "pending",
-		CreatedAt:  time.Now().UTC(),
+		Payment_ID:    uuid.New(),
+		OrderID:       orderID,
+		UserID:        userID,
+		Amount:        req.Amount,
+		Currency:      currency,
+		Status:        "pending",
+		CreatedAt:     time.Now().UTC(),
+		CorrelationID: req.CorrelationID,
 	}
 	eventID := req.EventID
 	if eventID == "" {
@@ -153,13 +156,14 @@ func (c *PaymentRequestConsumer) handleMessage(ctx context.Context, body string)
 
 		// Publish failure event
 		eventMsg := models.PaymentEvent{
-			Type:      "payment_failed",
-			OrderID:   orderID.String(),
-			UserID:    userID.String(),
-			PaymentID: payment.Payment_ID.String(),
-			Amount:    payment.Amount,
-			Currency:  payment.Currency,
-			Timestamp: time.Now().UTC(),
+			Type:          "payment_failed",
+			OrderID:       orderID.String(),
+			UserID:        userID.String(),
+			PaymentID:     payment.Payment_ID.String(),
+			Amount:        payment.Amount,
+			Currency:      payment.Currency,
+			Timestamp:     time.Now().UTC(),
+			CorrelationID: req.CorrelationID,
 		}
 		eventBytes, _ := json.Marshal(eventMsg)
 		c.snsPublisher.Publish(ctx, c.paymentTopicArn, eventBytes)
@@ -172,6 +176,7 @@ func (c *PaymentRequestConsumer) handleMessage(ctx context.Context, body string)
 			orderID.String(),
 			float64(payment.Amount),
 		)
+		notificationEvent.CorrelationID = req.CorrelationID
 		notificationBytes, nerr := json.Marshal(notificationEvent)
 		if nerr != nil {
 			c.logger.Warn("Failed to marshal payment_failed notification event", zap.Error(nerr))
@@ -199,4 +204,16 @@ func (c *PaymentRequestConsumer) handleMessage(ctx context.Context, body string)
 
 func normalizeCurrency(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func ensureCorrelationID(correlationID, eventID, idempotencyKey, orderID string) string {
+	if correlationID != "" {
+		return correlationID
+	}
+	for _, seed := range []string{eventID, idempotencyKey, orderID} {
+		if seed != "" {
+			return uuid.NewSHA1(uuid.NameSpaceOID, []byte("payment-request:"+seed)).String()
+		}
+	}
+	return uuid.NewString()
 }

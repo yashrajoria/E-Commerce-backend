@@ -340,9 +340,10 @@ Detailed technical audit report identifying potential bugs, security vulnerabili
 - **Problem**: If `INTERNAL_AUTH_SECRET` is not set in env, it falls back to a hardcoded string `"internal-secret-key"`. If a production cluster forgets to set this env var, internal endpoints can be forged using the known fallback key.
 - **Recommended Fix**: Panic or fail service initialization if `INTERNAL_AUTH_SECRET` is missing in non-development environments.
 
-#### 🟡 Issue 13.3: Missing Trace Correlation in Python Agent HTTP Client [MEDIUM]
-- **File**: `backend/services/agent-service/services/bff_client.py`
-- **Location**: `query_bff()`
+#### 🟡 Issue 13.3: Missing Trace Correlation in Python Agent HTTP Client [MEDIUM] — ✅ RESOLVED
+> `app/tools/executor.py::_headers()` forwards `X-Correlation-ID` (sourced from the inbound request's correlation ID, set in `main.py`'s middleware) on every outgoing tool call to the api-gateway/BFF.
+- **File**: `backend/services/agent-service/app/tools/executor.py`
+- **Location**: `_headers()` / `_request()`
 - **Problem**: Python agent HTTP client calls BFF without forwarding `X-Request-ID` or `X-Correlation-ID` headers, breaking distributed tracing between Agent and BFF services.
 - **Recommended Fix**: Extract `X-Request-ID` from incoming request headers and forward it in outgoing HTTP requests.
 

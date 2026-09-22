@@ -6,7 +6,8 @@ The cart service owns the active shopping cart for each user. It is a Go/Gin ser
 
 - Read, add to, remove from, and clear a user cart.
 - Apply a coupon code to the cart workflow.
-- Publish a checkout request without synchronously creating an order.
+- Publish a checkout request without synchronously creating an order, retaining correlation metadata for downstream consumers.
+- Validate all checkout products with one authenticated batch request.
 - Enforce that every request carries a gateway-authenticated `X-User-ID`.
 - Expire inactive cart state using the configured cart TTL.
 
@@ -37,7 +38,7 @@ sequenceDiagram
   User->>BFF: POST /bff/checkout
   BFF->>Cart: POST /cart/checkout
   Cart->>Redis: Read cart:{user_id}
-  Cart->>SNS: Publish checkout.requested
+  Cart->>SNS: Publish checkout.requested + correlation_id
   Cart-->>BFF: Return request/order correlation id
   SNS->>Order: Deliver through order-processing-queue
   Order->>Order: Reserve stock and persist order
