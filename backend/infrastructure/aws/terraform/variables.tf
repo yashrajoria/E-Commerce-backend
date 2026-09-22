@@ -12,22 +12,48 @@ variable "s3_bucket" {
 
 variable "ddb_tables" {
   description = "DynamoDB table names"
-  type = map(string)
+  type        = map(string)
   default = {
-    products            = "Products"
-    categories          = "Categories"
-    inventory           = "Inventory"
-    product_categories  = "ProductCategories"
+    products           = "Products"
+    categories         = "Categories"
+    inventory          = "Inventory"
+    product_categories = "ProductCategories"
   }
 }
 
 variable "sqs_queues" {
   description = "SQS queue names"
-  type = map(string)
+  type        = map(string)
   default = {
     order_processing = "order-processing-queue"
     payment_events   = "payment-events-queue"
     payment_request  = "payment-request-queue"
+    notification     = "notification-queue"
+    promotion_order  = "promotion-order-queue"
+  }
+}
+
+variable "sqs_dlqs" {
+  description = "SQS dead-letter queue names keyed by source queue"
+  type        = map(string)
+  default = {
+    order_processing = "order-processing-queue-dlq"
+    payment_events   = "payment-events-queue-dlq"
+    payment_request  = "payment-request-queue-dlq"
+    notification     = "notification-queue-dlq"
+    promotion_order  = "promotion-order-queue-dlq"
+  }
+}
+
+variable "sqs_max_receive_counts" {
+  description = "Maximum receives before each source queue moves a message to its DLQ"
+  type        = map(number)
+  default = {
+    order_processing = 3
+    payment_events   = 3
+    payment_request  = 3
+    notification     = 3
+    promotion_order  = 3
   }
 }
 
@@ -49,43 +75,43 @@ variable "ci_role_name" {
   default     = "ecommerce-github-actions-oidc-role"
 }
 
-  # EC2 instance variables
-  variable "ec2_ami" {
-    description = "AMI ID for EC2 instance"
-    type        = string
-    default     = "ami-0c02fb55956c7d316" # Amazon Linux 2
-  }
+# EC2 instance variables
+variable "ec2_ami" {
+  description = "AMI ID for EC2 instance"
+  type        = string
+  default     = "ami-0c02fb55956c7d316" # Amazon Linux 2
+}
 
-  variable "ec2_instance_type" {
-    description = "EC2 instance type"
-    type        = string
-    default     = "t3.micro"
-  }
+variable "ec2_instance_type" {
+  description = "EC2 instance type"
+  type        = string
+  default     = "t3.micro"
+}
 
-  # DynamoDB table name
-  variable "dynamodb_table_name" {
-    description = "DynamoDB table name"
-    type        = string
-    default     = "ECommerceDynamoDB"
-  }
+# DynamoDB table name
+variable "dynamodb_table_name" {
+  description = "DynamoDB table name"
+  type        = string
+  default     = "ECommerceDynamoDB"
+}
 
-  # SNS topic name
-  variable "sns_topic_name" {
-    description = "SNS topic name"
-    type        = string
-    default     = "ECommerceSNSTopic"
-  }
+# SNS topic name
+variable "sns_topic_name" {
+  description = "SNS topic name"
+  type        = string
+  default     = "ECommerceSNSTopic"
+}
 
-  # SQS queue name
-  variable "sqs_queue_name" {
-    description = "SQS queue name"
-    type        = string
-    default     = "ECommerceSQSQueue"
-  }
+# SQS queue name
+variable "sqs_queue_name" {
+  description = "SQS queue name"
+  type        = string
+  default     = "ECommerceSQSQueue"
+}
 
-  # CloudWatch log group name
-  variable "cloudwatch_log_group_name" {
-    description = "CloudWatch log group name"
-    type        = string
-    default     = "/aws/ecommerce/app"
-  }
+# CloudWatch log group name
+variable "cloudwatch_log_group_name" {
+  description = "CloudWatch log group name"
+  type        = string
+  default     = "/aws/ecommerce/app"
+}

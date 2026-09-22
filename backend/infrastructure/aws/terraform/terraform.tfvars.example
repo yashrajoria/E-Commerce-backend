@@ -1,13 +1,25 @@
 aws_region = "us-east-1"
 s3_bucket  = "shopswift"
 
-["ddb_tables"]
-products = "Products"
-categories = "Categories"
-inventory = "Inventory"
-product_categories = "ProductCategories"
+ddb_tables = {
+	products           = "Products"
+	categories         = "Categories"
+	inventory          = "Inventory"
+	product_categories = "ProductCategories"
+}
 
-["sqs_queues"]
-order_processing = "order-processing-queue"
-payment_events   = "payment-events-queue"
-payment_request  = "payment-request-queue"
+sqs_queues = {
+	order_processing = "order-processing-queue"
+	payment_events   = "payment-events-queue"
+	payment_request  = "payment-request-queue"
+	notification     = "notification-queue"
+	promotion_order  = "promotion-order-queue"
+}
+
+sqs_dlqs = {
+	order_processing = "order-processing-queue-dlq"
+	payment_events   = "payment-events-queue-dlq"
+	payment_request  = "payment-request-queue-dlq"
+	notification     = "notification-queue-dlq"
+	promotion_order  = "promotion-order-queue-dlq"
+}

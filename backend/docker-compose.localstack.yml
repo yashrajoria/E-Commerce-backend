@@ -56,7 +56,7 @@ services:
         if ! [[ \"$${q_count}\" =~ ^[0-9]+$ ]]; then q_count=0; fi;
         if ! [[ \"$${t_count}\" =~ ^[0-9]+$ ]]; then t_count=0; fi;
         if ! [[ \"$${s_count}\" =~ ^[0-9]+$ ]]; then s_count=0; fi;
-        if [ \"$${q_count}\" -ge 8 ] && [ \"$${t_count}\" -ge 5 ] && [ \"$${s_count}\" -ge 4 ]; then
+        if [ \"$${q_count}\" -ge 10 ] && [ \"$${t_count}\" -ge 5 ] && [ \"$${s_count}\" -ge 4 ]; then
           echo \"LocalStack resources ready: queues=$${q_count}, topics=$${t_count}, subscriptions=$${s_count}\";
           exit 0;
         fi;
@@ -83,6 +83,8 @@ services:
       - PAYMENT_EVENTS_QUEUE_NAME=${PAYMENT_EVENTS_QUEUE_NAME:-payment-events-queue}
       - PAYMENT_REQUEST_QUEUE_NAME=${PAYMENT_REQUEST_QUEUE_NAME:-payment-request-queue}
       - NOTIFICATION_SQS_QUEUE_NAME=${NOTIFICATION_SQS_QUEUE_NAME:-notification-queue}
+      - PROMOTION_ORDER_QUEUE_NAME=${PROMOTION_ORDER_QUEUE_NAME:-promotion-order-queue}
+      - SQS_MAX_RECEIVE_COUNT=${SQS_MAX_RECEIVE_COUNT:-3}
     depends_on:
       localstack:
         condition: service_healthy

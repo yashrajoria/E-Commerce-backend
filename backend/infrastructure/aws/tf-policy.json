@@ -49,15 +49,20 @@
         "sqs:DeleteQueue",
         "sqs:GetQueueAttributes",
         "sqs:SetQueueAttributes",
-        "sqs:SendMessage",
-        "sqs:ReceiveMessage",
-        "sqs:DeleteMessage",
-        "sqs:ListQueues"
+        "sqs:GetQueueUrl",
+        "sqs:ChangeMessageVisibility"
       ],
       "Resource": [
         "arn:aws:sqs:${AWS_REGION}:${ACCOUNT_ID}:order-processing-queue",
         "arn:aws:sqs:${AWS_REGION}:${ACCOUNT_ID}:payment-events-queue",
-        "arn:aws:sqs:${AWS_REGION}:${ACCOUNT_ID}:payment-request-queue"
+        "arn:aws:sqs:${AWS_REGION}:${ACCOUNT_ID}:payment-request-queue",
+        "arn:aws:sqs:${AWS_REGION}:${ACCOUNT_ID}:notification-queue",
+        "arn:aws:sqs:${AWS_REGION}:${ACCOUNT_ID}:promotion-order-queue",
+        "arn:aws:sqs:${AWS_REGION}:${ACCOUNT_ID}:order-processing-queue-dlq",
+        "arn:aws:sqs:${AWS_REGION}:${ACCOUNT_ID}:payment-events-queue-dlq",
+        "arn:aws:sqs:${AWS_REGION}:${ACCOUNT_ID}:payment-request-queue-dlq",
+        "arn:aws:sqs:${AWS_REGION}:${ACCOUNT_ID}:notification-queue-dlq",
+        "arn:aws:sqs:${AWS_REGION}:${ACCOUNT_ID}:promotion-order-queue-dlq"
       ]
     },
     {

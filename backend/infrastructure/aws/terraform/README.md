@@ -1,3 +1,32 @@
+# AWS SQS infrastructure
+
+Terraform provisions the five application source queues and one explicit DLQ for each:
+
+- `order-processing-queue`
+- `payment-events-queue`
+- `payment-request-queue`
+- `notification-queue`
+- `promotion-order-queue`
+
+Each source queue has a configurable `redrive_policy`; the default `maxReceiveCount` is `3`. Queue and DLQ names are configured with `sqs_queues` and `sqs_dlqs`, and retry thresholds with `sqs_max_receive_counts`.
+
+Validate the configuration with:
+
+```bash
+cd backend/infrastructure/aws/terraform
+terraform init -backend=false
+terraform validate
+```
+
+After LocalStack or AWS is running, verify policy wiring with:
+
+```bash
+cd backend
+LOCALSTACK_ENDPOINT=http://localhost:4566 ./scripts/verify_sqs_dlq.sh
+```
+
+Add `--exercise` to send probe messages and verify that SQS moves them to each DLQ. The exercise changes queue state temporarily and should be used only in a disposable test environment.
+
 Terraform for AWS resources used by E-Commerce backend
 
 Overview
