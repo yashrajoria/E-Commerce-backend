@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"log"
 	"order-service/models"
+	promotionmodels "order-service/promotion/models"
 	repositories "order-service/repository"
 	"time"
 
 	"github.com/google/uuid"
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"github.com/yashrajoria/common/events"
+	promotionservices "order-service/promotion/services"
 )
 
 type SQSCheckoutConsumer struct {
@@ -22,14 +24,14 @@ type SQSCheckoutConsumer struct {
 	productServiceURL    string // Base URL for the product service (internal endpoint)
 	snsClient            aws_pkg.SNSPublisher
 	notificationTopicArn string
-	promotionClient      *PromotionClient
+	promotionService     promotionservices.CouponService
 	storeCurrency        string
 }
 
 // NewSQSCheckoutConsumer creates a new SQS-based checkout consumer
-func NewSQSCheckoutConsumer(sqsConsumer *aws_pkg.SQSConsumer, sqsPublisher *aws_pkg.SQSConsumer, orderRepo repositories.OrderRepository, inventoryClient *InventoryClient, metricsClient *aws_pkg.MetricsClient, productServiceURL string, snsClient aws_pkg.SNSPublisher, notificationTopicArn string, promotionClient *PromotionClient, storeCurrency string) *SQSCheckoutConsumer {
+func NewSQSCheckoutConsumer(sqsConsumer *aws_pkg.SQSConsumer, sqsPublisher *aws_pkg.SQSConsumer, orderRepo repositories.OrderRepository, inventoryClient *InventoryClient, metricsClient *aws_pkg.MetricsClient, productServiceURL string, snsClient aws_pkg.SNSPublisher, notificationTopicArn string, promotionService promotionservices.CouponService, storeCurrency string) *SQSCheckoutConsumer {
 	if productServiceURL == "" {
-		productServiceURL = "http://product-service:8082"
+		productServiceURL = "http://catalog-service:8082"
 	}
 	if storeCurrency == "" {
 		storeCurrency = "usd"
@@ -43,7 +45,7 @@ func NewSQSCheckoutConsumer(sqsConsumer *aws_pkg.SQSConsumer, sqsPublisher *aws_
 		productServiceURL:    productServiceURL,
 		snsClient:            snsClient,
 		notificationTopicArn: notificationTopicArn,
-		promotionClient:      promotionClient,
+		promotionService:     promotionService,
 		storeCurrency:        storeCurrency,
 	}
 }
@@ -154,8 +156,11 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 
 	// Process Coupon if present
 	discountAmount := 0
-	if evt.CouponCode != "" && c.promotionClient != nil {
-		resp, err := c.promotionClient.ValidateCoupon(ctx, evt.CouponCode, evt.UserID, float64(totalAmount))
+	if evt.CouponCode != "" && c.promotionService != nil {
+		resp, err := c.promotionService.ValidateCoupon(ctx, &promotionmodels.ValidateCouponRequest{
+			Code:      evt.CouponCode,
+			CartTotal: float64(totalAmount),
+		})
 		if err != nil {
 			log.Printf("⚠️  [CHECKOUT] Coupon validation failed for code=%s: %v", evt.CouponCode, err)
 		} else if resp != nil && resp.Valid {

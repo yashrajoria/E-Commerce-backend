@@ -2,7 +2,7 @@ package models
 
 import "time"
 
-// From cart-service → order-service
+// From catalog cart → order-service
 type CheckoutEvent struct {
 	Event          string         `json:"event"`   // expected: "checkout.requested"
 	UserID         string         `json:"user_id"` // must be UUID string
@@ -20,7 +20,7 @@ type CheckoutItem struct {
 	Quantity  int    `json:"quantity"`
 }
 
-// order-service → payment-service
+// order-service checkout consumer → order-service payment consumer (same binary)
 type PaymentRequest struct {
 	EventID        string `json:"event_id,omitempty"`
 	OrderID        string `json:"order_id"`
@@ -32,7 +32,7 @@ type PaymentRequest struct {
 	CorrelationID  string `json:"correlation_id,omitempty"`
 }
 
-// payment-service → order-service
+// order-service payment consumer → order-service payment-events consumer (same binary)
 type PaymentEvent struct {
 	Type          string    `json:"type"` // "payment_succeeded" | "payment_failed"
 	OrderID       string    `json:"order_id"`

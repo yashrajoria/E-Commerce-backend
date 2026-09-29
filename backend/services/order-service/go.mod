@@ -80,4 +80,5 @@ require (
 	github.com/aws/smithy-go v1.24.0 // indirect
 	github.com/bytedance/sonic/loader v0.2.3 // indirect
 	github.com/cloudwego/base64x v0.1.5 // indirect
+	github.com/stripe/stripe-go/v80 v80.2.1 // indirect
 )

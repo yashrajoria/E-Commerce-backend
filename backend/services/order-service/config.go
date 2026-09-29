@@ -28,8 +28,9 @@ type Config struct {
 	OrderSNSTopicARN        string
 	PaymentSNSTopicARN      string
 	NotificationSNSTopicARN string
-	PromotionServiceURL     string
 	StoreCurrency           string
+	StripeSecretKey         string
+	StripeWebhookSecret     string
 }
 
 func LoadConfig() (*Config, error) {
@@ -42,9 +43,8 @@ func LoadConfig() (*Config, error) {
 		PostgresPort:            getEnv("POSTGRES_PORT", "5432"),
 		PostgresSSLMode:         getEnv("POSTGRES_SSLMODE", "disable"),
 		PostgresTimeZone:        getEnv("POSTGRES_TIMEZONE", "Asia/Kolkata"),
-		ProductServiceURL:       getEnv("PRODUCT_SERVICE_URL", "http://product-service:8082"),
-		InventoryServiceURL:     getEnv("INVENTORY_SERVICE_URL", "http://inventory-service:8084"),
-		PromotionServiceURL:     getEnv("PROMOTION_SERVICE_URL", "http://promotion-service:8090"),
+		ProductServiceURL:       getEnv("PRODUCT_SERVICE_URL", "http://catalog-service:8082"),
+		InventoryServiceURL:     getEnv("INVENTORY_SERVICE_URL", "http://catalog-service:8082"),
 		CheckoutQueueURL:        os.Getenv("CHECKOUT_QUEUE_URL"),
 		PaymentEventsQueueURL:   os.Getenv("PAYMENT_EVENTS_QUEUE_URL"),
 		PaymentRequestQueueURL:  os.Getenv("PAYMENT_REQUEST_QUEUE_URL"),
@@ -52,6 +52,8 @@ func LoadConfig() (*Config, error) {
 		PaymentSNSTopicARN:      os.Getenv("PAYMENT_SNS_TOPIC_ARN"),
 		NotificationSNSTopicARN: os.Getenv("NOTIFICATION_SNS_TOPIC_ARN"),
 		StoreCurrency:           normalizeCurrency(getEnv("STORE_CURRENCY", "USD")),
+		StripeSecretKey:         os.Getenv("STRIPE_API_KEY"),
+		StripeWebhookSecret:     os.Getenv("STRIPE_WEBHOOK_SECRET"),
 	}
 
 	if os.Getenv("AWS_USE_SECRETS") == "true" {

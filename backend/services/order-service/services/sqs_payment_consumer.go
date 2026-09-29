@@ -245,7 +245,7 @@ func (c *SQSPaymentConsumer) publishOrderConfirmedNotification(ctx context.Conte
 	// Fetch product names for each order item
 	productServiceURL := c.productServiceURL
 	if productServiceURL == "" {
-		productServiceURL = "http://product-service:8082"
+		productServiceURL = "http://catalog-service:8082"
 	}
 
 	notifItems := make([]events.NotificationItem, 0, len(order.OrderItems))
@@ -264,7 +264,7 @@ func (c *SQSPaymentConsumer) publishOrderConfirmedNotification(ctx context.Conte
 		})
 	}
 
-	// Use email propagated from payment-service so notification-service can route
+	// Use email propagated from the payment event so notification-service can route
 	// order_confirmed events to the recipient address.
 	notifEvent := events.NewOrderConfirmedEvent(
 		evt.UserID, evt.Email, "", evt.OrderID, float64(order.Amount), notifItems,
