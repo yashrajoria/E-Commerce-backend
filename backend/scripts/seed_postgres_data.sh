@@ -68,7 +68,8 @@ ensure_users_table() {
     echo "identity-service creates it via GORM AutoMigrate on first boot (ALLOW_AUTO_MIGRATE=true)." >&2
     echo "Start the full stack and wait for identity-service to become healthy first: ./scripts/dev-up.sh" >&2
     exit 1
-  }
+  fi
+}
 
 ensure_schema() {
   # Baseline migration (000001) can't run cleanly against a users table

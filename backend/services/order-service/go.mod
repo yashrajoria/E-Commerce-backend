@@ -11,7 +11,11 @@ require (
 
 require github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws v0.0.0
 
-require github.com/yashrajoria/common v0.0.0
+require (
+	github.com/stretchr/testify v1.11.1
+	github.com/stripe/stripe-go/v80 v80.2.1
+	github.com/yashrajoria/common v0.0.0
+)
 
 replace github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws => ../../pkg/aws
 
@@ -80,5 +84,6 @@ require (
 	github.com/aws/smithy-go v1.24.0 // indirect
 	github.com/bytedance/sonic/loader v0.2.3 // indirect
 	github.com/cloudwego/base64x v0.1.5 // indirect
-	github.com/stripe/stripe-go/v80 v80.2.1 // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
 )

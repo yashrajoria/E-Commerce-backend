@@ -8,14 +8,8 @@ import (
 )
 
 func RegisterPaymentRoutes(r *gin.Engine, pc *controllers.PaymentController) {
-	live := func(c *gin.Context) {
-		c.JSON(200, gin.H{"status": "ok", "service": "order-service"})
-	}
-	r.GET("/health", live)
-	r.GET("/health/live", live)
-	r.GET("/health/ready", func(c *gin.Context) {
-		c.JSON(200, gin.H{"status": "ready", "service": "order-service"})
-	})
+	// NOTE: /health* is owned by main.go — do not re-register here (gin panics
+	// on duplicate route registration at boot).
 
 	payments := r.Group("/payment")
 	payments.Use(middleware.AuthMiddleware())
