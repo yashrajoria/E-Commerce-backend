@@ -26,7 +26,6 @@ class Settings:
     LLM_TIMEOUT: float = _safe_float(os.getenv("LLM_TIMEOUT"), 30.0)
     
     TOOL_API_BASE_URL: str = os.getenv("TOOL_API_BASE_URL", "http://api-gateway:8080")
-    BFF_BASE_URL: str = os.getenv("BFF_BASE_URL", "http://bff-service:8088")
     BFF_TIMEOUT: float = _safe_float(os.getenv("BFF_TIMEOUT"), 15.0)
     TOOL_TIMEOUT: float = _safe_float(os.getenv("TOOL_TIMEOUT"), 20.0)
     MAX_CONCURRENT_TOOLS: int = _safe_int(os.getenv("MAX_CONCURRENT_TOOLS"), 5)
