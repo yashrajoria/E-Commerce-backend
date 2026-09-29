@@ -249,6 +249,108 @@ paths:
               schema:
                 $ref: '#/components/schemas/ToolRegistryResponse'
 
+  /agent/tools:
+    get:
+      tags:
+        - Agent Service
+      summary: List available agent tools (alias)
+      description: Returns the tool registry used by the agent pipeline.
+      operationId: agentListToolsAlias
+      responses:
+        '200':
+          description: Tool registry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolRegistryResponse'
+
+  /agent/mutations/{request_id}:
+    get:
+      tags:
+        - Agent Service
+      summary: Inspect pending mutation proposal
+      description: Retrieves details of a pending mutating tool execution awaiting admin confirmation.
+      operationId: agentGetMutation
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: request_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Mutation details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  request_id:
+                    type: string
+                    format: uuid
+                  tool:
+                    type: string
+                  status:
+                    type: string
+                    example: pending_confirmation
+                  arguments:
+                    type: object
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /agent/mutations/{request_id}/confirm:
+    post:
+      tags:
+        - Agent Service
+      summary: Confirm or reject a pending mutation
+      description: Two-phase commit approval for destructive or state-altering tool calls proposed by the AI agent.
+      operationId: agentConfirmMutation
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: request_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - approve
+              properties:
+                approve:
+                  type: boolean
+                  description: True to execute the proposed mutation, False to reject/cancel it.
+      responses:
+        '200':
+          description: Mutation execution result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: executed
+                  result:
+                    type: object
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Mutation is already in a terminal state (already executed or rejected)
+
   # ── Gateway ─────────────────────────────────────────────────────────────────
 
   /health:

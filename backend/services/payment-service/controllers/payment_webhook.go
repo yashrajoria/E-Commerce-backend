@@ -111,17 +111,31 @@ func (pc *PaymentController) handleCheckoutCompleted(event stripe.Event, rawPayl
 	}
 
 	now := time.Now()
+	outboxEvt, err := pc.paymentOutboxEvent(payment.OrderID, models.PaymentEvent{
+		Type:          "payment_succeeded",
+		OrderID:       orderID,
+		UserID:        userID,
+		PaymentID:     payment.Payment_ID.String(),
+		Amount:        payment.Amount,
+		Currency:      payment.Currency,
+		Timestamp:     now.UTC(),
+		CorrelationID: payment.CorrelationID,
+	})
+	if err != nil {
+		return fmt.Errorf("build payment_succeeded outbox event: %w", err)
+	}
 	// Atomic conditional update: two near-simultaneous webhook deliveries for the same
 	// event can both pass the terminalStatuses read above before either writes. Gating
 	// the UPDATE itself on status NOT IN (terminal) makes only one writer win the
-	// transition, so publishPaymentEvent below cannot fire twice for one payment.
-	updated, err := pc.Repo.UpdateIfStatusNotIn(context.Background(), payment.OrderID, terminalStatusList(), map[string]interface{}{
+	// transition, and the outbox event is inserted in the same DB transaction so the
+	// status change and the downstream event can never diverge.
+	updated, err := pc.Repo.UpdateIfStatusNotInWithOutbox(context.Background(), payment.OrderID, terminalStatusList(), map[string]interface{}{
 		"status":               "succeeded",
 		"stripe_event_payload": string(rawPayload),
 		"succeeded_at":         &now,
 		"stripe_payment_id":    sess.ID,
 		"updated_at":           now,
-	})
+	}, []models.OutboxEvent{outboxEvt})
 	if err != nil {
 		pc.Logger.Error("Failed to update payment status",
 			zap.String("payment_id", payment.Payment_ID.String()),
@@ -135,16 +149,6 @@ func (pc *PaymentController) handleCheckoutCompleted(event stripe.Event, rawPayl
 		)
 		return nil
 	}
-	pc.publishPaymentEvent(models.PaymentEvent{
-		Type:          "payment_succeeded",
-		OrderID:       orderID,
-		UserID:        userID,
-		PaymentID:     payment.Payment_ID.String(),
-		Amount:        payment.Amount,
-		Currency:      payment.Currency,
-		Timestamp:     now.UTC(),
-		CorrelationID: payment.CorrelationID,
-	})
 	return nil
 }
 
@@ -206,9 +210,52 @@ func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, statu
 		updates["failed_at"] = &now
 	}
 
+	outboxEvt, err := pc.paymentOutboxEvent(payment.OrderID, models.PaymentEvent{
+		Type:          "payment_" + status,
+		OrderID:       payment.OrderID.String(),
+		UserID:        payment.UserID.String(),
+		PaymentID:     payment.Payment_ID.String(),
+		Amount:        payment.Amount,
+		Currency:      payment.Currency,
+		Timestamp:     now.UTC(),
+		CorrelationID: payment.CorrelationID,
+	})
+	if err != nil {
+		return fmt.Errorf("build payment_%s outbox event: %w", status, err)
+	}
+	outboxEvents := []models.OutboxEvent{outboxEvt}
+
+	if status == "failed" {
+		notificationEvent := events.NewPaymentFailedEvent(
+			payment.UserID.String(),
+			pi.ReceiptEmail,
+			"",
+			"",
+			payment.OrderID.String(),
+			float64(payment.Amount),
+		)
+		notificationEvent.CorrelationID = payment.CorrelationID
+		payload, err := json.Marshal(notificationEvent)
+		if err != nil {
+			pc.Logger.Warn("Failed to marshal payment_failed notification event", zap.Error(err))
+		} else {
+			outboxEvents = append(outboxEvents, models.OutboxEvent{
+				AggregateType:   "payment",
+				AggregateID:     payment.OrderID,
+				EventType:       "payment_failed_notification",
+				DestinationType: models.OutboxDestinationSNS,
+				Destination:     pc.NotificationTopicArn,
+				Payload:         payload,
+				Status:          models.OutboxStatusPending,
+				AvailableAt:     time.Now().UTC(),
+			})
+		}
+	}
+
 	// Atomic conditional update — see handleCheckoutCompleted for why the terminal-status
-	// gate must live inside the UPDATE, not just the read above.
-	updated, err := pc.Repo.UpdateIfStatusNotIn(context.Background(), payment.OrderID, terminalStatusList(), updates)
+	// gate must live inside the UPDATE, not just the read above. The outbox events are
+	// inserted in the same DB transaction, only when this call wins the transition.
+	updated, err := pc.Repo.UpdateIfStatusNotInWithOutbox(context.Background(), payment.OrderID, terminalStatusList(), updates, outboxEvents)
 	if err != nil {
 		pc.Logger.Error("Failed to update payment status",
 			zap.String("payment_id", payment.Payment_ID.String()),
@@ -221,38 +268,6 @@ func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, statu
 			zap.String("payment_id", payment.Payment_ID.String()),
 		)
 		return nil
-	}
-
-	pc.publishPaymentEvent(models.PaymentEvent{
-		Type:          "payment_" + status,
-		OrderID:       payment.OrderID.String(),
-		UserID:        payment.UserID.String(),
-		PaymentID:     payment.Payment_ID.String(),
-		Amount:        payment.Amount,
-		Currency:      payment.Currency,
-		Timestamp:     now.UTC(),
-		CorrelationID: payment.CorrelationID,
-	})
-
-	if status == "failed" {
-		email := pi.ReceiptEmail
-		notificationEvent := events.NewPaymentFailedEvent(
-			payment.UserID.String(),
-			email,
-			"",
-			"",
-			payment.OrderID.String(),
-			float64(payment.Amount),
-		)
-		notificationEvent.CorrelationID = payment.CorrelationID
-		payload, err := json.Marshal(notificationEvent)
-		if err != nil {
-			pc.Logger.Warn("Failed to marshal payment_failed notification event", zap.Error(err))
-			return nil
-		}
-		if err := pc.SNS.Publish(context.Background(), pc.NotificationTopicArn, payload); err != nil {
-			pc.Logger.Warn("Failed to publish payment_failed notification event", zap.Error(err))
-		}
 	}
 	return nil
 }

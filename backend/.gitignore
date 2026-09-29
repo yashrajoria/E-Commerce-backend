@@ -89,4 +89,8 @@ tmp-*/
 *.swx
 *.bak
 *.md
+!README.md
+!SHOPSWIFT_PROGRESS.md
+!docs/**/*.md
+!docs/*.md
 *.mmd

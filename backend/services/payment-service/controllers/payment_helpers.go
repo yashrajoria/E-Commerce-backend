@@ -74,21 +74,23 @@ func (pc *PaymentController) setStripePaymentID(orderID uuid.UUID, stripeID stri
 	})
 }
 
-// publishPaymentEvent marshals a PaymentEvent and publishes it to SNS.
-func (pc *PaymentController) publishPaymentEvent(event models.PaymentEvent) {
-	payload, _ := json.Marshal(event)
-	if err := pc.SNS.Publish(context.Background(), pc.TopicArn, payload); err != nil {
-		pc.Logger.Error("Failed to publish payment event to SNS",
-			zap.String("event_type", event.Type),
-			zap.String("order_id", event.OrderID),
-			zap.String("correlation_id", event.CorrelationID),
-			zap.Error(err),
-		)
-		return
+// paymentOutboxEvent builds an outbox row for a PaymentEvent, to be inserted in the same DB
+// transaction as the status update that produced it — see UpdateIfStatusNotInWithOutbox. This
+// replaces a prior direct, non-transactional SNS.Publish call (a dual-write: if the publish
+// failed after the DB commit, order-service would never learn the payment outcome).
+func (pc *PaymentController) paymentOutboxEvent(orderID uuid.UUID, event models.PaymentEvent) (models.OutboxEvent, error) {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return models.OutboxEvent{}, err
 	}
-	pc.Logger.Info("Payment event published to SNS",
-		zap.String("event_type", event.Type),
-		zap.String("order_id", event.OrderID),
-		zap.String("correlation_id", event.CorrelationID),
-	)
+	return models.OutboxEvent{
+		AggregateType:   "payment",
+		AggregateID:     orderID,
+		EventType:       event.Type,
+		DestinationType: models.OutboxDestinationSNS,
+		Destination:     pc.TopicArn,
+		Payload:         payload,
+		Status:          models.OutboxStatusPending,
+		AvailableAt:     time.Now().UTC(),
+	}, nil
 }

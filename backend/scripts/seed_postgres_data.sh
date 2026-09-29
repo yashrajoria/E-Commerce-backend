@@ -13,7 +13,7 @@ COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.localstack.yml)
 POSTGRES_DB="${POSTGRES_DB:-ecommerce}"
 POSTGRES_USER="${POSTGRES_USER:-postgres}"
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
-DEMO_PASSWORD_HASH='$2y$10$lRXXtlaZwRyVaWaNhGphOuZYVqF2/CV5gwhCSoA9L/RxFQIg/ZybW'
+DEMO_PASSWORD_HASH='$2a$10$.y7nJxrJv1pmQELdYvPv9uOwgHwTD6GjVFaKDYRawkB58JE5oxPMe'
 DEMO_EMAILS=(
   "alice.johnson@shopswift-demo.test"
   "ben.carter@shopswift-demo.test"
@@ -198,7 +198,7 @@ seed_sql() {
 DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE 'DEMO-%');
 DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE 'DEMO-%');
 DELETE FROM stripe_processed_events WHERE event_id LIKE 'evt_demo_%';
-DELETE FROM notification_logs WHERE payload->>'seed' = 'demo';
+DELETE FROM notification_logs WHERE recipient LIKE '%@shopswift-demo.test';
 DELETE FROM orders WHERE order_number LIKE 'DEMO-%';
 DELETE FROM addresses WHERE user_id IN (SELECT id FROM users WHERE email LIKE '%@shopswift-demo.test');
 DELETE FROM shipments WHERE tracking_code LIKE 'DEMO-%';
@@ -226,10 +226,12 @@ INSERT INTO addresses (id, user_id, type, street, city, state, postal_code, coun
 ON CONFLICT (id) DO NOTHING;
 
 -- Coupons
-INSERT INTO coupons (id, code, discount_type, discount_value, min_order_value, usage_limit, used_count, expires_at, active, created_at, updated_at) VALUES
+-- Real schema uses type/value column names (not discount_type/discount_value);
+-- usage_limit is NOT NULL so unlimited is represented as 0.
+INSERT INTO coupons (id, code, type, value, min_order_value, usage_limit, used_count, expires_at, active, created_at, updated_at) VALUES
   ('33333333-3333-4333-8333-333333333301', 'WELCOME10', 'percentage', 10, 20, 500, 42, now() + interval '60 days', true, now() - interval '90 days', now()),
   ('33333333-3333-4333-8333-333333333302', 'SUMMER25',  'percentage', 25, 100, 200, 118, now() + interval '10 days', true, now() - interval '45 days', now()),
-  ('33333333-3333-4333-8333-333333333303', 'FREESHIP',  'fixed', 8, 0, NULL, 300, now() + interval '30 days', true, now() - interval '30 days', now()),
+  ('33333333-3333-4333-8333-333333333303', 'FREESHIP',  'fixed', 8, 0, 0, 300, now() + interval '30 days', true, now() - interval '30 days', now()),
   ('33333333-3333-4333-8333-333333333304', 'VIP15',     'percentage', 15, 50, 50, 12, now() + interval '20 days', true, now() - interval '15 days', now()),
   ('33333333-3333-4333-8333-333333333305', 'EXPIRED5',  'fixed', 5, 0, 100, 100, now() - interval '5 days', false, now() - interval '120 days', now() - interval '5 days')
 ON CONFLICT (id) DO NOTHING;
@@ -280,13 +282,12 @@ INSERT INTO shipments (id, order_id, tracking_code, status, created_at, updated_
   ('77777777-7777-4777-8777-777777777703', '44444444-4444-4444-8444-444444444403', 'DEMO-TRK-1003', 'in_transit', now() - interval '9 days', now() - interval '8 days')
 ON CONFLICT (id) DO NOTHING;
 
--- Notification logs
-INSERT INTO notification_logs (id, user_id, channel, template, status, payload, created_at, updated_at) VALUES
-  ('88888888-8888-4888-8888-888888888801', '11111111-1111-4111-8111-111111111101', 'email', 'order_confirmation', 'sent', '{"seed":"demo","order_id":"44444444-4444-4444-8444-444444444401"}', now() - interval '40 days', now() - interval '40 days'),
-  ('88888888-8888-4888-8888-888888888802', '11111111-1111-4111-8111-111111111102', 'email', 'order_confirmation', 'sent', '{"seed":"demo","order_id":"44444444-4444-4444-8444-444444444402"}', now() - interval '25 days', now() - interval '25 days'),
-  ('88888888-8888-4888-8888-888888888803', '11111111-1111-4111-8111-111111111103', 'email', 'order_shipped',      'sent', '{"seed":"demo","order_id":"44444444-4444-4444-8444-444444444403"}', now() - interval '9 days', now() - interval '9 days'),
-  ('88888888-8888-4888-8888-888888888804', '11111111-1111-4111-8111-111111111105', 'email', 'payment_failed',     'failed','{"seed":"demo","order_id":"44444444-4444-4444-8444-444444444405"}', now() - interval '14 days', now() - interval '14 days')
-ON CONFLICT (id) DO NOTHING;
+-- Notification logs (real schema: bigint id, no payload/template/updated_at columns)
+INSERT INTO notification_logs (user_id, recipient, type, channel, status, created_at) VALUES
+  ('11111111-1111-4111-8111-111111111101', 'alice.johnson@shopswift-demo.test', 'order_confirmation', 'email', 'sent', now() - interval '40 days'),
+  ('11111111-1111-4111-8111-111111111102', 'ben.carter@shopswift-demo.test', 'order_confirmation', 'email', 'sent', now() - interval '25 days'),
+  ('11111111-1111-4111-8111-111111111103', 'chloe.nguyen@shopswift-demo.test', 'order_shipped', 'email', 'sent', now() - interval '9 days'),
+  ('11111111-1111-4111-8111-111111111105', 'elena.ruiz@shopswift-demo.test', 'payment_failed', 'email', 'failed', now() - interval '14 days');
 SQL
 }
 
@@ -349,7 +350,7 @@ print_summary() {
     UNION ALL SELECT 'stripe_processed_events', count(*) FROM stripe_processed_events WHERE event_id LIKE 'evt_demo_%'
     UNION ALL SELECT 'coupons', count(*) FROM coupons WHERE code IN ('WELCOME10','SUMMER25','FREESHIP','VIP15','EXPIRED5')
     UNION ALL SELECT 'shipments', count(*) FROM shipments WHERE tracking_code LIKE 'DEMO-%'
-    UNION ALL SELECT 'notification_logs', count(*) FROM notification_logs WHERE payload->>'seed' = 'demo'
+    UNION ALL SELECT 'notification_logs', count(*) FROM notification_logs WHERE recipient LIKE '%@shopswift-demo.test'
     UNION ALL SELECT 'refresh_tokens', count(*) FROM refresh_tokens WHERE user_id IN (SELECT id FROM users WHERE email LIKE '%@shopswift-demo.test');
   "
   echo "Demo login: any *@shopswift-demo.test address, password Demo123! (merchant.owner@shopswift-demo.test is role=admin)."

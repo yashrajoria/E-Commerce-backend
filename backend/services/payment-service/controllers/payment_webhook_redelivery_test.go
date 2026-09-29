@@ -17,8 +17,9 @@ import (
 // mockPaymentRepo mimics the Postgres row semantics that matter for this test:
 // UpdateIfStatusNotIn only succeeds for one caller once the status becomes terminal.
 type mockPaymentRepo struct {
-	mu      sync.Mutex
-	payment models.Payment
+	mu           sync.Mutex
+	payment      models.Payment
+	outboxEvents []models.OutboxEvent
 }
 
 func (m *mockPaymentRepo) CreatePayment(context.Context, *models.Payment) error { return nil }
@@ -63,6 +64,16 @@ func (m *mockPaymentRepo) UpdateIfStatusNotIn(_ context.Context, _ uuid.UUID, ex
 		m.payment.Status = status
 	}
 	return true, nil
+}
+
+func (m *mockPaymentRepo) UpdateIfStatusNotInWithOutbox(ctx context.Context, orderID uuid.UUID, exclude []string, updates map[string]interface{}, events []models.OutboxEvent) (bool, error) {
+	updated, err := m.UpdateIfStatusNotIn(ctx, orderID, exclude, updates)
+	if updated && err == nil {
+		m.mu.Lock()
+		m.outboxEvents = append(m.outboxEvents, events...)
+		m.mu.Unlock()
+	}
+	return updated, err
 }
 
 func (m *mockPaymentRepo) MarkStripeEventProcessed(context.Context, string, string) (bool, error) {
@@ -139,14 +150,14 @@ func TestStripeWebhook_ConcurrentRedelivery(t *testing.T) {
 			t.Fatalf("delivery %d returned error: %v", i, err)
 		}
 	}
-	if got := atomic.LoadInt32(&sns.calls); got != 1 {
-		t.Fatalf("expected exactly 1 payment_succeeded publish for duplicate webhook delivery, got %d", got)
+	if got := len(repo.outboxEvents); got != 1 {
+		t.Fatalf("expected exactly 1 payment_succeeded outbox event for duplicate webhook delivery, got %d", got)
 	}
 	if repo.payment.Status != "succeeded" {
 		t.Fatalf("expected payment status succeeded, got %q", repo.payment.Status)
 	}
 	var published models.PaymentEvent
-	if err := json.Unmarshal(sns.last, &published); err != nil {
+	if err := json.Unmarshal(repo.outboxEvents[0].Payload, &published); err != nil {
 		t.Fatal(err)
 	}
 	if published.CorrelationID != "corr-webhook" {

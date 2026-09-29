@@ -17,7 +17,9 @@ import (
 	"go.uber.org/zap"
 )
 
-var validIdempotencyKey = regexp.MustCompile(`^[a-zA-Z0-9_\-]{1,128}$`)
+// Cart-service scopes checkout idempotency keys as "<userID>:<hex-hash>" (UUID + ':' + hex),
+// so ':' must be permitted alongside the SQS-message-safe charset.
+var validIdempotencyKey = regexp.MustCompile(`^[a-zA-Z0-9_:\-]{1,128}$`)
 
 type PaymentRequestConsumer struct {
 	sqsConsumer          *aws_pkg.SQSConsumer

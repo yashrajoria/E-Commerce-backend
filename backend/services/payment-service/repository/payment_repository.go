@@ -20,6 +20,10 @@ type PaymentRepository interface {
 	// atomically at the SQL level. Returns false (no error) if another writer already claimed
 	// the terminal transition — callers must skip side effects (e.g. event publish) in that case.
 	UpdateIfStatusNotIn(ctx context.Context, orderID uuid.UUID, excludeStatuses []string, updates map[string]interface{}) (updated bool, err error)
+	// UpdateIfStatusNotInWithOutbox does the same atomic conditional update, and — only when it
+	// wins the transition — inserts the given outbox events in the same DB transaction, so a
+	// status change and its downstream event(s) can never diverge (dual-write).
+	UpdateIfStatusNotInWithOutbox(ctx context.Context, orderID uuid.UUID, excludeStatuses []string, updates map[string]interface{}, events []models.OutboxEvent) (updated bool, err error)
 	// MarkStripeEventProcessed inserts event_id; returns false if already processed.
 	MarkStripeEventProcessed(ctx context.Context, eventID, eventType string) (inserted bool, err error)
 }
@@ -97,6 +101,29 @@ func (r *gormPaymentRepo) UpdateIfStatusNotIn(ctx context.Context, orderID uuid.
 		return false, tx.Error
 	}
 	return tx.RowsAffected > 0, nil
+}
+
+func (r *gormPaymentRepo) UpdateIfStatusNotInWithOutbox(ctx context.Context, orderID uuid.UUID, excludeStatuses []string, updates map[string]interface{}, events []models.OutboxEvent) (bool, error) {
+	var updated bool
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&models.Payment{}).
+			Where("order_id = ? AND status NOT IN ?", orderID, excludeStatuses).
+			Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		updated = result.RowsAffected > 0
+		if !updated {
+			return nil
+		}
+		for i := range events {
+			if err := tx.Create(&events[i]).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return updated, err
 }
 
 func (r *gormPaymentRepo) MarkStripeEventProcessed(ctx context.Context, eventID, eventType string) (bool, error) {

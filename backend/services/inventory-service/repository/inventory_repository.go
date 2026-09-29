@@ -177,14 +177,13 @@ func (r *DynamoInventoryRepository) ReserveAll(ctx context.Context, orderID stri
 		qtyAV, _ := attributevalue.Marshal(item.Quantity)
 		nowAV, _ := attributevalue.Marshal(now)
 
-		// Ensure order_reservations map exists (DynamoDB nested SET requires parent map),
-		// then atomically decrement available and record per-order reservation.
+		// order_reservations is always created as an empty map at inventory-record creation
+		// (see inventory_service.go), so the nested SET below never needs a parent-map
+		// fallback — combining `#order_resv = if_not_exists(...)` with `#order_resv.#orderID = ...`
+		// in the same expression sets two overlapping document paths, which DynamoDB rejects.
 		expr := "SET #avail = #avail - :qty, #resv = #resv + :qty, " +
-			"#order_resv = if_not_exists(#order_resv, :empty), " +
 			"#order_resv.#orderID = :qty, updated_at = :now"
 		cond := "#avail >= :qty AND attribute_not_exists(#order_resv.#orderID)"
-
-		emptyMap, _ := attributevalue.Marshal(map[string]int{})
 
 		transactItems = append(transactItems, types.TransactWriteItem{
 			Update: &types.Update{
@@ -199,9 +198,8 @@ func (r *DynamoInventoryRepository) ReserveAll(ctx context.Context, orderID stri
 					"#orderID":    orderID,
 				},
 				ExpressionAttributeValues: map[string]types.AttributeValue{
-					":qty":   qtyAV,
-					":now":   nowAV,
-					":empty": emptyMap,
+					":qty": qtyAV,
+					":now": nowAV,
 				},
 			},
 		})

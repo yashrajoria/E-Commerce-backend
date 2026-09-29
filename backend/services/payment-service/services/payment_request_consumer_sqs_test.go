@@ -35,6 +35,9 @@ func (duplicatePaymentRepo) Update(context.Context, uuid.UUID, map[string]interf
 func (duplicatePaymentRepo) UpdateIfStatusNotIn(context.Context, uuid.UUID, []string, map[string]interface{}) (bool, error) {
 	return false, nil
 }
+func (duplicatePaymentRepo) UpdateIfStatusNotInWithOutbox(context.Context, uuid.UUID, []string, map[string]interface{}, []models.OutboxEvent) (bool, error) {
+	return false, nil
+}
 func (duplicatePaymentRepo) MarkStripeEventProcessed(context.Context, string, string) (bool, error) {
 	return false, nil
 }

@@ -18,6 +18,7 @@ import (
 	"payment-service/services"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	commondb "github.com/yashrajoria/common/db"
 	commonmw "github.com/yashrajoria/common/middleware"
@@ -54,6 +55,7 @@ func main() {
 	}
 	defer logger.Sync()
 	paymentRepo := repository.NewGormPaymentRepo(database.DB)
+	outboxRepo := repository.NewGormOutboxRepository(database.DB)
 
 	// AWS setup
 	awsCfg, err := aws_pkg.LoadAWSConfig(context.Background())
@@ -99,6 +101,10 @@ func main() {
 
 	// Start consuming payment requests in the background
 	go paymentRequestConsumer.Start(shutdownCtx)
+
+	outboxPublisher := services.NewOutboxPublisher(outboxRepo, snsPublisher, "payment-service-"+uuid.NewString())
+	go outboxPublisher.Run(shutdownCtx)
+	logger.Info("Started payment outbox publisher")
 
 	// --- CloudWatch (Logs + Metrics) ---
 	cwLogsClient, err := aws_pkg.NewCloudWatchLogsClient(context.Background(), "payment-service")
