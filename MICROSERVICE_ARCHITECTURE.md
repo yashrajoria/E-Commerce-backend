@@ -9,14 +9,14 @@ Comprehensive architecture specification for the **ShopSwift** e-commerce backen
 ShopSwift is an enterprise-grade e-commerce microservices platform built primarily with **Go 1.25** (multi-module workspace) and a **Python (FastAPI)** AI Agent service. The system is designed around an event-driven architecture using AWS services (S3, DynamoDB, SNS, SQS) fully emulated locally via **LocalStack**, alongside **PostgreSQL** for relational transactions and **Redis** for state caching, rate limiting, and distributed locking.
 
 ### Key Architectural Principles
-- **API Gateway + BFF Pattern**: Gateway handles edge routing, rate limiting, correlation IDs, and JWT validation. The BFF (Backend-For-Frontend) handles domain aggregation and async checkout orchestration.
-- **Polyglot Persistence**: 
+- **API Gateway edge**: Gateway handles edge routing, rate limiting, correlation IDs, and JWT validation. Storefront clients call domain routes directly; `/bff/admin/*` is retained as the admin/analytics path contract.
+- **Polyglot Persistence**:
   - **PostgreSQL**: Transactional entities (Users, Orders, Payments, Coupons, Notifications).
   - **DynamoDB**: High-throughput catalog, category adjacency graphs, and inventory stock.
-  - **Redis**: Cart state, product catalog caching, gateway rate limits, and checkout locks.
+  - **Redis**: Cart state + checkout idempotency replay, product catalog caching, bulk-import queue, gateway rate limits.
   - **AWS S3**: Product media assets.
 - **Asynchronous Event-Driven Processing**: Orders, payments, and notifications are processed asynchronously via SNS topics and SQS queues with built-in Dead Letter Queues (DLQs).
-- **Strict Idempotency & Safety**: Multi-tier idempotency guarantees across API calls (Client SetNX lock), SQS message processing (`idempotency_key` columns), inventory updates (`ClientRequestToken`), and Stripe webhooks (`stripe_processed_events`).
+- **Strict Idempotency & Safety**: Multi-tier idempotency guarantees across API calls (user-scoped idempotency keys with cached replay), SQS message processing (`idempotency_key` columns), inventory updates (`ClientRequestToken`), and Stripe webhooks (`stripe_processed_events`).
 
 ---
 
@@ -33,20 +33,10 @@ flowchart TB
     GW["API Gateway (:8080)<br/>Go / Gin + Redis"]
   end
 
-  subgraph AggregationLayer ["Aggregation Layer"]
-    BFF["BFF Service (:8088)<br/>Go / Gin"]
-  end
-
   subgraph CoreServices ["Core Domain Microservices"]
-    AUTH["Auth Service (:8081)"]
-    USER["User Service (:8085)"]
-    PROD["Product Service (:8082)"]
-    CART["Cart Service (:8086)"]
-    ORDER["Order Service (:8083)"]
-    PAYMENT["Payment Service (:8087)"]
-    INVENT["Inventory Service (:8084)"]
-    PROMO["Promotion Service (:8090)"]
-    SHIP["Shipping Service (:8091)"]
+    IDENT["Identity Service (:8081)"]
+    CATALOG["Catalog Service (:8082)<br/>catalog + inventory + cart"]
+    ORDER["Order Service (:8083)<br/>orders + coupons + shipping + payments"]
     NOTIF["Notification Service (:8092)"]
     AGENT["Agent Service (:8089)<br/>Python FastAPI"]
   end
@@ -65,49 +55,34 @@ flowchart TB
 
   %% HTTP Flows
   Web -->|HTTP / Cookies| GW
-  GW -->|Proxy /bff| BFF
-  GW -->|Proxy /auth| AUTH
-  GW -->|Proxy /users| USER
-  GW -->|Proxy /products| PROD
-  GW -->|Proxy /cart| CART
-  GW -->|Proxy /orders| ORDER
-  GW -->|Proxy /payments| PAYMENT
-  GW -->|Proxy /inventory| INVENT
-  GW -->|Proxy /promotions| PROMO
-  GW -->|Proxy /shipping| SHIP
+  GW -->|Proxy /auth, /users| IDENT
+  GW -->|Proxy /products, /categories, /cart, /inventory| CATALOG
+  GW -->|Proxy /orders, /coupons, /shipping, /payment| ORDER
   GW -->|Proxy /notifications| NOTIF
   GW -->|Proxy /agent| AGENT
 
-  BFF -->|Checkout Lock SetNX| REDIS
-  BFF -->|HTTP Aggregation| GW
-  AGENT -->|Direct Call| BFF
+  AGENT -->|Via gateway| GW
   StripeExt -->|Webhook /stripe/webhook| GW
 
   %% Data Store Connections
-  AUTH --> PG
-  USER --> PG
+  IDENT --> PG
   ORDER --> PG
-  PAYMENT --> PG
-  PROMO --> PG
   NOTIF --> PG
 
-  PROD --> DDB
-  PROD --> S3
-  PROD --> REDIS
-  INVENT --> DDB
-  CART --> REDIS
+  CATALOG --> DDB
+  CATALOG --> S3
+  CATALOG --> REDIS
   GW --> REDIS
 
   %% Async Event Connections
-  CART -->|Publish order-events| SNS
+  CATALOG -->|Publish order-events| SNS
   ORDER -->|Publish payment-request| SQS
-  PAYMENT -->|Publish payment-events| SNS
-  StripeExt <-->|API / Webhook| PAYMENT
+  ORDER -->|Publish payment-events| SNS
+  StripeExt <-->|API / Webhook| ORDER
   SNS --> SQS
   SQS -->|Consume| ORDER
-  SQS -->|Consume| PAYMENT
   SQS -->|Consume| NOTIF
-  ORDER -->|Reserve Stock| INVENT
+  ORDER -->|Reserve Stock| CATALOG
 ```
 
 ---
@@ -117,17 +92,10 @@ flowchart TB
 | Service | Port | Technology | Primary Data Store | Responsibility Summary |
 |:---|:---:|:---|:---|:---|
 | **api-gateway** | `8080` | Go / Gin | Redis | Edge router, JWT validation, rate limiting, `X-Request-ID` correlation, client header sanitization. |
-| **auth-service** | `8081` | Go / Gin | Postgres (`users`, `refresh_tokens`) | Identity authentication, token refresh, password hashing, admin bootstrapping. |
-| **product-service** | `8082` | Go / Gin | DynamoDB + Redis + AWS S3 | Catalog items, categories, category-product adjacency graph, S3 image uploads, cache versioning. |
-| **order-service** | `8083` | Go / Gin | Postgres (`orders`, `order_items`) + SQS | Order state machine, stock reservation integration, payment request dispatch. |
-| **inventory-service** | `8084` | Go / Gin | DynamoDB (`Inventory`) | Real-time stock levels, idempotent reservations (`ClientRequestToken`), stock confirmations. |
-| **user-service** | `8085` | Go / Gin | Postgres (`users`, `addresses`) | Customer profiles, address book management. |
-| **cart-service** | `8086` | Go / Gin | Redis | Real-time user shopping cart storage, cart checkout event publishing. |
-| **payment-service** | `8087` | Go / Gin | Postgres (`payments`, `stripe_processed_events`) | Stripe Checkout session creation, webhook processing, payment event publishing. |
-| **bff-service** | `8088` | Go / Gin | Redis | Storefront aggregation (home, profile, checkout), checkout idempotency (`SetNX`), status polling. |
-| **agent-service** | `8089` | Python / FastAPI | Stateless | AI-powered conversational backend assistant interacting with the BFF. |
-| **promotion-service**| `8090` | Go / Gin | Postgres (`coupons`) | Coupon rules, atomic coupon usage limit checks and discounts. |
-| **shipping-service** | `8091` | Go / Gin | In-Memory / Static JSON | Zone-based shipping rate calculations and delivery estimations. |
+| **identity-service** | `8081` | Go / Gin | Postgres (`users`, `refresh_tokens`, `addresses`) | Identity authentication, token refresh, password hashing, admin bootstrapping, profiles, addresses. |
+| **catalog-service** | `8082` | Go / Gin | DynamoDB + Redis + AWS S3 | Catalog items, categories, adjacency graph, S3 image uploads, cache versioning, stock levels + idempotent reservations, Redis cart + SNS checkout. |
+| **order-service** | `8083` | Go / Gin | Postgres (`orders`, `order_items`, `coupons`, `payments`, `stripe_processed_events`) + SQS + Stripe | Order state machine, stock reservation integration, coupons, zone shipping rates, Stripe Checkout + webhooks. |
+| **agent-service** | `8089` | Python / FastAPI | Stateless | AI-powered conversational backend assistant calling domain + admin analytics paths via the gateway. |
 | **notification-service**| `8092` | Go / Gin | Postgres (`notification_logs`) + SQS | Async notification consumer (`notification-queue`), transactional emails. |
 
 ---
@@ -139,14 +107,14 @@ Single shared Postgres database instance with clear per-service table ownership 
 
 ```
 ecommerce/
- ├── users                   [Owned by auth-service (auth credentials) & user-service (profile)]
- ├── refresh_tokens          [Owned by auth-service]
- ├── addresses               [Owned by user-service]
+ ├── users                   [Owned by identity-service]
+ ├── refresh_tokens          [Owned by identity-service]
+ ├── addresses               [Owned by identity-service]
  ├── orders                  [Owned by order-service]
  ├── order_items             [Owned by order-service]
- ├── payments                [Owned by payment-service]
- ├── stripe_processed_events [Owned by payment-service (webhook deduplication)]
- ├── coupons                 [Owned by promotion-service]
+ ├── payments                [Owned by order-service]
+ ├── stripe_processed_events [Owned by order-service (webhook deduplication)]
+ ├── coupons                 [Owned by order-service]
  └── notification_logs       [Owned by notification-service]
 ```
 
@@ -154,17 +122,18 @@ ecommerce/
 
 | Table Name | Environment Key | Partition Key (PK) | Sort Key (SK) / GSIs | Managing Service |
 |:---|:---|:---|:---|:---|
-| **Products** | `DDB_TABLE_PRODUCTS` | `id` (String) | GSIs: `sku-index` (`sku`), `featured-index` (`is_featured`, `created_at`) | `product-service` |
-| **Categories** | `DDB_TABLE_CATEGORIES` | `id` (String) | GSI: `name-index` (`name`) | `product-service` |
-| **ProductCategories** | `DDB_TABLE_PRODUCT_CATEGORIES` | `category_id` | `product_id` (GSI: `product-index` on `product_id`) | `product-service` |
-| **Inventory** | `DDB_TABLE_INVENTORY` | `product_id` | — | `inventory-service` |
+| **Products** | `DDB_TABLE_PRODUCTS` | `id` (String) | GSIs: `sku-index` (`sku`), `featured-index` (`is_featured`, `created_at`) | `catalog-service` |
+| **Categories** | `DDB_TABLE_CATEGORIES` | `id` (String) | GSI: `name-index` (`name`) | `catalog-service` |
+| **ProductCategories** | `DDB_TABLE_PRODUCT_CATEGORIES` | `category_id` | `product_id` (GSI: `product-index` on `product_id`) | `catalog-service` |
+| **Inventory** | `DDB_TABLE_INVENTORY` | `product_id` | — | `catalog-service` |
 
 ### 4.3 Redis Data Structure Usage
 
-- **Cart (`cart-service`)**: Key `cart:{user_id}` storing JSON cart items.
-- **Checkout Idempotency (`bff-service`)**: Key `checkout:lock:{idempotency_key}` using `SetNX` with TTL for atomic request locking and result caching.
+- **Cart (`catalog-service`)**: Key `cart:user:{user_id}` storing JSON cart items.
+- **Checkout Idempotency (`catalog-service`)**: Key `idem:cart:{user_id}:{hash}` caching `order_id` for retried checkouts.
 - **Gateway Rate Limiting (`api-gateway`)**: Key `ratelimit:{ip/user_id}` managing window counters.
-- **Product Caching (`product-service`)**: Product catalog queries cached with version-invalidation tags.
+- **Product Caching (`catalog-service`)**: Product catalog queries cached with version-invalidation tags.
+- **Bulk Import (`catalog-service`)**: `bulk_import:queue` list + `bulk_import:job:{id}` hashes.
 
 ---
 
@@ -198,40 +167,29 @@ sequenceDiagram
   autonumber
   actor Client as Client / Storefront
   participant GW as API Gateway
-  participant BFF as BFF Service
   participant Redis as Redis
-  participant Cart as Cart Service
+  participant Catalog as Catalog Service
   participant SNS as SNS (order-events)
   participant SQS_Order as SQS (order-processing-queue)
   participant Order as Order Service
-  participant Invent as Inventory Service
   participant SQS_Pay as SQS (payment-request-queue)
-  participant Payment as Payment Service
   participant Stripe as Stripe API
 
-  Client->>GW: POST /bff/checkout (Header: Idempotency-Key)
-  GW->>BFF: Forward Request + X-User-ID
-  BFF->>Redis: SETNX checkout:lock:{key} "PENDING" TTL=60s
-  alt Lock Acquired
-    BFF->>Cart: POST /cart/checkout
-    Cart->>SNS: Publish checkout.requested
-    Cart-->>BFF: Return temporary order_id
-    SNS->>SQS_Order: Route message
-    SQS_Order->>Order: Consume checkout.requested
-    Order->>Invent: Reserve Stock (ClientRequestToken)
-    Order->>Order: Create Order (Status: PENDING)
-    Order->>SQS_Pay: Enqueue payment request
-    SQS_Pay->>Payment: Consume payment request
-    Payment->>Stripe: Create Checkout Session
-    Payment-->>Redis: Cache checkout_url for order_id
-    BFF->>Payment: Poll GET /payments/order/{order_id}
-    Payment-->>BFF: Return checkout_url
-    BFF->>Redis: Update checkout:lock:{key} "SUCCESS"
-    BFF-->>Client: 200 OK (checkout_url)
-  else Duplicate Request
-    BFF->>Redis: GET checkout:lock:{key}
-    BFF-->>Client: Return cached status / result
-  end
+  Client->>GW: POST /cart/checkout (Header: Idempotency-Key)
+  GW->>Catalog: Forward Request + X-User-ID
+  Catalog->>Catalog: Validate products in-process
+  Catalog->>SNS: Publish checkout.requested
+  Catalog->>Redis: Store order_id on idempotency key
+  Catalog-->>Client: 200 OK (order_id PENDING)
+  SNS->>SQS_Order: Route message
+  SQS_Order->>Order: Consume checkout.requested
+  Order->>Catalog: Reserve Stock (ClientRequestToken)
+  Order->>Order: Create Order (Status: pending_payment)
+  Order->>SQS_Pay: Enqueue payment request
+  SQS_Pay->>Order: Consume payment request (in-process)
+  Order->>Stripe: Create Checkout Session
+  Client->>GW: GET /payment/status/by-order/{order_id} (poll)
+  GW->>Order: Forward, returns checkout_url when ready
 ```
 
 ### 6.2 Payment Confirmation & Fulfillment Flow
@@ -241,23 +199,22 @@ sequenceDiagram
   autonumber
   actor Stripe as Stripe Webhook
   participant GW as API Gateway
-  participant Payment as Payment Service
+  participant Order as Order Service
   participant PG as Postgres
   participant SNS as SNS (payment-events)
   participant SQS_Order as SQS (payment-events-queue)
-  participant Order as Order Service
   participant SQS_Notif as SQS (notification-queue)
   participant Notif as Notification Service
 
   Stripe->>GW: POST /stripe/webhook
-  GW->>Payment: Forward Webhook Payload
-  Payment->>PG: UPDATE payments SET status='succeeded' WHERE order_id=? AND status NOT IN (terminal)
+  GW->>Order: Forward Webhook Payload
+  Order->>PG: UPDATE payments SET status='succeeded' WHERE order_id=? AND status NOT IN (terminal)
   alt 0 rows updated (already terminal — duplicate/concurrent delivery)
-    Payment-->>Stripe: 200 OK (Ignored duplicate, no publish)
+    Order-->>Stripe: 200 OK (Ignored duplicate, no publish)
   else 1 row updated (this delivery won the transition)
-    Payment->>SNS: Publish payment.succeeded
-    Payment->>PG: Insert event.id into stripe_processed_events (audit only, post-fulfillment)
-    Payment-->>Stripe: 200 OK ACK
+    Order->>SNS: Publish payment.succeeded
+    Order->>PG: Insert event.id into stripe_processed_events (audit only, post-fulfillment)
+    Order-->>Stripe: 200 OK ACK
     
     par Order Fulfillment
       SNS->>SQS_Order: Route payment.succeeded
@@ -272,22 +229,22 @@ sequenceDiagram
   end
 ```
 
-The dedup guard is the conditional `UPDATE` (`status NOT IN (terminal)`), not the `stripe_processed_events` lookup — that table is written only after fulfillment for audit/traceability and is never queried before processing. Two concurrent deliveries of the same event race on the same conditional `UPDATE`; only the winner publishes. See `payment-service/repository/payment_repository.go` (`UpdateIfStatusNotIn`) and the regression test `payment-service/controllers/payment_webhook_redelivery_test.go`.
+The dedup guard is the conditional `UPDATE` (`status NOT IN (terminal)`), not the `stripe_processed_events` lookup — that table is written only after fulfillment for audit/traceability and is never queried before processing. Two concurrent deliveries of the same event race on the same conditional `UPDATE`; only the winner publishes. See `services/order-service/payment/repository/payment_repository.go` (`UpdateIfStatusNotIn`) and the regression test `services/order-service/payment/controllers/payment_webhook_redelivery_test.go`.
 
 ---
 
 ## 7. Security, Authorization & Idempotency
 
 ### 7.1 Security & Auth Model
-- **Authentication**: `auth-service` issues JWT access tokens and HTTP-only refresh tokens.
+- **Authentication**: `identity-service` issues JWT access tokens and HTTP-only refresh tokens.
 - **Gateway Injection**: `api-gateway` strips any client-provided identity headers (`X-User-ID`, `X-User-Role`), validates the JWT, and injects validated identity context headers into internal requests.
 - **Role-Based Access Control (RBAC)**: Routes marked with admin privileges require `X-User-Role: admin`. Domain services re-verify roles for sensitive operations (e.g., product creation, admin user creation).
 
 ### 7.2 Idempotency Architecture
-1. **API Level**: Client sends `Idempotency-Key` header to `/bff/checkout`. BFF uses Redis `SetNX` to lock concurrent requests.
+1. **API Level**: Client sends `Idempotency-Key` header to `POST /cart/checkout`. Catalog hashes it user-scoped (`idem:cart:*`) and replays the cached `order_id` on retry.
 2. **Order Creation**: Order Service verifies unique `idempotency_key` constraint on PostgreSQL `orders` table.
-3. **Inventory Management**: Inventory Service utilizes DynamoDB conditional updates with `ClientRequestToken` for idempotent stock reservation and release.
-4. **Stripe Webhooks**: Payment Service guards the terminal status transition with an atomic conditional `UPDATE ... WHERE status NOT IN (terminal)`, so a redelivered event that loses the race is a no-op and never re-publishes. `stripe_processed_events` records the event ID for audit/traceability after fulfillment; it is not the dedup mechanism.
+3. **Inventory Management**: Catalog utilizes DynamoDB conditional updates with `ClientRequestToken` for idempotent stock reservation and release.
+4. **Stripe Webhooks**: Order Service guards the terminal status transition with an atomic conditional `UPDATE ... WHERE status NOT IN (terminal)`, so a redelivered event that loses the race is a no-op and never re-publishes. `stripe_processed_events` records the event ID for audit/traceability after fulfillment; it is not the dedup mechanism.
 
 ---
 

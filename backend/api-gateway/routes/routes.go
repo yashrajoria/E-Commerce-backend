@@ -60,7 +60,6 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 
 	// ── forwardTo helper ──────────────────────────────────────────────────────
 	// URL path so it can append it correctly to TargetBase.
-	// with an empty path (""), producing 404s from bff-service.
 	forwardTo := func(targetBase string) gin.HandlerFunc {
 		return func(c *gin.Context) {
 			// SECURITY: Block public access to internal-only service endpoints.
@@ -78,30 +77,28 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	// ── service base URLs ─────────────────────────────────────────────────────
 	// Overridable per-environment via env vars; default to the Docker Compose
 	// service names/ports used in local/LocalStack deployments.
-	bffBase := getEnv("BFF_SERVICE_URL", "http://bff-service:8088")
-	productBase := getEnv("PRODUCT_SERVICE_URL", "http://product-service:8082")
-	userBase := getEnv("USER_SERVICE_URL", "http://user-service:8085")
-	cartBase := getEnv("CART_SERVICE_URL", "http://cart-service:8086")
+	// Catalog absorbed product-service (:8082), inventory-service (:8084) and
+	// cart-service (:8086): the old *_SERVICE_URL vars are kept as overrides
+	// but all default to catalog-service:8082.
+	productBase := getEnv("PRODUCT_SERVICE_URL", "http://catalog-service:8082")
+	userBase := getEnv("USER_SERVICE_URL", "http://identity-service:8081")
+	cartBase := getEnv("CART_SERVICE_URL", "http://catalog-service:8082")
 	orderBase := getEnv("ORDER_SERVICE_URL", "http://order-service:8083")
-	paymentBase := getEnv("PAYMENT_SERVICE_URL", "http://payment-service:8087")
-	inventoryBase := getEnv("INVENTORY_SERVICE_URL", "http://inventory-service:8084")
-	promotionBase := getEnv("PROMOTION_SERVICE_URL", "http://promotion-service:8090")
-	shippingBase := getEnv("SHIPPING_SERVICE_URL", "http://shipping-service:8091")
-	authBase := getEnv("AUTH_SERVICE_URL", "http://auth-service:8081")
+	inventoryBase := getEnv("INVENTORY_SERVICE_URL", "http://catalog-service:8082")
+	authBase := getEnv("AUTH_SERVICE_URL", "http://identity-service:8081")
 	notificationBase := getEnv("NOTIFICATION_SERVICE_URL", "http://notification-service:8092")
 	agentBase := getEnv("AGENT_SERVICE_URL", "http://agent-service:8000")
 
 	// ── service targets ───────────────────────────────────────────────────────
-	bff := forwardTo(bffBase + "/bff")
 	products := forwardTo(productBase + "/products")
 	categories := forwardTo(productBase + "/categories")
 	users := forwardTo(userBase + "/users")
 	cart := forwardTo(cartBase + "/cart")
 	orders := forwardTo(orderBase + "/orders")
-	payment := forwardTo(paymentBase + "/payment")
+	payment := forwardTo(orderBase + "/payment")
 	inventory := forwardTo(inventoryBase + "/inventory")
-	coupons := forwardTo(promotionBase + "/coupons")
-	shipping := forwardTo(shippingBase + "/shipping")
+	coupons := forwardTo(orderBase + "/coupons")
+	shipping := forwardTo(orderBase + "/shipping")
 	authProxy := forwardTo(authBase + "/auth")
 	notifications := forwardTo(notificationBase + "/notifications")
 	agent := forwardTo(agentBase + "/agent")
@@ -116,12 +113,8 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	// PUBLIC ROUTES — no authentication required
 	// =========================================================================
 
-	// Docs
-	public.GET("/docs", forwardTo(bffBase+"/docs"))
-	public.GET("/docs/*any", forwardTo(bffBase+"/docs"))
-
 	// Stripe webhook — Stripe calls this directly, no auth
-	public.POST("/stripe/webhook", forwardTo(paymentBase+"/stripe/webhook"))
+	public.POST("/stripe/webhook", forwardTo(orderBase+"/stripe/webhook"))
 
 	// Auth — sensitive public actions (strict rate limiting)
 	authStrict := public.Group("/auth")
@@ -149,44 +142,24 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	// Coupons — guest checkout can validate without login
 	public.POST("/coupons/validate", coupons)
 
-	// ── BFF routes ────────────────────────────────────────────────────────────
-
-	// BFF — PUBLIC (no auth required)
-	bffPublic := public.Group("/bff")
-	bffPublic.POST("/auth/register", bff)
-	bffPublic.POST("/auth/login", bff)
-	bffPublic.POST("/auth/verify-email", bff)
-	bffPublic.POST("/auth/resend-verification", bff)
-	bffPublic.POST("/auth/refresh", bff)
-	bffPublic.POST("/promotions/validate", bff)
-	bffPublic.GET("/products", bff)
-	bffPublic.GET("/products/*action", bff)
-	bffPublic.GET("/categories", bff)
-	bffPublic.GET("/categories/*action", bff)
-	bffPublic.GET("/home", bff)
-
-	// BFF — PROTECTED (JWT required)
-	bffProtected := protected.Group("/bff")
-	bffProtected.POST("/auth/logout", bff)
-	bffProtected.GET("/auth/status", bff)
-	bffProtected.GET("/cart", bff)
-	bffProtected.POST("/cart/*action", bff)
-	bffProtected.DELETE("/cart/*action", bff)
-	bffProtected.POST("/checkout", bff)
-	bffProtected.GET("/orders", bff)
-	bffProtected.GET("/orders/*action", bff)
-	bffProtected.GET("/profile", bff)
-	bffProtected.PUT("/users/profile", bff)
-	bffProtected.POST("/users/change-password", bff)
-	bffProtected.GET("/payment/*action", bff)
-	bffProtected.POST("/payment/*action", bff)
+	// ── Storefront aggregation (ex-BFF) ─────────────────────────────────────
+	// bff-service is deleted. Its storefront fan-outs (home, profile,
+	// checkout orchestration) are gone: callers use the domain routes below
+	// directly (GET /products + /categories, GET /cart, POST /cart/checkout
+	// then poll GET /payment/status/by-order/:order_id).
+	// The /bff/admin/* prefix is retained as the admin/analytics contract
+	// (agent-service + admin UI): pure proxies forward straight to the owning
+	// service, dashboard aggregation lives in order-service.
 
 	// BFF — ADMIN (JWT + Admin Role required)
 	bffAdmin := newAdminGroup(protected, "/bff/admin")
 
-	// Keep dashboard and analytics routed to BFF
-	bffAdmin.GET("/dashboard", bff)
-	bffAdmin.GET("/reports/*any", bff)
+	// Dashboard aggregation (order-service fans out in-process + mesh)
+	bffAdmin.GET("/dashboard", forwardTo(orderBase+"/orders/admin/dashboard"))
+	// Analytics reports (pure proxies to the owning service)
+	bffAdmin.GET("/reports/sales", forwardTo(orderBase+"/orders/admin/stats"))
+	bffAdmin.GET("/reports/users", users)
+	bffAdmin.GET("/reports/inventory", inventory)
 
 	// Map CRUD operations directly to microservices to avoid bff double-proxy
 	bffAdmin.GET("/products", products)
@@ -302,6 +275,6 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 
 	// Notifications — admin read
 	admin.GET("/notifications/log", notifications)
-	// Auth — admin-only user creation (forward to auth-service)
+	// Auth — admin-only user creation (forward to identity-service)
 	admin.POST("/auth/admin/users", authProxy)
 }

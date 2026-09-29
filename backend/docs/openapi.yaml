@@ -3,24 +3,17 @@ info:
   title: Ecommerce Backend API
   version: 1.0.0
   description: |
-    OpenAPI specification for the API Gateway, BFF (Backend-for-Frontend), and all backend microservices of the ecommerce platform.
+    OpenAPI specification for the API Gateway and all backend microservices of the ecommerce platform.
 
     ## Architecture Overview
     The system is composed of the following layers:
     - **API Gateway** (`:8080`) — Single ingress point. Validates JWT access tokens from the `access_token` cookie, enforces role-based access control, and proxies requests to the appropriate downstream service.
-    - **BFF Service** (`:8088`) — Aggregates data from multiple services into single, page-optimised responses for the web frontend. All BFF endpoints also flow through the Gateway.
-    - **Auth Service** (`:8081`) — Issues and validates JWT access tokens (short-lived) and refresh tokens (long-lived). Both tokens are delivered as HttpOnly cookies.
-    - **User Service** (`:8085`) — Manages user profiles and credential changes.
-    - **Product Service** (`:8082`) — Product catalogue, category tree, bulk import/export, and presigned S3 upload URLs.
-    - **Cart Service** (`:8086`) — Per-user shopping cart and checkout initiation.
-    - **Order Service** (`:8083`) — Order lifecycle management.
-    - **Payment Service** (`:8087`) — Stripe payment session creation, verification, and webhook ingestion.
-    - **Inventory Service** — Stock management, reservation, release, and confirmation as part of the order saga.
-    - **Promotion Service** (`:8090`) — Coupon and discount management.
-    - **Shipping Service** (`:8091`) — Static shipping rate lookup based on a configured JSON catalog.
+    - **Identity Service** (`:8081`) — Issues and validates JWT access tokens (short-lived) and refresh tokens (long-lived, both as HttpOnly cookies); manages user profiles and credential changes.
+    - **Catalog Service** (`:8082`) — Product catalogue, category tree, bulk import/export, presigned S3 upload URLs, stock levels and reservations, and the Redis shopping cart.
+    - **Order Service** (`:8083`) — Order lifecycle management, coupons, zone shipping rates, and Stripe payment session creation, verification, and webhook ingestion.
 
     ## Authentication
-    All protected endpoints require a valid JWT `__session` cookie issued by the Auth Service. The gateway rejects missing or expired tokens with `401 Unauthorized`. Refresh the token via `POST /auth/refresh` before it expires.
+    All protected endpoints require a valid JWT `__session` cookie issued by the Identity Service. The gateway rejects missing or expired tokens with `401 Unauthorized`. Refresh the token via `POST /auth/refresh` before it expires.
 
     ## Role-Based Access Control
     | Role    | Description                                          |
@@ -44,27 +37,12 @@ servers:
     description: API Gateway (primary ingress — use this in production)
   - url: http://localhost:8089
     description: Agent Service
-  - url: http://localhost:8088
-    description: BFF Service
   - url: http://localhost:8081
-    description: Auth Service
-  - url: http://localhost:8085
-    description: User Service
+    description: Identity Service
   - url: http://localhost:8082
-    description: Product Service
-  - url: http://localhost:8086
-    description: Cart Service
+    description: Catalog Service
   - url: http://localhost:8083
     description: Order Service
-  - url: http://localhost:8087
-    description: Payment Service
-  - url: http://localhost:8090
-    description: Promotion Service
-  - url: http://localhost:8091
-    description: Shipping Service
-
-  - url: http://localhost:8084
-    description: Inventory Service
   - url: http://localhost:8092
     description: Notification Service
 tags:
@@ -72,11 +50,6 @@ tags:
     description: |
       Endpoints exposed by the API Gateway. The gateway handles JWT validation, role enforcement,
       and reverse-proxying to downstream services.
-  - name: BFF
-    description: |
-      Backend-for-Frontend aggregation endpoints. These combine calls to multiple microservices
-      into single, page-optimised responses for the web frontend. All BFF routes are also proxied
-      through the Gateway.
   - name: Auth Service
     description: |
       Authentication and session management. Issues HttpOnly cookie-based JWT access tokens and
@@ -122,8 +95,9 @@ tags:
       `user`-role tokens will receive `403 Forbidden`.
   - name: Admin
     description: |
-      Administrative BFF endpoints under `/bff/admin/*`. These endpoints require admin role
-      headers from the gateway and return a standardized BFF response envelope.
+      Administrative endpoints under `/bff/admin/*` (legacy prefix retained for
+      the admin UI and agent tools). These endpoints require admin role
+      headers from the gateway.
   - name: Agent Service
     description: |
       AI agent endpoints used for natural language ecommerce analytics. These endpoints run
@@ -377,672 +351,12 @@ paths:
 
   # ── BFF ─────────────────────────────────────────────────────────────────────
 
-  /bff/home:
-    get:
-      tags:
-        - BFF
-      summary: Home page — aggregated products & categories
-      description: |
-        Returns a single aggregated payload containing the product list (with default pagination)
-        and the full category tree. Designed to populate the storefront home page in a single
-        round trip. No authentication required.
-      operationId: bffGetHome
-      security: []
-      responses:
-        '200':
-          description: Aggregated home page data
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BFFHomeResponse'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  /bff/profile:
-    get:
-      tags:
-        - BFF
-      summary: Profile page — user profile & order history
-      description: |
-        Returns a combined payload containing the authenticated user's profile information and
-        their order history. Requires a valid `access_token` cookie. Designed to populate the
-        "My Account" / profile page in a single round trip.
-      operationId: bffGetProfile
-      security:
-        - cookieAuth: []
-      responses:
-        '200':
-          description: Aggregated profile page data
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BFFProfileResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  /bff/auth/register:
-    post:
-      tags:
-        - BFF
-      summary: Register a new user account
-      description: |
-        Creates a new **user** account (role is always `user` for self-registration).
-        On success a verification email is sent to the provided address. The user must
-        verify their email before they can log in.
-
-        Returns `409 Conflict` if the email is already registered.
-
-        > **Admin Panel Signup:** To register an admin account directly from the Admin Panel UI, include the `X-Admin-Signup-Secret` header with the secret defined in the backend environment. This bypasses the email verification requirement.
-
-        > **Standard Admin Creation:** Alternatively, use `POST /bff/admin/users` with an existing admin JWT cookie.
-      operationId: bffRegister
-      security: []
-      requestBody:
-        $ref: '#/components/requestBodies/RegisterRequest'
-      responses:
-        '201':
-          $ref: '#/components/responses/MessageResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  /bff/auth/login:
-    post:
-      tags:
-        - BFF
-      summary: Login and receive auth cookies
-      description: |
-        Authenticates a user with email and password. On success, sets four HttpOnly cookies:
-        - `__session` — short-lived JWT access token (15 min). **This is the token the API
-          Gateway validates on every subsequent request.**
-        - `refresh_token` — long-lived token (7 days) used exclusively with `POST /bff/auth/refresh`.
-        - `user_id` — the authenticated user's UUID (readable by JS, used by BFF internally).
-        - `user_role` — the authenticated user's role (`user` or `admin`).
-
-        Returns `401 Unauthorized` for invalid credentials or unverified email addresses.
-      operationId: bffLogin
-      security: []
-      requestBody:
-        $ref: '#/components/requestBodies/LoginRequest'
-      responses:
-        '200':
-          description: Generic success message
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MessageResponse'
-              example:
-                message: Operation completed successfully.
-
-          headers:
-            Set-Cookie: &authCookieHeader
-              description: HttpOnly auth cookies set on successful authentication.
-              schema:
-                type: string
-              example: __session=eyJ...; HttpOnly; Secure; SameSite=None; Path=/
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  /bff/auth/logout:
-    post:
-      tags:
-        - BFF
-      summary: Logout and clear auth cookies
-      description: |
-        Invalidates the current session and clears both `access_token` and `refresh_token`
-        cookies on the client. Safe to call even if the user is not currently authenticated.
-      operationId: bffLogout
-      security: []
-      responses:
-        '200':
-          $ref: '#/components/responses/MessageResponse'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  /bff/auth/refresh:
-    post:
-      tags:
-        - BFF
-      summary: Refresh the access token using the refresh cookie
-      description: |
-        Issues a new `access_token` cookie using the `refresh_token` cookie. Call this when an
-        API request returns `401 Unauthorized` due to an expired access token. Returns `401` if
-        the refresh token is missing, expired, or revoked.
-      operationId: bffRefreshToken
-      security: []
-      responses:
-        '200':
-          description: Generic success message
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MessageResponse'
-              example:
-                message: Operation completed successfully.
-
-          headers:
-            Set-Cookie: *authCookieHeader
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  /bff/auth/status:
-    get:
-      tags:
-        - BFF
-      summary: Check authentication status
-      description: |
-        Returns whether the current request is authenticated and, if so, the basic identity of
-        the authenticated user (ID, email, role). Useful for initialising client-side auth state
-        on page load.
-      operationId: bffGetAuthStatus
-      security:
-        - cookieAuth: []
-      responses:
-        '200':
-          description: Current authentication status
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AuthStatusResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  /bff/auth/verify-email:
-    post:
-      tags:
-        - BFF
-      summary: Verify email address with OTP code
-      description: |
-        Verifies a user's email address using the one-time code sent during registration.
-        The `email` and `code` fields are both required. Returns `404` if no pending
-        verification exists for the given email.
-      operationId: bffVerifyEmail
-      security: []
-      requestBody:
-        $ref: '#/components/requestBodies/VerifyEmailRequest'
-      responses:
-        '200':
-          $ref: '#/components/responses/MessageResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  /bff/auth/resend-verification:
-    post:
-      tags:
-        - BFF
-      summary: Resend email verification code
-      description: |
-        Generates a new one-time verification code and resends it to the provided email address.
-        Use this when the original code has expired or was not received.
-        Returns `404` if the email is not registered, and `400` if the email is already verified.
-      operationId: bffResendVerification
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - email
-              properties:
-                email:
-                  type: string
-                  format: email
-                  example: user@example.com
-      responses:
-        '200':
-          $ref: '#/components/responses/MessageResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  /bff/products:
-    get:
-      tags:
-        - BFF
-      summary: List products with filtering, sorting, and pagination
-      description: |
-        Returns a paginated list of products. Supports filtering by featured status, one or
-        more category IDs, and price range. Sort order can be controlled via the `sort`
-        parameter. No authentication required — public endpoint.
-      operationId: bffListProducts
-      security: []
-      parameters:
-        - $ref: '#/components/parameters/PageParam'
-        - $ref: '#/components/parameters/PerPageParam'
-        - $ref: '#/components/parameters/IsFeaturedParam'
-        - $ref: '#/components/parameters/CategoryIDsParam'
-        - $ref: '#/components/parameters/MinPriceParam'
-        - $ref: '#/components/parameters/MaxPriceParam'
-        - $ref: '#/components/parameters/SortParam'
-      responses:
-        '200':
-          description: Paginated product list
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ProductListResponse'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  /bff/products/{id}:
-    get:
-      tags:
-        - BFF
-      summary: Get a single product by ID
-      description: |
-        Returns full product details for the given product UUID. No authentication required.
-        Returns `404` if the product does not exist or has been deleted.
-      operationId: bffGetProduct
-      security: []
-      parameters:
-        - $ref: '#/components/parameters/ProductID'
-      responses:
-        '200':
-          description: Product details
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Product'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  /bff/categories:
-    get:
-      tags:
-        - BFF
-      summary: Get the full category tree
-      description: |
-        Returns the complete category hierarchy as a nested tree. Each node may contain a
-        `children` array of sub-categories. No authentication required.
-      operationId: bffListCategories
-      security: []
-      responses:
-        '200':
-          description: Nested category tree
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CategoryListResponse'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  /bff/cart:
-    get:
-      tags:
-        - BFF
-      summary: Get the current user's cart
-      description: |
-        Returns the authenticated user's cart contents, including all items and their quantities.
-        Returns an empty `items` array if the cart has not been populated yet.
-      operationId: bffGetCart
-      security:
-        - cookieAuth: []
-      responses:
-        '200':
-          description: Current cart
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Cart'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  /bff/cart/add:
-    post:
-      tags:
-        - BFF
-      summary: Add one or more items to the cart
-      description: |
-        Adds the provided items to the authenticated user's cart. If an item with the same
-        `product_id` already exists in the cart, its quantity is incremented by the provided
-        amount. Provide an `Idempotency-Key` header to safely retry on network failure without
-        duplicating items.
-      operationId: bffAddCartItems
-      security:
-        - cookieAuth: []
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        $ref: '#/components/requestBodies/AddItemsRequest'
-      responses:
-        '200':
-          description: Updated cart after adding items
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Cart'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  /bff/cart/remove/{product_id}:
-    delete:
-      tags:
-        - BFF
-      summary: Remove an item from the cart
-      description: |
-        Removes the cart line identified by `product_id` entirely (regardless of quantity).
-        Returns `404` if the product is not currently in the cart.
-      operationId: bffRemoveCartItem
-      security:
-        - cookieAuth: []
-      parameters:
-        - $ref: '#/components/parameters/ProductIDString'
-      responses:
-        '200':
-          description: Updated cart after removing item
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Cart'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  /bff/cart/clear:
-    delete:
-      tags:
-        - BFF
-      summary: Clear all items from the cart
-      description: Removes all items from the authenticated user's cart, returning it to an empty state.
-      operationId: bffClearCart
-      security:
-        - cookieAuth: []
-      responses:
-        '200':
-          $ref: '#/components/responses/MessageResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  /bff/cart/checkout:
-    post:
-      tags:
-        - BFF
-      summary: Initiate checkout for the current cart
-      description: |
-        Converts the authenticated user's cart into a pending order and creates a Stripe checkout
-        session. Returns the new order ID, initial status, and an optional `checkout_url` to
-        redirect the user to Stripe's hosted payment page.
-
-        This operation is protected by a distributed Redis lock (SetNX) to ensure atomicity. 
-        It is idempotent when an `Idempotency-Key` is provided — retrying with the
-        same key within the deduplication window returns the same order and checkout URL without
-        creating a duplicate order. The cart is cleared after a successful checkout initiation.
-      operationId: bffCheckout
-      security:
-        - cookieAuth: []
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      responses:
-        '200':
-          description: Checkout initiated — order created and payment session ready
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CheckoutResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  /bff/checkout:
-    post:
-      tags:
-        - BFF
-      summary: (Deprecated) Initiate checkout — alias for POST /bff/cart/checkout
-      description: |
-        Convenience alias for `POST /bff/cart/checkout`. Both routes invoke the same checkout
-        logic. **Deprecated** — prefer `/bff/cart/checkout` for consistency.
-      operationId: bffCheckoutAlias
-      deprecated: true
-      security:
-        - cookieAuth: []
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      responses:
-        '200':
-          description: Checkout initiated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CheckoutResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  /bff/orders:
-    get:
-      tags:
-        - BFF
-      summary: List the current user's orders
-      description: |
-        Returns a paginated list of orders belonging to the authenticated user, sorted by
-        creation date descending (most recent first).
-      operationId: bffListOrders
-      security:
-        - cookieAuth: []
-      parameters:
-        - $ref: '#/components/parameters/PageParam'
-        - $ref: '#/components/parameters/LimitParam'
-      responses:
-        '200':
-          description: Paginated order list
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OrderListResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  /bff/orders/{id}:
-    get:
-      tags:
-        - BFF
-      summary: Get order detail
-      description: |
-        Returns full details for the specified order, including all line items. Users may only
-        retrieve their own orders — attempting to fetch another user's order returns `404`.
-        Administrators can use the Gateway endpoint directly to retrieve any order.
-      operationId: bffGetOrder
-      security:
-        - cookieAuth: []
-      parameters:
-        - $ref: '#/components/parameters/OrderID'
-      responses:
-        '200':
-          description: Full order detail
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OrderDetailResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  /bff/users/profile:
-    put:
-      tags:
-        - BFF
-      summary: Update the authenticated user's profile
-      description: |
-        Updates mutable profile fields (`name`, `phone_number`) for the authenticated user.
-        Partial updates are supported — omit fields that should remain unchanged.
-      operationId: bffUpdateProfile
-      security:
-        - cookieAuth: []
-      requestBody:
-        $ref: '#/components/requestBodies/UpdateProfileRequest'
-      responses:
-        '200':
-          description: Profile updated successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UpdateProfileResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  /bff/users/change-password:
-    post:
-      tags:
-        - BFF
-      summary: Change the authenticated user's password
-      description: |
-        Changes the password for the currently authenticated user. Requires the current password
-        (`old_password`) to be provided as confirmation. All active sessions are invalidated
-        after a successful password change. Returns `400` if `old_password` is incorrect.
-      operationId: bffChangePassword
-      security:
-        - cookieAuth: []
-      requestBody:
-        $ref: '#/components/requestBodies/ChangePasswordRequest'
-      responses:
-        '200':
-          $ref: '#/components/responses/MessageResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  /bff/payment/status/by-order/{order_id}:
-    get:
-      tags:
-        - BFF
-      summary: Get payment status for an order
-      description: |
-        Returns the current payment status for the given order. Can be polled after checkout to
-        determine whether payment has been confirmed by Stripe. Only the order owner may query
-        payment status; administrators can use the direct Gateway endpoint.
-      operationId: bffGetPaymentStatus
-      security:
-        - cookieAuth: []
-      parameters:
-        - $ref: '#/components/parameters/OrderIDInPath'
-      responses:
-        '200':
-          description: Payment status
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PaymentStatusResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  /bff/promotions/validate:
-    post:
-      tags:
-        - BFF
-      summary: Validate a promotion coupon
-      description: |
-        Checks if a coupon code is valid for the given cart total. Returns the calculated
-        discount amount and coupon details if valid. Requires authentication.
-      operationId: bffValidatePromotion
-      security:
-        - cookieAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ValidateCouponRequest'
-      responses:
-        '200':
-          description: Validation result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ValidateCouponResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  /bff/payment/verify-payment:
-    post:
-      tags:
-        - BFF
-      summary: Verify payment after Stripe redirect
-      description: |
-        Called by the frontend after Stripe redirects back to the success URL. Verifies the
-        Stripe payment session and syncs the order status. Both `payment_id` and `session_id`
-        (from the Stripe redirect query params) are required.
-      operationId: bffVerifyPayment
-      security:
-        - cookieAuth: []
-      requestBody:
-        $ref: '#/components/requestBodies/VerifyPaymentRequest'
-      responses:
-        '200':
-          description: Verification result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VerifyPaymentResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '502':
-          $ref: '#/components/responses/BadGateway'
-
-  # ── BFF Admin ───────────────────────────────────────────────────────────────
-
   /bff/admin/products:
     get:
       operationId: getBffAdminProducts
       tags: [Admin]
       summary: List products (admin)
-      description: Returns a paginated product list from product-service.
+      description: Returns a paginated product list from catalog-service.
       parameters:
         - $ref: '#/components/parameters/AdminAuthorizationHeader'
         - $ref: '#/components/parameters/AdminUserIDHeader'
@@ -1059,7 +373,7 @@ paths:
       operationId: postBffAdminProducts
       tags: [Admin]
       summary: Create product (admin)
-      description: Creates a product in product-service.
+      description: Creates a product in catalog-service.
       parameters:
         - $ref: '#/components/parameters/AdminAuthorizationHeader'
         - $ref: '#/components/parameters/AdminUserIDHeader'
@@ -1083,7 +397,7 @@ paths:
       tags: [Admin]
       summary: Get product image presign URL (admin)
       description: |
-        Proxies the product-service presign endpoint for new-product image uploads. Use the
+        Proxies the catalog-service presign endpoint for new-product image uploads. Use the
         returned `public_url` as the stable URL to persist later on the product record.
       parameters:
         - $ref: '#/components/parameters/AdminAuthorizationHeader'
@@ -1120,7 +434,7 @@ paths:
       tags: [Admin]
       summary: Update product (admin)
       description: |
-        Updates a product by id in product-service. To attach uploaded images, send the stable
+        Updates a product by id in catalog-service. To attach uploaded images, send the stable
         `public_url` values in the `images` array.
       parameters:
         - $ref: '#/components/parameters/AdminAuthorizationHeader'
@@ -1139,7 +453,7 @@ paths:
       operationId: deleteBffAdminProductsById
       tags: [Admin]
       summary: Delete product (admin)
-      description: Deletes a product by id in product-service.
+      description: Deletes a product by id in catalog-service.
       parameters:
         - $ref: '#/components/parameters/AdminAuthorizationHeader'
         - $ref: '#/components/parameters/AdminUserIDHeader'
@@ -1158,7 +472,7 @@ paths:
       tags: [Admin]
       summary: Get existing product image presign URL (admin)
       description: |
-        Proxies the product-service image presign endpoint for an existing product. After upload,
+        Proxies the catalog-service image presign endpoint for an existing product. After upload,
         persist the returned `public_url` with `PUT /bff/admin/products/{id}` by updating the
         `images` array.
       parameters:
@@ -1190,7 +504,7 @@ paths:
       operationId: getBffAdminCategories
       tags: [Admin]
       summary: List categories (admin)
-      description: Returns categories from product-service.
+      description: Returns categories from catalog-service.
       parameters:
         - $ref: '#/components/parameters/AdminAuthorizationHeader'
         - $ref: '#/components/parameters/AdminUserIDHeader'
@@ -1207,7 +521,7 @@ paths:
       operationId: postBffAdminCategories
       tags: [Admin]
       summary: Create category (admin)
-      description: Creates category in product-service.
+      description: Creates category in catalog-service.
       parameters:
         - $ref: '#/components/parameters/AdminAuthorizationHeader'
         - $ref: '#/components/parameters/AdminUserIDHeader'
@@ -1230,7 +544,7 @@ paths:
       operationId: putBffAdminCategoriesById
       tags: [Admin]
       summary: Update category (admin)
-      description: Updates category by id in product-service.
+      description: Updates category by id in catalog-service.
       parameters:
         - $ref: '#/components/parameters/AdminAuthorizationHeader'
         - $ref: '#/components/parameters/AdminUserIDHeader'
@@ -1252,7 +566,7 @@ paths:
       operationId: deleteBffAdminCategoriesById
       tags: [Admin]
       summary: Delete category (admin)
-      description: Deletes category by id in product-service.
+      description: Deletes category by id in catalog-service.
       parameters:
         - $ref: '#/components/parameters/AdminAuthorizationHeader'
         - $ref: '#/components/parameters/AdminUserIDHeader'
@@ -1433,7 +747,7 @@ paths:
       summary: Create user (admin)
       operationId: adminCreateUser
       description: |
-        Creates a user through the auth-service admin flow.
+        Creates a user through the identity-service admin flow.
         Requires admin role and supports creating either `user` or `admin` accounts.
       parameters:
         - $ref: '#/components/parameters/AdminAuthorizationHeader'
@@ -1476,7 +790,7 @@ paths:
       operationId: putBffAdminUsersByIdRole
       tags: [Admin]
       summary: Update user role (admin)
-      description: Updates user role through user-service.
+      description: Updates user role through identity-service.
       parameters:
         - $ref: '#/components/parameters/AdminAuthorizationHeader'
         - $ref: '#/components/parameters/AdminUserIDHeader'
@@ -1505,7 +819,7 @@ paths:
       operationId: deleteBffAdminUsersById
       tags: [Admin]
       summary: Delete user (admin)
-      description: Deletes user by id through user-service.
+      description: Deletes user by id through identity-service.
       parameters:
         - $ref: '#/components/parameters/AdminAuthorizationHeader'
         - $ref: '#/components/parameters/AdminUserIDHeader'
@@ -1662,7 +976,7 @@ paths:
       operationId: putBffAdminInventoryByProductId
       tags: [Admin]
       summary: Update inventory (admin)
-      description: Updates inventory for a product in inventory-service.
+      description: Updates inventory for a product in catalog-service.
       parameters:
         - $ref: '#/components/parameters/AdminAuthorizationHeader'
         - $ref: '#/components/parameters/AdminUserIDHeader'
@@ -1693,7 +1007,7 @@ paths:
       operationId: getBffAdminCoupons
       tags: [Admin]
       summary: List coupons (admin)
-      description: Returns coupon list from promotion-service.
+      description: Returns coupon list from order-service.
       parameters:
         - $ref: '#/components/parameters/AdminAuthorizationHeader'
         - $ref: '#/components/parameters/AdminUserIDHeader'
@@ -1710,7 +1024,7 @@ paths:
       operationId: postBffAdminCoupons
       tags: [Admin]
       summary: Create coupon (admin)
-      description: Creates a coupon in promotion-service.
+      description: Creates a coupon in order-service.
       parameters:
         - $ref: '#/components/parameters/AdminAuthorizationHeader'
         - $ref: '#/components/parameters/AdminUserIDHeader'
@@ -1733,7 +1047,7 @@ paths:
       operationId: putBffAdminCouponsById
       tags: [Admin]
       summary: Update coupon (admin)
-      description: Updates coupon by id/code in promotion-service.
+      description: Updates coupon by id/code in order-service.
       parameters:
         - $ref: '#/components/parameters/AdminAuthorizationHeader'
         - $ref: '#/components/parameters/AdminUserIDHeader'
@@ -1756,7 +1070,7 @@ paths:
       operationId: deleteBffAdminCouponsById
       tags: [Admin]
       summary: Delete coupon (admin)
-      description: Deactivates/deletes coupon by id/code in promotion-service.
+      description: Deactivates/deletes coupon by id/code in order-service.
       parameters:
         - $ref: '#/components/parameters/AdminAuthorizationHeader'
         - $ref: '#/components/parameters/AdminUserIDHeader'
@@ -1827,7 +1141,7 @@ paths:
       operationId: getBffAdminReportsUsers
       tags: [Admin]
       summary: Users analytics report (admin)
-      description: Aggregates user stats from user-service.
+      description: Aggregates user stats from identity-service.
       parameters:
         - $ref: '#/components/parameters/AdminAuthorizationHeader'
         - $ref: '#/components/parameters/AdminUserIDHeader'
@@ -1844,7 +1158,7 @@ paths:
       operationId: getBffAdminReportsInventory
       tags: [Admin]
       summary: Inventory analytics report (admin)
-      description: Aggregates inventory stats from inventory-service.
+      description: Aggregates inventory stats from catalog-service.
       parameters:
         - $ref: '#/components/parameters/AdminAuthorizationHeader'
         - $ref: '#/components/parameters/AdminUserIDHeader'
@@ -1904,7 +1218,11 @@ paths:
                 message: Operation completed successfully.
 
           headers:
-            Set-Cookie: *authCookieHeader
+            Set-Cookie: &authCookieHeader
+              description: HttpOnly auth cookies set on successful authentication.
+              schema:
+                type: string
+              example: __session=eyJ...; HttpOnly; Secure; SameSite=None; Path=/
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -3758,17 +3076,6 @@ components:
             details: A user with this email address already exists.
 
       x-retryable: true
-    BadGateway:
-      description: Bad Gateway — the BFF or Gateway received an invalid response from an upstream microservice. This typically indicates the downstream service is unavailable or returned an unexpected error.
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ErrorResponse'
-          example:
-            error: Bad Gateway
-            details: Upstream service is temporarily unavailable.
-
-      x-retryable: true
     InternalServerError:
       description: Internal server error.
       content:
@@ -4761,37 +4068,6 @@ components:
             - `pending` — payment not yet captured (try again shortly).
             - `failed` — payment failed; order will be cancelled.
           example: success
-
-    # ── BFF aggregated ─────────────────────────────────────────────────────────
-
-    BFFHomeResponse:
-      type: object
-      description: |
-        Aggregated home page payload. Note that `products` is a full `ProductListResponse`
-        object (containing a `products` array and `meta`) — not a flat array.
-      properties:
-        products:
-          $ref: '#/components/schemas/ProductListResponse'
-        categories:
-          $ref: '#/components/schemas/CategoryListResponse'
-        timestamp:
-          type: string
-          format: date-time
-          description: Server-side timestamp when the response was assembled.
-          example: '2026-02-25T10:00:00Z'
-
-    BFFProfileResponse:
-      type: object
-      description: Aggregated profile page payload.
-      properties:
-        profile:
-          $ref: '#/components/schemas/UserProfileResponse'
-        orders:
-          $ref: '#/components/schemas/OrderListResponse'
-        timestamp:
-          type: string
-          format: date-time
-          example: '2026-02-25T10:00:00Z'
 
     # ── Bulk operations ────────────────────────────────────────────────────────
 

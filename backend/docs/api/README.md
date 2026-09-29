@@ -7,9 +7,9 @@ Swagger UI (Compose): http://localhost:8099
 
 | Doc | Service |
 |-----|---------|
-| [BFF.md](./BFF.md) | bff-service `:8088` |
-| [Promotion-Service.md](./Promotion-Service.md) | promotion-service `:8090` — gateway `/coupons` |
-| [Shipping-Service.md](./Shipping-Service.md) | shipping-service `:8091` — rates only |
+| [BFF.md](./BFF.md) | retained `/bff/admin/*` contract + removed storefront paths |
+| [Promotion-Service.md](./Promotion-Service.md) | order-service `:8083` — gateway `/coupons` (merged in-process) |
+| [Shipping-Service.md](./Shipping-Service.md) | order-service `:8083` — rates only (merged in-process) |
 | [Notification-Service.md](./Notification-Service.md) | notification-service `:8092` — SQS consumer |
 
 ## Generated from OpenAPI

@@ -99,13 +99,10 @@ services:
   # rather than localstack (service_healthy), ensuring all AWS resources exist
   # before any service starts polling or publishing.
 
-  auth-service:
+  identity-service:
     environment:
       - USE_LOCALSTACK=true
       - LOCALSTACK_ENDPOINT=http://localstack:4566
-      - SMTP_EMAIL=${SMTP_EMAIL:-test@example.com}
-      - SMTP_PASSWORD=${SMTP_PASSWORD:-password}
-      - SMTP_SERVER=${SMTP_SERVER:-smtp.gmail.com}
       - AWS_ACCESS_KEY_ID=test
       - AWS_SECRET_ACCESS_KEY=test
       - AWS_SESSION_TOKEN=
@@ -115,41 +112,14 @@ services:
       localstack-init:
         condition: service_completed_successfully
 
-  user-service:
-    environment:
-      - USE_LOCALSTACK=true
-      - LOCALSTACK_ENDPOINT=http://localstack:4566
-      - SMTP_EMAIL=${SMTP_EMAIL:-test@example.com}
-      - SMTP_PASSWORD=${SMTP_PASSWORD:-password}
-      - SMTP_SERVER=${SMTP_SERVER:-smtp.gmail.com}
-    depends_on:
-      localstack-init:
-        condition: service_completed_successfully
-
-  product-service:
+  catalog-service:
     environment:
       - USE_LOCALSTACK=true
       - LOCALSTACK_ENDPOINT=http://localstack:4566
       # Disable hardcoded CLOUDWATCH_ENABLED=true from the base file in local dev
       - CLOUDWATCH_ENABLED=false
-    depends_on:
-      localstack-init:
-        condition: service_completed_successfully
-
-  cart-service:
-    environment:
-      - USE_LOCALSTACK=true
-      - LOCALSTACK_ENDPOINT=http://localstack:4566
-      - ORDER_SNS_TOPIC_ARN=arn:aws:sns:${AWS_REGION:-us-east-1}:000000000000:${ORDER_SNS_TOPIC_NAME:-order-events}
-    depends_on:
-      localstack-init:
-        condition: service_completed_successfully
-
-  inventory-service:
-    environment:
-      - USE_LOCALSTACK=true
-      - LOCALSTACK_ENDPOINT=http://localstack:4566
       - DDB_TABLE_INVENTORY=${DDB_TABLE_INVENTORY:-Inventory}
+      - ORDER_SNS_TOPIC_ARN=arn:aws:sns:${AWS_REGION:-us-east-1}:000000000000:${ORDER_SNS_TOPIC_NAME:-order-events}
     depends_on:
       localstack-init:
         condition: service_completed_successfully
@@ -174,23 +144,6 @@ services:
       localstack-init:
         condition: service_completed_successfully
 
-  payment-service:
-    environment:
-      - USE_LOCALSTACK=true
-      - LOCALSTACK_ENDPOINT=http://localstack:4566
-      - AWS_REGION=us-east-1
-      - AWS_ACCESS_KEY_ID=test
-      - AWS_SECRET_ACCESS_KEY=test
-      - AWS_SESSION_TOKEN=
-      - PAYMENT_REQUEST_QUEUE_URL=http://localstack:4566/queue/us-east-1/000000000000/${PAYMENT_REQUEST_QUEUE_NAME:-payment-request-queue}
-      - PAYMENT_EVENTS_QUEUE_URL=http://localstack:4566/queue/us-east-1/000000000000/${PAYMENT_EVENTS_QUEUE_NAME:-payment-events-queue}
-      - PAYMENT_SNS_TOPIC_ARN=arn:aws:sns:${AWS_REGION:-us-east-1}:000000000000:${PAYMENT_SNS_TOPIC_NAME:-payment-events}
-      - NOTIFICATION_SNS_TOPIC_ARN=arn:aws:sns:${AWS_REGION:-us-east-1}:000000000000:notification-events
-      - STORE_CURRENCY=${STORE_CURRENCY:-USD}
-    depends_on:
-      localstack-init:
-        condition: service_completed_successfully
-
   notification-service:
     environment:
       - USE_LOCALSTACK=true
@@ -206,29 +159,10 @@ services:
       localstack-init:
         condition: service_completed_successfully
 
-  promotion-service:
-    environment:
-      - USE_LOCALSTACK=true
-      - LOCALSTACK_ENDPOINT=http://localstack:4566
-      - AWS_REGION=us-east-1
-      - ORDER_CREATED_QUEUE_URL=http://localstack:4566/queue/us-east-1/000000000000/promotion-order-queue
-    depends_on:
-      localstack-init:
-        condition: service_completed_successfully
-
   api-gateway:
     environment:
       - USE_LOCALSTACK=true
       - LOCALSTACK_ENDPOINT=http://localstack:4566
-    depends_on:
-      localstack-init:
-        condition: service_completed_successfully
-
-  bff-service:
-    environment:
-      - USE_LOCALSTACK=true
-      - LOCALSTACK_ENDPOINT=http://localstack:4566
-      - CLOUDWATCH_ENABLED=true
     depends_on:
       localstack-init:
         condition: service_completed_successfully

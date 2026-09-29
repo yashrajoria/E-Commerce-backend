@@ -55,7 +55,7 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 	// 1. Try the wildcard param (*any) used by most routes.
 	// 2. Fall back to deriving it from the full request path by stripping
 	//    the gateway-level prefix that mirrors the TargetBase tail segment.
-	//    e.g. TargetBase="http://inventory-service:8084/inventory"
+	//    e.g. TargetBase="http://catalog-service:8082/inventory"
 	//         request path="/inventory/check"  →  suffix="/check"
 	targetPath := ""
 	if any := c.Param("any"); any != "" {

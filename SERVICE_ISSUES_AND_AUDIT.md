@@ -2,6 +2,12 @@
 
 Detailed technical audit report identifying potential bugs, security vulnerabilities, edge-case flaws, concurrency risks, and performance bottlenecks across all 13 microservices and shared packages in the **ShopSwift** backend repository.
 
+> **Consolidation note (Phase 1):** `auth-service` + `user-service` merged into **`identity-service`** (`backend/services/identity-service`, port `8081`). Audit findings filed under §2 (Auth) and §9 (User) still apply; map old paths mechanically: `services/auth-service/X` → `services/identity-service/auth/X` (except shared code now at `models/`, `repository/`, `database/`, `middleware/` roots), `services/user-service/X` → `services/identity-service/users/X` (except shared code at the same roots). The `POST /auth/internal/revoke-tokens` HTTP hop (§9) no longer exists — revocation is an in-process call.
+>
+> **Consolidation note (Phases 2–3):** `promotion-service` + `shipping-service` + `payment-service` merged into **`order-service`** (port `8083`) as `promotion/`, `shipping/`, and `payment/` subpackages. Findings filed under the old payment/promotion/shipping sections still apply; map paths mechanically: `services/<old>/X` → `services/order-service/<old-name>/X`. The `order → promotion` HTTP hop and the `order → payment-request-queue → payment` SQS hop are now in-process calls; `payment-request-queue` is retained only as a durable buffer for the in-process payment consumer.
+>
+> **Consolidation note (Phase 4):** `product-service` + `inventory-service` + `cart-service` merged into **`catalog-service`** (port `8082`); `bff-service` deleted. Map paths: `services/product-service/X` → `services/catalog-service/X`, `services/inventory-service/X` → `services/catalog-service/inventory/X`, `services/cart-service/X` → `services/catalog-service/cart/X`. The `product → inventory` and `cart → product` HTTP hops are in-process calls. Storefront `/bff/*` routes are gone (use domain routes directly); `/bff/admin/*` paths survive on the gateway as direct forwards, with dashboard aggregation rehomed to `services/order-service/admin/`.
+
 ---
 
 ## Executive Summary & Severity Matrix
@@ -28,7 +34,7 @@ Detailed technical audit report identifying potential bugs, security vulnerabili
 #### 🟡 Issue 1.2: Hardcoded Plain HTTP Internal Auth URL [MEDIUM]
 - **File**: `backend/api-gateway/middlewares/jwt.go`
 - **Location**: `InitJWTConfig()`
-- **Problem**: `authBaseURL` defaults to `http://auth-service:8081`. In production Kubernetes/ECS environments without service mesh mTLS, inter-service traffic flows unencrypted over plain HTTP.
+- **Problem**: `authBaseURL` defaults to `http://identity-service:8081`. In production Kubernetes/ECS environments without service mesh mTLS, inter-service traffic flows unencrypted over plain HTTP.
 - **Recommended Fix**: Support `AUTH_SERVICE_URL` with `https://` protocol enforcement in production environments.
 
 #### 🟢 Issue 1.3: Un-tuned HTTP Client Transport for Silent Refresh [LOW]

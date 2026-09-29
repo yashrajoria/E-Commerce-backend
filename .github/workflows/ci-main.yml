@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [auth-service, bff-service, cart-service, inventory-service, order-service, payment-service, product-service, user-service]
+        service: [identity-service, catalog-service, order-service]
 
     steps:
       - name: Checkout

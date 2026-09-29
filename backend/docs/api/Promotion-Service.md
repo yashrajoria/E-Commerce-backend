@@ -1,6 +1,6 @@
-# Promotion Service API
+# Promotion API (merged into order-service)
 
-Base URL: `http://localhost:8090` (Service Internal)
+Base URL: `http://localhost:8083` (order-service, in-process since consolidation)
 Gateway Prefix: `/coupons` (Admin routes via API Gateway)
 
 ## Endpoints

@@ -59,21 +59,20 @@ run_sql() {
 
 ensure_users_table() {
   # This script never creates `users` itself (see ensure_schema comment) — it
-  # only exists once auth-service has booted and run its GORM AutoMigrate.
+  # only exists once identity-service has booted and run its GORM AutoMigrate.
   # Fail with a clear next step instead of a raw "relation does not exist" error.
   local exists
   exists="$(run_sql -t -A -c "SELECT to_regclass('public.users') IS NOT NULL;" 2>/dev/null || true)"
   if [[ "$exists" != "t" ]]; then
     echo "ERROR: 'users' table does not exist yet." >&2
-    echo "auth-service creates it via GORM AutoMigrate on first boot (ALLOW_AUTO_MIGRATE=true)." >&2
-    echo "Start the full stack and wait for auth-service to become healthy first: ./scripts/dev-up.sh" >&2
+    echo "identity-service creates it via GORM AutoMigrate on first boot (ALLOW_AUTO_MIGRATE=true)." >&2
+    echo "Start the full stack and wait for identity-service to become healthy first: ./scripts/dev-up.sh" >&2
     exit 1
-  fi
-}
+  }
 
 ensure_schema() {
   # Baseline migration (000001) can't run cleanly against a users table
-  # created by auth-service's GORM AutoMigrate (different column set), so
+  # created by identity-service's GORM AutoMigrate (different column set), so
   # create only the tables this seed script needs directly, matching the
   # baseline schema. users/refresh_tokens are left untouched.
   run_sql <<'SQL'
@@ -292,11 +291,11 @@ SQL
 }
 
 seed_redis_carts() {
-  # Cart state lives in Redis only (cart-service owns `cart:user:{id}`), so it
+  # Cart state lives in Redis only (catalog-service owns `cart:user:{id}`), so it
   # can't be seeded by SQL. Written here (not seed_demo_data.sh) because it
   # needs both real product IDs (from that script) and real user IDs (from
   # seed_sql above) — this is the point where both exist. TTL matches
-  # cart-service's default (7 days, cart-service/config).
+  # catalog-service's default (7 days).
   echo "Seeding demo carts in Redis..."
   local now
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"

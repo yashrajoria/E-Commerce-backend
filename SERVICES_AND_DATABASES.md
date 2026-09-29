@@ -7,20 +7,13 @@ An exhaustive technical reference manual covering every microservice, database s
 ## Table of Contents
 
 1. [Architectural Topology & Matrix](#1-architectural-topology--matrix)
-2. [Microservices Deep Dive (13 Services)](#2-microservices-deep-dive-13-services)
+2. [Microservices Deep Dive (5 Services)](#2-microservices-deep-dive-5-services)
    - [2.1 API Gateway Service (`:8080`)](#21-api-gateway-service-8080)
-   - [2.2 Auth Service (`:8081`)](#22-auth-service-8081)
-   - [2.3 Product Service (`:8082`)](#23-product-service-8082)
+   - [2.2 Identity Service (`:8081`)](#22-identity-service-8081)
+   - [2.3 Catalog Service (`:8082`)](#23-catalog-service-8082)
    - [2.4 Order Service (`:8083`)](#24-order-service-8083)
-   - [2.5 Inventory Service (`:8084`)](#25-inventory-service-8084)
-   - [2.6 User Service (`:8085`)](#26-user-service-8085)
-   - [2.7 Cart Service (`:8086`)](#27-cart-service-8086)
-   - [2.8 Payment Service (`:8087`)](#28-payment-service-8087)
-   - [2.9 BFF (Backend-For-Frontend) Service (`:8088`)](#29-bff-backend-for-frontend-service-8088)
-   - [2.10 Agent Service (`:8089`)](#210-agent-service-8089)
-   - [2.11 Promotion Service (`:8090`)](#211-promotion-service-8090)
-   - [2.12 Shipping Service (`:8091`)](#212-shipping-service-8091)
-   - [2.13 Notification Service (`:8092`)](#213-notification-service-8092)
+   - [2.5 Agent Service (`:8089`)](#25-agent-service-8089)
+   - [2.6 Notification Service (`:8092`)](#26-notification-service-8092)
 3. [Database Architecture & Complete Schemas](#3-database-architecture--complete-schemas)
    - [3.1 PostgreSQL Database (`ecommerce`)](#31-postgresql-database-ecommerce)
    - [3.2 AWS DynamoDB Tables](#32-aws-dynamodb-tables)
@@ -44,30 +37,19 @@ An exhaustive technical reference manual covering every microservice, database s
         ┌───────────────────────────────────┼───────────────────────────────────┐
         │ Proxy                             │ Proxy                             │ Proxy
 ┌───────▼───────┐                   ┌───────▼───────┐                   ┌───────▼───────┐
-│  BFF Service  │ (:8088)           │  Auth Service │ (:8081)           │Product Service│ (:8082)
+│Identity Svc   │ (:8081)           │Catalog Service│ (:8082)           │ Order Service │ (:8083)
 └───────┬───────┘                   └───────┬───────┘                   └───────┬───────┘
-        │ SetNX Lock                        │ Postgres                          │ DynamoDB / S3 / Redis
+        │ Postgres                          │ DynamoDB / S3 / Redis             │ Postgres / SQS / Stripe
 ┌───────▼───────┐                   ┌───────▼───────┐                   ┌───────▼───────┐
-│ Redis 7 Cache │                   │ User Service  │ (:8085)           │Cart Service   │ (:8086)
-└───────────────┘                   └───────┬───────┘                   └───────┬───────┘
-                                            │ Postgres                          │ Redis / SNS
-┌───────────────┐                   ┌───────▼───────┐                   ┌───────▼───────┐
-│ Agent Service │ (:8089)           │ Order Service │ (:8083)           │Payment Service│ (:8087)
-└───────┬───────┘                   └───────┬───────┘                   └───────┬───────┘
-        │ Calls BFF                         │ Postgres / SQS                    │ Postgres / Stripe / SNS
-        │                           ┌───────▼───────┐                   ┌───────▼───────┐
-        │                           │Inventory Serv.│ (:8084)           │Promo Service  │ (:8090)
-        │                           └───────┬───────┘                   └───────┬───────┘
-        │                                   │ DynamoDB                          │ Postgres
-        │                           ┌───────▼───────┐                   ┌───────▼───────┐
-        │                           │Shipping Serv. │ (:8091)           │Notif Service  │ (:8092)
-        └──────────────────────────>└───────────────┘                   └───────────────┘
-                                      In-Memory                           Postgres / SQS
+│Agent Service  │ (:8089)           │Notif Service  │ (:8092)           │ Redis 7 Cache │
+└───────┬───────┘                   └───────┬───────┘                   └───────────────┘
+        │ via gateway                       │ Postgres / SQS
+        └──────────────────────────>└───────────────┘
 ```
 
 ---
 
-## 2. Microservices Deep Dive (13 Services)
+## 2. Microservices Deep Dive (5 Services)
 
 ---
 
@@ -83,18 +65,18 @@ An exhaustive technical reference manual covering every microservice, database s
 | Endpoint Pattern | Upstream Destination | Auth Guard | Notes |
 |:---|:---|:---|:---|
 | `/health` | Self (`api-gateway`) | Public | Gateway liveness & readiness check |
-| `/auth/*` | `http://auth-service:8081` | Mixed | Identity, login, refresh, admin user management |
-| `/users/*` | `http://user-service:8085` | JWT Required | User profile and address book |
-| `/products/*` | `http://product-service:8082` | Mixed | Catalog browsing (Public), CRUD (Admin) |
-| `/categories/*` | `http://product-service:8082` | Mixed | Categories browsing (Public), CRUD (Admin) |
-| `/cart/*` | `http://cart-service:8086` | JWT Required | Shopping cart management |
+| `/auth/*` | `http://identity-service:8081` | Mixed | Identity, login, refresh, admin user management |
+| `/users/*` | `http://identity-service:8081` | JWT Required | User profile and address book |
+| `/products/*` | `http://catalog-service:8082` | Mixed | Catalog browsing (Public), CRUD (Admin) |
+| `/categories/*` | `http://catalog-service:8082` | Mixed | Categories browsing (Public), CRUD (Admin) |
+| `/cart/*` | `http://catalog-service:8082` | JWT Required | Shopping cart management |
 | `/orders/*` | `http://order-service:8083` | JWT Required | Customer order management |
-| `/payments/*` | `http://payment-service:8087` | Mixed | Stripe checkout polling, Webhooks (Public) |
-| `/inventory/*` | `http://inventory-service:8084` | Mixed | Stock checks (Public), Admin updates |
-| `/promotions/*` | `http://promotion-service:8090` | Mixed | Coupon validations & Admin coupon rules |
-| `/shipping/*` | `http://shipping-service:8091` | Public | Shipping rate queries |
+| `/payment`, `/payment/*` | `http://order-service:8083` | JWT Required | Stripe checkout ops (webhook is `/stripe/webhook`, Public) |
+| `/coupons/validate` (public), `/coupons/:code`, admin `/coupons*` | `http://order-service:8083` | Mixed | Coupon validations & Admin coupon rules |
+| `/shipping/rates` | `http://order-service:8083` | JWT Required | Shipping rate queries |
+| `/inventory/*` | `http://catalog-service:8082` | Mixed | Stock checks (Public), Admin updates, mesh reserve/release |
 | `/notifications/*` | `http://notification-service:8092` | JWT Required | Customer notification audit logs |
-| `/bff/*` | `http://bff-service:8088` | Mixed | Aggregated storefront & async checkout |
+| `/bff/admin/*` | gateway → owning service | Admin | Retained admin/analytics contract (BFF process deleted) |
 | `/agent/*` | `http://agent-service:8089` | Public / JWT | AI conversational backend assistant |
 
 #### Key Middleware
@@ -104,12 +86,12 @@ An exhaustive technical reference manual covering every microservice, database s
 
 ---
 
-### 2.2 Auth Service (`:8081`)
+### 2.2 Identity Service (`:8081`)
 
 - **Port**: `8081`
 - **Stack**: Go 1.25, Gin, GORM, Postgres
-- **Primary Data Store**: PostgreSQL (`users`, `refresh_tokens` tables)
-- **Main Responsibility**: Identity management, user registration, credential authentication (bcrypt), JWT access token generation, refresh token rotation/revocation, email verification code generation, and idempotent admin user initialization on startup.
+- **Primary Data Store**: PostgreSQL (`users`, `refresh_tokens`, `addresses` tables)
+- **Main Responsibility**: Identity management, user registration, credential authentication (bcrypt), JWT access token generation, refresh token rotation/revocation, email verification code generation, idempotent admin user initialization on startup, plus user profiles and addresses. Merged from the former auth-service + user-service; password changes revoke refresh tokens via direct in-process call (no inter-service hop).
 
 #### Endpoints Specification
 
@@ -122,16 +104,22 @@ An exhaustive technical reference manual covering every microservice, database s
 | `POST` | `/auth/verify-email` | JWT / Public | `{email, code}` | `200 OK` — Validates 6-digit verification code |
 | `POST` | `/auth/admin/users` | Admin (`role=admin`) | `{email, password, name}` | `201 Created` — Invites/creates a new admin user |
 | `GET` | `/auth/me` | JWT Required | — | `200 OK` — Returns authenticated identity info |
+| `GET` | `/users/profile` | JWT Required | — | Fetch authenticated user profile |
+| `PUT` | `/users/profile` | JWT Required | `{name, phone_number, store_name}` | Update profile information |
+| `GET` | `/users/addresses` | JWT Required | — | List all saved user addresses |
+| `POST` | `/users/addresses` | JWT Required | `{type: "shipping"|"billing", street, city, state, postal_code, country}` | Add new address |
+| `PUT` | `/users/addresses/:id` | JWT Required | `{street, city, state, ...}` | Update address |
+| `DELETE` | `/users/addresses/:id` | JWT Required | — | Delete address |
 | `GET` | `/health` | Public | — | `200 OK` — Liveness status |
 
 ---
 
-### 2.3 Product Service (`:8082`)
+### 2.3 Catalog Service (`:8082`)
 
 - **Port**: `8082`
 - **Stack**: Go 1.25, Gin, AWS SDK v2 (DynamoDB & S3), Redis
-- **Primary Data Store**: DynamoDB (`Products`, `Categories`, `ProductCategories`), AWS S3 (`shopswift` bucket), Redis
-- **Main Responsibility**: Product catalog management, category hierarchies, category-product adjacency indexing, product image file upload to S3, and Redis versioned caching for high-speed read queries.
+- **Primary Data Store**: DynamoDB (`Products`, `Categories`, `ProductCategories`, `Inventory`), AWS S3 (`shopswift` bucket), Redis (product cache, cart state, bulk-import queue)
+- **Main Responsibility**: Product catalog management, category hierarchies, category-product adjacency indexing, product image file upload to S3, Redis versioned caching for high-speed read queries, real-time stock levels with idempotent reservations, and the Redis shopping cart with SNS checkout publishing. Absorbed product-service, inventory-service, and cart-service — product↔inventory sync and cart product validation run in-process.
 
 #### Endpoints Specification
 
@@ -146,15 +134,29 @@ An exhaustive technical reference manual covering every microservice, database s
 | `GET` | `/categories` | Public | — | List all categories |
 | `POST` | `/categories` | Admin (`role=admin`) | `{name, slug, description, parent_id}` | Create category |
 | `GET` | `/categories/:id/products` | Public | `?limit=&cursor=` | Fetch products in category using `ProductCategories` GSI |
+| `GET` | `/inventory/:product_id` | Public | — | Get stock level for a product |
+| `GET` | `/inventory` | Admin | `?page=&page_size=` | List all stock |
+| `POST` | `/inventory` | Admin | `{product_id, available}` | Upsert stock record |
+| `PUT` | `/inventory/:productId` | Admin | `{available?, threshold?}` | Partial stock update |
+| `POST` | `/inventory/check` | Mesh (internal token) | `{items: [{product_id, quantity}]}` | Check availability |
+| `POST` | `/inventory/reserve` | Mesh (internal token) | `{order_id, items}` | Idempotent conditional reserve |
+| `POST` | `/inventory/release` | Mesh (internal token) | `{order_id, items}` | Release reservation |
+| `POST` | `/inventory/confirm` | Mesh (internal token) | `{order_id, items}` | Confirm reservation into sold stock |
+| `GET` | `/cart/` | JWT Required | — | Get user shopping cart contents |
+| `POST` | `/cart/add` | JWT Required | `{items: [{product_id, quantity}]}` | Add/increment items |
+| `DELETE` | `/cart/remove/:product_id` | JWT Required | — | Remove item from cart |
+| `DELETE` | `/cart/clear` | JWT Required | — | Clear entire cart |
+| `POST` | `/cart/coupon` | JWT Required | `{coupon_code}` | Attach coupon to cart |
+| `POST` | `/cart/checkout` | JWT Required | Header: `Idempotency-Key` | Validate in-process, publish `checkout.requested`, cache replay on retry |
 
 ---
 
 ### 2.4 Order Service (`:8083`)
 
 - **Port**: `8083`
-- **Stack**: Go 1.25, Gin, GORM, Postgres, AWS SQS/SNS
-- **Primary Data Store**: PostgreSQL (`orders`, `order_items` tables), SQS (`order-processing-queue`, `payment-events-queue`, `payment-request-queue`)
-- **Main Responsibility**: Manages the complete lifecycle of customer orders. Consumes `checkout.requested` messages from SQS, calls Inventory Service to reserve stock, writes order and order items in Postgres, dispatches payment creation requests, and processes payment completion events.
+- **Stack**: Go 1.25, Gin, GORM, Postgres, Stripe SDK, AWS SQS/SNS
+- **Primary Data Store**: PostgreSQL (`orders`, `order_items`, `coupons`, `payments`, `stripe_processed_events`, `payment_outbox_events` tables), SQS (`order-processing-queue`, `payment-events-queue`, `payment-request-queue`, `promotion-order-queue`)
+- **Main Responsibility**: Manages the complete lifecycle of customer orders. Consumes `checkout.requested` messages from SQS, calls Inventory Service to reserve stock, writes order and order items in Postgres, dispatches payment creation requests, and processes payment completion events. Absorbed promotion-service (coupons), shipping-service (zone rates), and payment-service (Stripe Checkout + webhooks) — all three run in-process.
 
 #### Endpoints Specification
 
@@ -165,108 +167,25 @@ An exhaustive technical reference manual covering every microservice, database s
 | `GET` | `/orders/:id` | JWT Required | — | Fetch order details with order items |
 | `PATCH` | `/orders/:id/cancel` | JWT Required | — | Cancel pending order & release stock |
 | `GET` | `/orders/admin/all` | Admin | `?user_id=&status=` | Admin order search & reporting |
+| `POST` | `/coupons/validate` | Public | `{code, cart_total}` | Validate coupon eligibility & calculate discount |
+| `GET` | `/coupons/:code` | JWT Required | — | Fetch coupon by code |
+| `POST` | `/coupons` | Admin | `{code, type, value, min_order_value, usage_limit, expires_at}` | Create new coupon rule |
+| `GET` | `/coupons` | Admin | `?page=&limit=` | List all coupons |
+| `DELETE` | `/coupons/:code` | Admin | — | Deactivate coupon |
+| `POST` | `/shipping/rates` | JWT Required | `{weight_kg, destination: {country, ...}}` | Zone-based shipping rates |
+| `GET` | `/payment/status/by-order/:order_id` | JWT Required | — | Poll payment status + `checkout_url` |
+| `POST` | `/payment/create-checkout` | JWT Required | `{order_id}` | Create Stripe Checkout Session |
+| `POST` | `/payment/verify-payment` | JWT Required | `{payment_id, session_id}` | Verify Stripe session live |
+| `POST` | `/stripe/webhook` | Public (Stripe Signature) | Stripe Event Payload | Webhook ingestion, dedup via `stripe_processed_events` |
 
 ---
 
-### 2.5 Inventory Service (`:8084`)
-
-- **Port**: `8084`
-- **Stack**: Go 1.25, Gin, AWS SDK v2 (DynamoDB)
-- **Primary Data Store**: DynamoDB (`Inventory` table)
-- **Main Responsibility**: Real-time stock level management, atomic stock reservation with idempotency token (`ClientRequestToken`), stock confirmation upon payment, and stock release upon cancellation.
-
-#### Endpoints Specification
-
-| Method | Path | Auth / Role | Request Body | Purpose |
-|:---|:---|:---|:---|:---|
-| `GET` | `/inventory/:product_id` | Public | — | Get stock level for a product |
-| `POST` | `/inventory/reserve` | Internal / Order | `{order_id, items: [{product_id, quantity}], request_token}` | Reserve stock conditionally |
-| `POST` | `/inventory/release` | Internal / Order | `{order_id, items: [{product_id, quantity}], request_token}` | Release reserved stock |
-| `POST` | `/inventory/confirm` | Internal / Order | `{order_id, items: [{product_id, quantity}], request_token}` | Confirm reservation into sold stock |
-| `POST` | `/inventory/set` | Admin | `{product_id, stock}` | Set absolute stock count |
-
----
-
-### 2.6 User Service (`:8085`)
-
-- **Port**: `8085`
-- **Stack**: Go 1.25, Gin, GORM, Postgres
-- **Primary Data Store**: PostgreSQL (`users` profile columns, `addresses` table)
-- **Main Responsibility**: Management of user profiles (phone number, name, store name) and customer address books (shipping & billing addresses).
-
-#### Endpoints Specification
-
-| Method | Path | Auth / Role | Request Body | Purpose |
-|:---|:---|:---|:---|:---|
-| `GET` | `/users/profile` | JWT Required | — | Fetch authenticated user profile |
-| `PUT` | `/users/profile` | JWT Required | `{name, phone_number, store_name}` | Update profile information |
-| `GET` | `/users/addresses` | JWT Required | — | List all saved user addresses |
-| `POST` | `/users/addresses` | JWT Required | `{type: "shipping"|"billing", street, city, state, postal_code, country}` | Add new address |
-| `PUT` | `/users/addresses/:id` | JWT Required | `{street, city, state, ...}` | Update address |
-| `DELETE` | `/users/addresses/:id` | JWT Required | — | Delete address |
-
----
-
-### 2.7 Cart Service (`:8086`)
-
-- **Port**: `8086`
-- **Stack**: Go 1.25, Gin, Redis, AWS SNS
-- **Primary Data Store**: Redis (`cart:{user_id}`)
-- **Main Responsibility**: Manages fast, temporary customer shopping cart data stored strictly in Redis. Publishes `checkout.requested` messages to SNS topic `order-events` upon checkout initiation.
-
-#### Endpoints Specification
-
-| Method | Path | Auth / Role | Request Body | Purpose |
-|:---|:---|:---|:---|:---|
-| `GET` | `/cart` | JWT Required | — | Get user shopping cart contents |
-| `POST` | `/cart/items` | JWT Required | `{product_id, quantity, price}` | Add item to cart |
-| `PUT` | `/cart/items/:product_id` | JWT Required | `{quantity}` | Update item quantity |
-| `DELETE` | `/cart/items/:product_id` | JWT Required | — | Remove item from cart |
-| `DELETE` | `/cart` | JWT Required | — | Clear entire cart |
-| `POST` | `/cart/checkout` | JWT Required | `{shipping_address_id, coupon_code}` | Triggers async checkout event to SNS |
-
----
-
-### 2.8 Payment Service (`:8087`)
-
-- **Port**: `8087`
-- **Stack**: Go 1.25, Gin, GORM, Postgres, Stripe SDK, SQS/SNS
-- **Primary Data Store**: PostgreSQL (`payments`, `stripe_processed_events` tables)
-- **Main Responsibility**: Manages Stripe Checkout session creation, payment status tracking, Stripe webhook verification (`/stripe/webhook`), idempotency processing via event tracking, and SNS `payment-events` publishing.
-
-#### Endpoints Specification
-
-| Method | Path | Auth / Role | Request Body / Params | Purpose |
-|:---|:---|:---|:---|:---|
-| `POST` | `/payments/create-session` | Internal / Order | `{order_id, user_id, amount, currency, idempotency_key}` | Create Stripe Checkout Session |
-| `GET` | `/payments/order/:order_id` | JWT / BFF | — | Query payment status and `checkout_url` |
-| `POST` | `/payments/stripe/webhook` | Public (Stripe Signature) | Stripe Event Payload | Processes Stripe webhook & deduplicates via `event.id` |
-
----
-
-### 2.9 BFF (Backend-For-Frontend) Service (`:8088`)
-
-- **Port**: `8088`
-- **Stack**: Go 1.25, Gin, Redis
-- **Primary Data Store**: Redis (`checkout:lock:{idempotency_key}`)
-- **Main Responsibility**: Aggregates responses from underlying microservices for single-page storefront loads (home catalog + cart + user profile). Orchestrates async checkout using Redis `SetNX` distributed locks to prevent double submission and polls Payment Service for the Stripe checkout URL.
-
-#### Endpoints Specification
-
-| Method | Path | Auth / Role | Request Body / Headers | Purpose |
-|:---|:---|:---|:---|:---|
-| `GET` | `/bff/home` | Public | — | Aggregated response: featured products, categories, cart summary |
-| `POST` | `/bff/checkout` | JWT Required | Header: `Idempotency-Key`<br/>Body: `{shipping_address_id, coupon_code}` | Idempotent async checkout orchestrator |
-| `GET` | `/bff/profile` | JWT Required | — | Aggregated user profile, addresses, and recent orders |
-
----
-
-### 2.10 Agent Service (`:8089`)
+### 2.5 Agent Service (`:8089`)
 
 - **Port**: `8089` (Internal container: `8000`)
 - **Stack**: Python 3.11+, FastAPI, Uvicorn, Requests / HTTPX
 - **Primary Data Store**: Stateless
-- **Main Responsibility**: Provides a conversational AI assistant endpoint that interfaces directly with the BFF service to query catalog items, check cart status, and answer user e-commerce inquiries.
+- **Main Responsibility**: Provides a conversational AI assistant endpoint that calls domain and `/bff/admin/*` analytics paths through the API gateway to query catalog items, check cart status, and answer user e-commerce inquiries.
 
 #### Endpoints Specification
 
@@ -277,41 +196,7 @@ An exhaustive technical reference manual covering every microservice, database s
 
 ---
 
-### 2.11 Promotion Service (`:8090`)
-
-- **Port**: `8090`
-- **Stack**: Go 1.25, Gin, GORM, Postgres
-- **Primary Data Store**: PostgreSQL (`coupons` table)
-- **Main Responsibility**: Coupon code management, discount calculation (percentage or flat discount), minimum order value validation, and atomic usage count incrementing.
-
-#### Endpoints Specification
-
-| Method | Path | Auth / Role | Request Body | Purpose |
-|:---|:---|:---|:---|:---|
-| `POST` | `/promotions/validate` | JWT Required | `{code, order_amount}` | Validate coupon eligibility & calculate discount |
-| `POST` | `/promotions/coupons` | Admin (`role=admin`) | `{code, discount_type, discount_value, usage_limit, expires_at}` | Create new coupon rule |
-| `GET` | `/promotions/coupons` | Admin (`role=admin`) | — | List all coupons |
-| `DELETE` | `/promotions/coupons/:id` | Admin (`role=admin`) | — | Deactivate coupon |
-
----
-
-### 2.12 Shipping Service (`:8091`)
-
-- **Port**: `8091`
-- **Stack**: Go 1.25, Gin
-- **Primary Data Store**: In-Memory / Static JSON Rate Rules
-- **Main Responsibility**: Calculates estimated shipping rates and delivery dates based on shipping zone, destination country/postal code, and package weight/item count.
-
-#### Endpoints Specification
-
-| Method | Path | Auth / Role | Request Body | Purpose |
-|:---|:---|:---|:---|:---|
-| `POST` | `/shipping/rates` | Public | `{address_id, country, state, postal_code, items_count}` | Calculate available shipping options and rates |
-| `GET` | `/health` | Public | — | Liveness check |
-
----
-
-### 2.13 Notification Service (`:8092`)
+### 2.6 Notification Service (`:8092`)
 
 - **Port**: `8092`
 - **Stack**: Go 1.25, Gin, GORM, Postgres, AWS SQS
@@ -336,7 +221,7 @@ An exhaustive technical reference manual covering every microservice, database s
 PostgreSQL is managed using **`golang-migrate`** SQL scripts located in `backend/migrations/`.
 
 #### 1. `users` Table
-Stores user credentials, verification status, role, and profile parameters. Owned jointly by `auth-service` (auth credentials) and `user-service` (profile fields).
+Stores user credentials, verification status, role, and profile parameters. Owned solely by `identity-service` (single `User` model).
 
 ```sql
 CREATE TABLE users (
@@ -362,7 +247,7 @@ CREATE INDEX idx_users_deleted_at ON users (deleted_at);
 ```
 
 #### 2. `refresh_tokens` Table
-Stores issued JWT refresh tokens. Owned by `auth-service`.
+Stores issued JWT refresh tokens. Owned by `identity-service`.
 
 ```sql
 CREATE TABLE refresh_tokens (
@@ -380,7 +265,7 @@ CREATE INDEX idx_refresh_tokens_expires_at ON refresh_tokens (expires_at);
 ```
 
 #### 3. `addresses` Table
-Stores customer shipping and billing addresses. Owned by `user-service`.
+Stores customer shipping and billing addresses. Owned by `identity-service`.
 
 ```sql
 CREATE TABLE addresses (
@@ -442,7 +327,7 @@ CREATE INDEX idx_order_items_order_id ON order_items (order_id);
 ```
 
 #### 6. `payments` Table
-Stores payment transactions and Stripe session links. Owned by `payment-service`.
+Stores payment transactions and Stripe session links. Owned by `order-service`.
 
 ```sql
 CREATE TABLE payments (
@@ -471,7 +356,7 @@ CREATE INDEX idx_payments_deleted_at ON payments (deleted_at);
 ```
 
 #### 7. `stripe_processed_events` Table
-Tracks processed Stripe webhook event IDs to guarantee idempotent webhook processing. Owned by `payment-service`.
+Tracks processed Stripe webhook event IDs to guarantee idempotent webhook processing. Owned by `order-service`.
 
 ```sql
 CREATE TABLE stripe_processed_events (
@@ -482,7 +367,7 @@ CREATE TABLE stripe_processed_events (
 ```
 
 #### 8. `coupons` Table
-Stores promotional code rules and usage counts. Owned by `promotion-service`.
+Stores promotional code rules and usage counts. Owned by `order-service`.
 
 ```sql
 CREATE TABLE coupons (
@@ -527,7 +412,7 @@ CREATE INDEX idx_notification_logs_user_id ON notification_logs (user_id);
 
 ### 3.2 AWS DynamoDB Tables
 
-Managed by AWS SDK v2 in `product-service` and `inventory-service`.
+Managed by AWS SDK v2 in `catalog-service`.
 
 #### 1. `Products` Table (`DDB_TABLE_PRODUCTS`)
 - **Partition Key (PK)**: `id` (String / UUID)
@@ -563,11 +448,12 @@ Category-to-product adjacency table to support many-to-many relationships cleanl
 
 | Key Format | Type | Managing Service | TTL | Description |
 |:---|:---:|:---|:---:|:---|
-| `cart:{user_id}` | Hash / JSON | `cart-service` | 7 Days | User active shopping cart items |
-| `checkout:lock:{idempotency_key}` | String | `bff-service` | 60 Seconds | `SetNX` lock to prevent duplicate checkout requests |
+| `cart:user:{user_id}` | JSON | `catalog-service` | 7 Days | User active shopping cart items |
+| `idem:cart:{user_id}:{hash}` | String | `catalog-service` | 7 Days | Checkout idempotency replay (order_id) |
 | `ratelimit:{ip_or_user_id}` | String | `api-gateway` | 1 Minute | Counter for API Gateway rate limiting |
-| `product:cache:{product_id}` | JSON | `product-service` | 1 Hour | Cached product catalog item |
-| `catalog:version` | Integer | `product-service` | Persistent | Incremented on catalog mutations to invalidate cache |
+| `product:detail:{id}` | JSON | `catalog-service` | TTL | Cached product catalog item |
+| `products:version` | Integer | `catalog-service` | Persistent | Incremented on catalog mutations to invalidate cache |
+| `bulk_import:queue`, `bulk_import:job:{id}` | List / JSON | `catalog-service` | 24h (jobs) | Async bulk-import jobs |
 
 ---
 
@@ -575,7 +461,7 @@ Category-to-product adjacency table to support many-to-many relationships cleanl
 
 - **Bucket Name**: `shopswift` (`AWS_S3_BUCKET`)
 - **Object Prefix**: `products/` (`AWS_S3_PREFIX`)
-- **File Upload Handler**: `product-service` handles multipart image uploads, assigns a unique UUID filename, uploads to S3, and returns the public CDN / LocalStack object URL: `http://localhost:4566/shopswift/products/{uuid}.png`.
+- **File Upload Handler**: `catalog-service` handles presigned image uploads, assigns a unique UUID filename, uploads to S3, and returns the public CDN / LocalStack object URL: `http://localhost:4566/shopswift/products/{uuid}.png`.
 
 ---
 
@@ -583,7 +469,7 @@ Category-to-product adjacency table to support many-to-many relationships cleanl
 
 ```
                        ┌──────────────────────┐
-                       │   Cart / BFF Service │
+                       │   Catalog (cart)     │
                        └──────────┬───────────┘
                                   │ Publish: checkout.requested
                        ┌──────────▼───────────┐
@@ -593,9 +479,9 @@ Category-to-product adjacency table to support many-to-many relationships cleanl
                        ┌──────────▼───────────┐
                        │ SQS: order-processing│ ───> [ Order Service ]
                        └──────────────────────┘           │
-                                                          │ Enqueue
-                                               ┌──────────▼───────────┐
-                                               │ SQS: payment-request │ ───> [ Payment Service ]
+                                                          │ Enqueue (in-process consumer
+                                               ┌──────────▼───────────┐  reads the durable queue)
+                                               │ SQS: payment-request │ ───> [ Order Service ]
                                                └──────────────────────┘           │
                                                                                   │ Publish: payment.succeeded
                                                ┌──────────────────────┐           │

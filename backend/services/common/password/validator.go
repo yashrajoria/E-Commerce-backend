@@ -1,7 +1,7 @@
 // Package password provides the shared password-strength policy used by
-// every service that accepts a new or changed password (auth-service
-// register/admin-create, user-service change-password). Previously each
-// service carried its own byte-for-byte copy of this file.
+// every service that accepts a new or changed password (identity-service
+// register/admin-create/change-password). Previously each service carried
+// its own byte-for-byte copy of this file.
 package password
 
 import (

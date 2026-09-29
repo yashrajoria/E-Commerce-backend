@@ -7,20 +7,10 @@ flowchart LR
     API[API_Gateway_8080]
   end
 
-  subgraph BFF_Service
-    BFF[BFF_8088]
-  end
-
   subgraph Services
-    AUTH[Auth_8081]
-    USER[User_8085]
-    PROD[Product_8082]
-    CART[Cart_8086]
+    IDENT[Identity_8081]
+    CATALOG[Catalog_8082]
     ORDER[Order_8083]
-    PAYMENT[Payment_8087]
-    INVENT[Inventory_8084]
-    PROMO[Promotion_8090]
-    SHIP[Shipping_8091]
     NOTIF[Notification_8092]
     AGENT[Agent_8089]
   end
@@ -36,38 +26,24 @@ flowchart LR
   end
 
   U -->|HTTP_cookies| API
-  API -->|proxy| BFF
-  API -->|proxy| AUTH
-  API -->|proxy| USER
-  API -->|proxy| PROD
-  API -->|proxy| CART
+  API -->|proxy| IDENT
+  API -->|proxy| CATALOG
   API -->|proxy| ORDER
-  API -->|proxy| PAYMENT
-  API -->|proxy| INVENT
-  API -->|proxy| PROMO
-  API -->|proxy| SHIP
   API -->|proxy| NOTIF
   API -->|proxy| AGENT
 
-  BFF -->|HTTP_via_gateway| API
-  BFF -->|idempotency| REDIS
-
-  CART --> REDIS
+  CATALOG --> REDIS
   ORDER --> PG
-  AUTH --> PG
-  USER --> PG
-  PROMO --> PG
+  IDENT --> PG
   NOTIF --> PG
-  PAYMENT --> PG
 
-  PROD --> S3
-  PROD --> DDB
-  INVENT --> DDB
+  CATALOG --> S3
+  CATALOG --> DDB
 
-  CART -->|SNS| SNS_SQS
+  CATALOG -->|SNS_order_events| SNS_SQS
   ORDER --> SNS_SQS
-  PAYMENT --> SNS_SQS
-  PAYMENT --> STRIPE
-  NOTIF -->|SQS| SNS_SQS
-  ORDER -->|reserve| INVENT
-  AGENT -->|BFF_direct| BFF
+  ORDER --> STRIPE
+  NOTIF -->|SQS_consume| SNS_SQS
+
+  AGENT -->|via_gateway| API
+```

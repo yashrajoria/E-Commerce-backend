@@ -8,7 +8,7 @@ This document contains key commands, architectural rules, code style guidelines,
 
 - **Repository**: ShopSwift E-Commerce Microservices Backend
 - **Core Stack**: Go 1.25 (multi-module workspace in `backend/go.work`), Python 3.11+ FastAPI (`agent-service`), PostgreSQL (`ecommerce` DB), DynamoDB (LocalStack / AWS), Redis 7, AWS S3, SNS/SQS.
-- **Architecture**: Edge API Gateway (`:8080`) + BFF Service (`:8088`) + 11 Domain Microservices + 1 AI Agent Service.
+- **Architecture**: Edge API Gateway (`:8080`) + 3 Domain Microservices (identity, catalog, order) + notification consumer + 1 AI Agent Service.
 - **Documentation**:
   - [MICROSERVICE_ARCHITECTURE.md](MICROSERVICE_ARCHITECTURE.md) — Mermaid sequence diagrams and storage ownership rules.
   - [SERVICES_AND_DATABASES.md](SERVICES_AND_DATABASES.md) — per-service data model detail.
@@ -22,17 +22,10 @@ This document contains key commands, architectural rules, code style guidelines,
 | Service | Port | Technology | Primary Data Store | Main Path / Purpose |
 |:---|:---:|:---|:---|:---|
 | **api-gateway** | `8080` | Go / Gin | Redis | `/` (Edge router, JWT auth check, rate limiting, request correlation) |
-| **auth-service** | `8081` | Go / Gin | Postgres (`users`, `refresh_tokens`) | `/auth` (Identity, login, token refresh, admin bootstrap) |
-| **product-service** | `8082` | Go / Gin | DynamoDB + Redis + S3 | `/products`, `/categories` (Catalog, image upload, caching) |
-| **order-service** | `8083` | Go / Gin | Postgres (`orders`, `order_items`) + SQS | `/orders` (Order state machine, stock reserve, payment dispatch) |
-| **inventory-service**| `8084` | Go / Gin | DynamoDB (`Inventory`) | `/inventory` (Stock levels, idempotent reservation with token) |
-| **user-service** | `8085` | Go / Gin | Postgres (`users`, `addresses`) | `/users` (Profiles, customer address management) |
-| **cart-service** | `8086` | Go / Gin | Redis | `/cart` (User shopping cart state, SNS checkout event trigger) |
-| **payment-service** | `8087` | Go / Gin | Postgres (`payments`, `stripe_processed_events`) | `/payments` (Stripe Checkout sessions, webhook deduplication) |
-| **bff-service** | `8088` | Go / Gin | Redis | `/bff` (Storefront aggregation, SetNX checkout lock, URL polling) |
-| **agent-service** | `8089` | Python / FastAPI | Stateless | `/agent` (AI Assistant calling BFF directly) |
-| **promotion-service**| `8090` | Go / Gin | Postgres (`coupons`) | `/promotions` (Coupons, atomic usage limits & discounts) |
-| **shipping-service** | `8091` | Go / Gin | In-Memory JSON | `/shipping` (Zone-based shipping calculation) |
+| **identity-service** | `8081` | Go / Gin | Postgres (`users`, `refresh_tokens`, `addresses`) | `/auth`, `/users` (Identity, login, token refresh, admin bootstrap, profiles, addresses) |
+| **catalog-service** | `8082` | Go / Gin | DynamoDB + Redis + S3 | `/products`, `/categories`, `/inventory`, `/cart` (Catalog, stock, cart, caching) |
+| **order-service** | `8083` | Go / Gin | Postgres (`orders`, `order_items`, `coupons`, `payments`, `stripe_processed_events`) + SQS + Stripe | `/orders`, `/coupons`, `/shipping`, `/payment` (Orders, coupons, shipping rates, Stripe) |
+| **agent-service** | `8089` | Python / FastAPI | Stateless | `/agent` (AI Assistant via gateway) |
 | **notification-service**| `8092` | Go / Gin | Postgres (`notification_logs`) + SQS | `/notifications` (Async notification consumer & email logger) |
 | **OpenAPI Docs UI** | `8099` | Swagger UI | — | http://localhost:8099 |
 | **LocalStack** | `4566` | AWS Emulator | S3, DDB, SNS, SQS | http://localhost:4566 |
@@ -91,11 +84,11 @@ cd backend
 # Run unit tests across all Go workspace modules
 go test ./...
 
-# Run unit tests in a specific service (e.g. cart-service)
-cd services/cart-service && go test -v ./...
+# Run unit tests in a specific service (e.g. catalog-service)
+cd services/catalog-service && go test -v ./...
 
 # Run a single Go test by name
-cd services/cart-service && go test -v -run TestFuncName ./...
+cd services/catalog-service && go test -v -run TestFuncName ./...
 
 # Run unit tests in Python agent service
 cd services/agent-service && pytest
@@ -141,25 +134,19 @@ Each Go domain microservice follows standard clean architecture boundaries:
 
 ### 4.5 Database Ownership Rules
 - **PostgreSQL**: Do NOT perform cross-service database operations directly unless specified. Respect service table ownership:
-  - `auth-service`: `users` (credentials/auth), `refresh_tokens`
-  - `user-service`: `users` (profile fields), `addresses`
-  - `order-service`: `orders`, `order_items`
-  - `payment-service`: `payments`, `stripe_processed_events`
-  - `promotion-service`: `coupons`
+  - `identity-service`: `users`, `refresh_tokens`, `addresses`
+  - `order-service`: `orders`, `order_items`, `coupons`, `payments`, `stripe_processed_events`, `payment_outbox_events`
   - `notification-service`: `notification_logs`
 - **DynamoDB**:
-  - `product-service` owns `Products`, `Categories`, and `ProductCategories` tables.
-  - `inventory-service` owns `Inventory` table. Use `ClientRequestToken` on conditional updates for stock reservations.
+  - `catalog-service` owns `Products`, `Categories`, `ProductCategories`, and `Inventory` tables. Use `ClientRequestToken` on conditional updates for stock reservations.
 - **Redis**:
-  - `cart-service` uses `cart:{user_id}` keys.
-  - `bff-service` uses `checkout:lock:{idempotency_key}` keys with `SetNX` for distributed checkout locking.
+  - `catalog-service` uses `cart:user:{user_id}` + `idem:cart:*` keys (cart + checkout replay), `product:detail:*` + `products:version` (cache), `bulk_import:*` (import jobs).
   - `api-gateway` uses Redis for request rate limiting.
 
 ### 4.6 Asynchronous Messaging & Idempotency Rules
 - **SNS/SQS**:
-  - `cart-service` publishes `checkout.requested` to `order-events` topic.
-  - `order-service` consumes `order-processing-queue` and enqueues to `payment-request-queue`.
-  - `payment-service` handles Stripe sessions and publishes `payment.succeeded` to `payment-events` topic.
+  - `catalog-service` (cart) publishes `checkout.requested` to `order-events` topic.
+  - `order-service` consumes `order-processing-queue`, runs checkout → Stripe → webhook fulfillment in-process, and publishes `payment.succeeded` to `payment-events` topic via transactional outbox.
   - `notification-service` consumes `notification-queue`.
 - **Idempotency**:
   - Every checkout call must supply an `Idempotency-Key` header.
