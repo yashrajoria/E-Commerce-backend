@@ -94,3 +94,12 @@ tmp-*/
 !docs/**/*.md
 !docs/*.md
 *.mmd
+# Python virtualenvs (agent-service local test venvs)
+.venv/
+venv/
+
+# Postgres dumps from backup_postgres.sh (copy off-box for real DR)
+backups/*.dump
+
+# k6 / load-test artifacts
+tools/loadtest/*.summary.json
