@@ -70,8 +70,9 @@ jobs:
           # Build context must be backend/ — the service Dockerfiles COPY paths
           # relative to that root (pkg/aws, services/common, services/<name>).
           # Matches the context used by backend/docker-compose.yml.
+          # `file:` is resolved against the workspace root, not the context.
           context: ./backend
-          file: ./services/${{ matrix.service }}/Dockerfile
+          file: ./backend/services/${{ matrix.service }}/Dockerfile
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:latest
