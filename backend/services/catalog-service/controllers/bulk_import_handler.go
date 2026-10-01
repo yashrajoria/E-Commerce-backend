@@ -192,7 +192,7 @@ func (h *BulkImportHandler) enqueueJob(ctx context.Context, fileHandle multipart
 	// Setup storage directory
 	storageDir := os.Getenv("BULK_STORAGE_DIR")
 	if storageDir == "" {
-		storageDir = "./data/bulk_imports"
+		storageDir = "/tmp/bulk_imports"
 	}
 	if err := os.MkdirAll(storageDir, 0o755); err != nil {
 		return "", fmt.Errorf("failed to create storage directory: %w", err)
