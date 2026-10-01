@@ -127,6 +127,11 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	// Refresh must be public: access JWT is often expired when this is called.
 	// Auth is the refresh_token cookie, not __session.
 	authStrict.POST("/refresh", authProxy)
+	// BFF alias used by admin/storefront SSR (proxyAuthAction, ssrAuth,
+	// requireAdminApi call /bff/auth/refresh on the gateway).
+	// Exact target (not authProxy): authProxy derives suffix from the
+	// path, which fails for the /bff prefix — this forwards to /auth/refresh.
+	public.POST("/bff/auth/refresh", forwardTo(authBase+"/auth/refresh"))
 
 	// Auth — other public actions
 	public.POST("/auth/verify-email", authProxy)
@@ -198,6 +203,14 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	agentAdmin := newAdminGroup(protected, "/agent")
 	agentAdmin.Any("", agent)
 	agentAdmin.Any("/*any", agent)
+
+	// Agent BFF aliases (frontend contract: admin-new pages/api/agent/*
+	// tries bff/admin/agent/* then bff/agent/* then agent/*).
+	// Without these the admin AI assistant gets 404 on tools/query/session.
+	// Single wildcard per group (gin panics on static + wildcard siblings).
+	bffAgent := protected.Group("/bff/agent")
+	bffAgent.Any("/*any", agent)
+	bffAdmin.Any("/agent/*any", agent)
 
 	// =========================================================================
 	// PROTECTED ROUTES — JWT required

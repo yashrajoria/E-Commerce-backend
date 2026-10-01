@@ -18,7 +18,13 @@ func InitLogger() error {
 	if env == "production" {
 		Log, err = zap.NewProduction()
 	} else {
-		Log, err = zap.NewDevelopment()
+		// Development console output, but only attach stack traces on
+		// Error+ (default NewDevelopment stacks on Warn+, which turns
+		// every expected 401/404 into multi-line stack noise).
+		cfg := zap.NewDevelopmentConfig()
+		cfg.DisableStacktrace = false
+		cfg.Level.SetLevel(zap.DebugLevel)
+		Log, err = cfg.Build(zap.AddStacktrace(zap.ErrorLevel))
 	}
 	if err != nil {
 		return err

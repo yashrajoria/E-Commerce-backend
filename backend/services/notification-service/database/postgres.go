@@ -96,7 +96,7 @@ func ConnectPostgres(logger *zap.Logger, autoMigrateModels ...interface{}) (*gor
 
 func Connect(logger *zap.Logger) error {
 	var err error
-	DB, err = ConnectPostgres(logger, &models.NotificationLog{})
+	DB, err = ConnectPostgres(logger, &models.NotificationLog{}, &models.NotificationEvent{})
 	if err != nil {
 		logger.Error("Failed to connect to PostgreSQL", zap.Error(err))
 		return err

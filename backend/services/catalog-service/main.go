@@ -132,7 +132,7 @@ func main() {
 	// Start bulk import worker (consumes persisted files from storage)
 	storageDir := os.Getenv("BULK_STORAGE_DIR")
 	if storageDir == "" {
-		storageDir = "./data/bulk_imports"
+		storageDir = "/tmp/bulk_imports"
 	}
 	services.StartBulkImportWorker(context.Background(), rdb, productService, storageDir)
 

@@ -135,6 +135,7 @@ services:
       - CLOUDWATCH_ENABLED=${CLOUDWATCH_ENABLED:-false}
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
+      - BULK_STORAGE_DIR=/tmp/bulk_imports
     depends_on:
       redis:
         condition: service_healthy
@@ -275,6 +276,7 @@ services:
       - RATE_LIMIT_GLOBAL=${RATE_LIMIT_GLOBAL:-1000}
       - RATE_LIMIT_STRICT=${RATE_LIMIT_STRICT:-30}
       - RATE_LIMIT_WINDOW_SECONDS=${RATE_LIMIT_WINDOW_SECONDS:-60}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001}
       # Comma-separated CIDRs of reverse proxies allowed to set
       # X-Forwarded-For (e.g. an ALB/nginx in front of this container). Left
       # unset here because nothing sits in front of the gateway in this

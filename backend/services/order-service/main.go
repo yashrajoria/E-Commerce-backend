@@ -63,7 +63,7 @@ func main() {
 		logger.Fatal("DB connection failed", zap.Error(err))
 	}
 	if commondb.AllowAutoMigrate() {
-		if err := database.DB.AutoMigrate(&models.Order{}, &models.OrderItem{}, &promotionmodels.Coupon{}, &paymentmodels.Payment{}, &paymentmodels.StripeProcessedEvent{}, &paymentmodels.OutboxEvent{}); err != nil {
+		if err := database.DB.AutoMigrate(&models.Order{}, &models.OrderItem{}, &models.OutboxEvent{}, &promotionmodels.Coupon{}, &paymentmodels.Payment{}, &paymentmodels.StripeProcessedEvent{}, &paymentmodels.OutboxEvent{}); err != nil {
 			logger.Fatal("Migration failed", zap.Error(err))
 		}
 	}

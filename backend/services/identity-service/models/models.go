@@ -72,6 +72,7 @@ type RefreshToken struct {
 	UserID    uuid.UUID `gorm:"type:uuid;not null;index"`
 	FamilyID  uuid.UUID `gorm:"type:uuid;not null;index"`
 	Revoked   bool      `gorm:"default:false"`
+	RevokedAt *time.Time `gorm:""`
 	ExpiresAt time.Time `gorm:"not null;index"`
 	CreatedAt time.Time `gorm:"autoCreateTime"`
 }

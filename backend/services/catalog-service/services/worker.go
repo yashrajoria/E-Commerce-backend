@@ -23,7 +23,7 @@ func StartBulkImportWorker(ctx context.Context, rdb *redis.Client, productSvc *P
 
 	// ensure storage dir exists
 	if storageDir == "" {
-		storageDir = "./data/bulk_imports"
+		storageDir = "/tmp/bulk_imports"
 	}
 	if err := os.MkdirAll(storageDir, 0o755); err != nil {
 		zap.L().Error("failed to create bulk storage dir", zap.Error(err))
