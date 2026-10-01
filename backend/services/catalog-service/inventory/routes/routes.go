@@ -8,7 +8,7 @@ import (
 
 // RegisterRoutes registers all inventory service routes.
 // Admin mutations require X-User-Role=admin (via gateway).
-// reserve/release/confirm/check require INTERNAL_SERVICE_TOKEN (order/product mesh).
+// reserve/release/confirm/restock/check require INTERNAL_SERVICE_TOKEN (order/product mesh).
 func RegisterRoutes(r *gin.Engine, ctrl *controllers.InventoryController) {
 	// Prevent /inventory ↔ /inventory/ 301 loops through the gateway proxy.
 	r.RedirectTrailingSlash = false
@@ -36,6 +36,7 @@ func RegisterRoutes(r *gin.Engine, ctrl *controllers.InventoryController) {
 			mesh.POST("/reserve", ctrl.ReserveStock)
 			mesh.POST("/release", ctrl.ReleaseStock)
 			mesh.POST("/confirm", ctrl.ConfirmStock)
+			mesh.POST("/restock", ctrl.RestockStock)
 		}
 	}
 }

@@ -37,6 +37,7 @@ type InventoryRepository interface {
 	ReserveAll(ctx context.Context, orderID string, items []models.ReserveItem) error
 	ReleaseAll(ctx context.Context, orderID string, items []models.ReserveItem) error
 	ConfirmAll(ctx context.Context, orderID string, items []models.ReserveItem) error
+	RestockAll(ctx context.Context, orderID string, items []models.ReserveItem) error
 	CheckStock(ctx context.Context, productID string, quantity int) (*models.StockCheckResult, error)
 	ListAll(ctx context.Context, limit int32, exclusiveStartKey map[string]types.AttributeValue) ([]models.Inventory, map[string]types.AttributeValue, error)
 }
@@ -385,6 +386,49 @@ func (r *DynamoInventoryRepository) ConfirmAll(ctx context.Context, orderID stri
 	})
 	if err != nil {
 		return fmt.Errorf("transact confirm failed: %w", err)
+	}
+	return nil
+}
+
+// RestockAll adds confirmed quantities back to available stock (paid order
+// cancelled after ConfirmStock removed its reservation). No reservation entry
+// is expected to exist, so there is deliberately no order_reservations
+// condition — ReleaseAll would fail here with ConditionalCheckFailed.
+// Idempotency is guarded upstream by the order's paid -> cancelled status
+// transition (optimistic locking), so this is a plain atomic increment.
+func (r *DynamoInventoryRepository) RestockAll(ctx context.Context, orderID string, items []models.ReserveItem) error {
+	transactItems := make([]types.TransactWriteItem, 0, len(items))
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	for _, item := range items {
+		key, _ := attributevalue.MarshalMap(map[string]string{"id": item.ProductID})
+		qtyAV, _ := attributevalue.Marshal(item.Quantity)
+		nowAV, _ := attributevalue.Marshal(now)
+
+		expr := "SET #avail = #avail + :qty, updated_at = :now"
+		transactItems = append(transactItems, types.TransactWriteItem{
+			Update: &types.Update{
+				TableName:        &r.table,
+				Key:              key,
+				UpdateExpression: &expr,
+				ExpressionAttributeNames: map[string]string{
+					"#avail": "available",
+				},
+				ExpressionAttributeValues: map[string]types.AttributeValue{
+					":qty": qtyAV,
+					":now": nowAV,
+				},
+			},
+		})
+	}
+
+	token := inventoryTxnToken("k", orderID)
+	_, err := r.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
+		TransactItems:      transactItems,
+		ClientRequestToken: &token,
+	})
+	if err != nil {
+		return fmt.Errorf("transact restock failed: %w", err)
 	}
 	return nil
 }

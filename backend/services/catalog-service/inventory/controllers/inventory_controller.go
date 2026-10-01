@@ -166,6 +166,26 @@ func (ic *InventoryController) ConfirmStock(c *gin.Context) {
 	})
 }
 
+// RestockStock returns confirmed stock to available (paid order cancelled)
+// POST /inventory/restock
+func (ic *InventoryController) RestockStock(c *gin.Context) {
+	var req models.RestockRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request", "details": err.Error()})
+		return
+	}
+
+	if err := ic.service.RestockStock(c.Request.Context(), &req); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to restock"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":  "Stock restocked successfully",
+		"order_id": req.OrderID,
+	})
+}
+
 // CheckStock checks stock availability for multiple items
 // POST /inventory/check
 func (ic *InventoryController) CheckStock(c *gin.Context) {

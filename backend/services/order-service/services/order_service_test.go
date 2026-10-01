@@ -62,13 +62,17 @@ func TestCreateOrderPropagatesIdempotencyKey(t *testing.T) {
 	}
 }
 
-// fakeInventoryReleaser records ReleaseStock calls for cancellation tests.
+// fakeInventoryReleaser records ReleaseStock/RestockStock calls for cancellation tests.
 type fakeInventoryReleaser struct {
-	mu         sync.Mutex
-	calls      int
-	lastOrder  string
-	lastItems  []ReserveItem
-	releaseErr error
+	mu          sync.Mutex
+	calls       int
+	restockCalls int
+	lastOrder   string
+	lastItems   []ReserveItem
+	lastRestockOrder string
+	lastRestockItems []ReserveItem
+	releaseErr  error
+	restockErr  error
 }
 
 func (f *fakeInventoryReleaser) ReleaseStock(ctx context.Context, orderID string, items []ReserveItem) error {
@@ -78,6 +82,15 @@ func (f *fakeInventoryReleaser) ReleaseStock(ctx context.Context, orderID string
 	f.lastOrder = orderID
 	f.lastItems = items
 	return f.releaseErr
+}
+
+func (f *fakeInventoryReleaser) RestockStock(ctx context.Context, orderID string, items []ReserveItem) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.restockCalls++
+	f.lastRestockOrder = orderID
+	f.lastRestockItems = items
+	return f.restockErr
 }
 
 func TestCancelOrder_ReleasesStockOnSuccess(t *testing.T) {
@@ -105,8 +118,47 @@ func TestCancelOrder_ReleasesStockOnSuccess(t *testing.T) {
 	if releaser.calls != 1 {
 		t.Fatalf("expected ReleaseStock called once, got %d", releaser.calls)
 	}
+	if releaser.restockCalls != 0 {
+		t.Fatalf("expected no RestockStock for pending_payment cancel, got %d", releaser.restockCalls)
+	}
 	if releaser.lastOrder != orderID.String() {
 		t.Fatalf("unexpected order id passed to ReleaseStock: %s", releaser.lastOrder)
+	}
+}
+
+func TestCancelOrder_PaidRestocksInsteadOfRelease(t *testing.T) {
+	orderID := uuid.New()
+	productID := uuid.New()
+	repo := &fakeOrderRepo{
+		order: models.Order{
+			ID:     orderID,
+			Status: "paid",
+			OrderItems: []models.OrderItem{
+				{ProductID: productID, Quantity: 3},
+			},
+		},
+	}
+	releaser := &fakeInventoryReleaser{}
+	svc := NewOrderServiceSQS(repo, nil, "", "", releaser)
+
+	order, err := svc.CancelOrder(context.Background(), orderID, "admin-1", "refund")
+	if err != nil {
+		t.Fatalf("CancelOrder returned error: %v", err)
+	}
+	if order.Status != "cancelled" {
+		t.Fatalf("expected status cancelled, got %s", order.Status)
+	}
+	if releaser.restockCalls != 1 {
+		t.Fatalf("expected RestockStock called once for paid cancel, got %d", releaser.restockCalls)
+	}
+	if releaser.calls != 0 {
+		t.Fatalf("expected no ReleaseStock for paid cancel, got %d", releaser.calls)
+	}
+	if releaser.lastRestockOrder != orderID.String() {
+		t.Fatalf("unexpected order id passed to RestockStock: %s", releaser.lastRestockOrder)
+	}
+	if len(releaser.lastRestockItems) != 1 || releaser.lastRestockItems[0].Quantity != 3 {
+		t.Fatalf("unexpected restock items: %+v", releaser.lastRestockItems)
 	}
 }
 

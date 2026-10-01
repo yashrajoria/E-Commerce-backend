@@ -50,10 +50,12 @@ func (e *ServiceError) Error() string {
 }
 
 // InventoryReleaser is the subset of InventoryClient's behavior OrderService
-// needs to release reserved stock on cancellation. Defined here (rather than
-// depending on the concrete *InventoryClient) so tests can supply a fake.
+// needs to release reserved stock on cancellation and restock confirmed stock
+// when a paid order is cancelled. Defined here (rather than depending on the
+// concrete *InventoryClient) so tests can supply a fake.
 type InventoryReleaser interface {
 	ReleaseStock(ctx context.Context, orderID string, items []ReserveItem) error
+	RestockStock(ctx context.Context, orderID string, items []ReserveItem) error
 }
 
 // cancellableStatuses are the order statuses an admin may cancel from.
@@ -240,10 +242,15 @@ func (s *OrderService) GetOrderByID(ctx context.Context, userID string, order_id
 	return order, nil
 }
 
-// CancelOrder transitions an order to "cancelled" (admin action) and releases
-// any reserved inventory for it. Only pending_payment/paid orders can be
-// cancelled; anything else (already cancelled, completed, payment_failed) is
-// rejected with 409 so the caller doesn't silently no-op on a terminal order.
+// CancelOrder transitions an order to "cancelled" (admin action) and restores
+// its inventory. Only pending_payment/paid orders can be cancelled; anything
+// else (already cancelled, completed, payment_failed) is rejected with 409 so
+// the caller doesn't silently no-op on a terminal order.
+//
+// Inventory handling differs by prior status:
+//   - pending_payment: reservation still exists → ReleaseStock (available += qty, reserved -= qty)
+//   - paid: ConfirmStock already removed the reservation while keeping available
+//     deducted → RestockStock (available += qty) so stock isn't permanently depleted.
 func (s *OrderService) CancelOrder(ctx context.Context, orderID uuid.UUID, adminID, reason string) (*models.Order, *ServiceError) {
 	order, err := s.orderRepo.FindByID(ctx, orderID)
 	if err != nil {
@@ -261,6 +268,7 @@ func (s *OrderService) CancelOrder(ctx context.Context, orderID uuid.UUID, admin
 		}
 	}
 
+	wasPaid := order.Status == "paid"
 	now := time.Now().UTC()
 	if err := s.orderRepo.UpdateOrderStatus(ctx, orderID, order.Status, "cancelled", map[string]interface{}{"canceled_at": now}); err != nil {
 		if errors.Is(err, repositories.ErrStatusConflict) {
@@ -275,9 +283,14 @@ func (s *OrderService) CancelOrder(ctx context.Context, orderID uuid.UUID, admin
 		for _, item := range order.OrderItems {
 			items = append(items, ReserveItem{ProductID: item.ProductID.String(), Quantity: item.Quantity})
 		}
-		// Best-effort: a release failure shouldn't undo the cancellation (mirrors
+		// Best-effort: an inventory failure shouldn't undo the cancellation (mirrors
 		// the existing release-on-payment-failure behavior in sqs_payment_consumer.go).
-		if relErr := s.inventoryClient.ReleaseStock(ctx, orderID.String(), items); relErr != nil {
+		if wasPaid {
+			if restErr := s.inventoryClient.RestockStock(ctx, orderID.String(), items); restErr != nil {
+				zap.L().Error("failed to restock inventory for cancelled paid order",
+					zap.String("order_id", orderID.String()), zap.Error(restErr))
+			}
+		} else if relErr := s.inventoryClient.ReleaseStock(ctx, orderID.String(), items); relErr != nil {
 			zap.L().Error("failed to release inventory for cancelled order",
 				zap.String("order_id", orderID.String()), zap.Error(relErr))
 		}
