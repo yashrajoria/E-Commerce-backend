@@ -23,6 +23,7 @@ import (
 	"github.com/yashrajoria/common/internalauth"
 	commonlog "github.com/yashrajoria/common/logger"
 	commonmw "github.com/yashrajoria/common/middleware"
+	"github.com/yashrajoria/common/telemetry"
 	"go.uber.org/zap"
 )
 
@@ -38,6 +39,10 @@ func main() {
 	commonlog.Log = logger
 
 	_ = godotenv.Load()
+
+	// --- OpenTelemetry (optional, no-op when OTEL_EXPORTER_OTLP_ENDPOINT unset) ---
+	shutdownTelemetry := telemetry.Init(context.Background(), "identity-service")
+	defer shutdownTelemetry()
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -97,6 +102,9 @@ func main() {
 	// --- HTTP Server & Middleware ---
 	r := gin.New()
 	r.Use(gin.Recovery())
+	// OpenTelemetry server spans (no-op when telemetry disabled) — before all
+	// other middleware so traces span the full request lifecycle.
+	r.Use(telemetry.GinMiddleware("identity-service"))
 
 	if metricsClient != nil {
 		r.Use(commonmw.MetricsMiddleware(metricsClient, "identity-service"))

@@ -6,6 +6,11 @@ GIT_SHA="${GIT_SHA:?Missing GIT_SHA}"
 DEPLOY_DIR="${DEPLOY_DIR:?Missing DEPLOY_DIR}"
 
 COMPOSE_FILE="docker-compose.yml"
+DEPLOY_OVERRIDE="docker-compose.deploy.yml"
+COMPOSE_CMD=(docker compose -f "${COMPOSE_FILE}")
+if [ -f "${DEPLOY_OVERRIDE}" ]; then
+  COMPOSE_CMD+=(-f "${DEPLOY_OVERRIDE}")
+fi
 
 echo "🚀 Deploying to EC2..."
 echo "User: ${DOCKERHUB_USERNAME}"
@@ -40,15 +45,26 @@ echo "[deploy] Logging into DockerHub..."
 echo "${DOCKERHUB_TOKEN:-}" | docker login -u "${DOCKERHUB_USERNAME}" --password-stdin || true
 
 # -----------------------------
-# Pull & Deploy
+# Pull & Deploy (sha-pinned)
 # -----------------------------
-echo "[deploy] Pulling images..."
-docker compose -f "${COMPOSE_FILE}" pull
+if [ ! -f "${DEPLOY_OVERRIDE}" ]; then
+  echo "❌ Error: ${DEPLOY_OVERRIDE} not found — refusing to deploy unpinned images"
+  echo "   Copy backend/docker-compose.deploy.yml to ${DEPLOY_DIR} first."
+  exit 1
+fi
+
+if [ -z "${GIT_SHA:-}" ]; then
+  echo "❌ Error: GIT_SHA is required — refusing to deploy unpinned images"
+  exit 1
+fi
+
+echo "[deploy] Pulling images at tag ${GIT_SHA}..."
+"${COMPOSE_CMD[@]}" pull
 
 echo "[deploy] Starting containers..."
-docker compose -f "${COMPOSE_FILE}" up -d --remove-orphans
+"${COMPOSE_CMD[@]}" up -d --remove-orphans
 
 echo "[deploy] Containers status:"
 docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
 
-echo "✅ Deployment complete"
+echo "✅ Deployment complete (tag ${GIT_SHA})"

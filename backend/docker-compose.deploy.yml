@@ -1,0 +1,33 @@
+# Deploy override — pins app images to immutable git-SHA tags pushed by CI.
+#
+# Usage (on EC2, from backend/):
+#   DOCKERHUB_USERNAME=<user> GIT_SHA=<sha> \
+#     docker compose -f docker-compose.yml -f docker-compose.deploy.yml pull
+#   docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d
+#
+# Base docker-compose.yml keeps `build:` for local dev; this override
+# replaces each app service with the prebuilt image so deploys never
+# rebuild from source and never silently move off a known SHA.
+
+services:
+  api-gateway:
+    image: ${DOCKERHUB_USERNAME}/api-gateway:${GIT_SHA}
+
+  identity-service:
+    image: ${DOCKERHUB_USERNAME}/identity-service:${GIT_SHA}
+
+  catalog-service:
+    image: ${DOCKERHUB_USERNAME}/catalog-service:${GIT_SHA}
+
+  order-service:
+    image: ${DOCKERHUB_USERNAME}/order-service:${GIT_SHA}
+
+  notification-service:
+    image: ${DOCKERHUB_USERNAME}/notification-service:${GIT_SHA}
+
+  agent-service:
+    image: ${DOCKERHUB_USERNAME}/agent-service:${GIT_SHA}
+    # Production images are immutable; drop the dev bind-mount so the
+    # container runs the baked-in code from the pushed image, not the
+    # host checkout.
+    volumes: []

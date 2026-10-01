@@ -18,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"github.com/yashrajoria/common/telemetry"
 	"go.uber.org/zap"
 )
 
@@ -27,6 +28,10 @@ func main() {
 		panic("failed to initialize logger: " + err.Error())
 	}
 	defer logger.Sync()
+
+	// --- OpenTelemetry (optional, no-op when OTEL_EXPORTER_OTLP_ENDPOINT unset) ---
+	shutdownTelemetry := telemetry.Init(context.Background(), "notification-service")
+	defer shutdownTelemetry()
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -71,6 +76,9 @@ func main() {
 	// Router
 	r := gin.New()
 	r.Use(gin.Recovery())
+	// OpenTelemetry server spans (no-op when telemetry disabled) — before all
+	// other middleware so traces span the full request lifecycle.
+	r.Use(telemetry.GinMiddleware("notification-service"))
 
 	// CloudWatch middleware
 	r.Use(func(c *gin.Context) {

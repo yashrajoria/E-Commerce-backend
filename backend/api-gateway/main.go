@@ -23,6 +23,7 @@ import (
 	apperrors "github.com/yashrajoria/common/errors"
 	"github.com/yashrajoria/common/internalauth"
 	commonmw "github.com/yashrajoria/common/middleware"
+	"github.com/yashrajoria/common/telemetry"
 	"go.uber.org/zap"
 )
 
@@ -127,6 +128,10 @@ func main() {
 	defer logger.Sync()
 	logger.Log.Info("Starting API Gateway...")
 
+	// --- OpenTelemetry (optional, no-op when OTEL_EXPORTER_OTLP_ENDPOINT unset) ---
+	shutdownTelemetry := telemetry.Init(context.Background(), "api-gateway")
+	defer shutdownTelemetry()
+
 	// INTERNAL_SERVICE_TOKEN unset means internalauth.Apply() silently no-ops on
 	// every forwarded request — downstream services will then reject them at
 	// internalauth.Require(). Surface that misconfiguration at boot, not first request.
@@ -151,6 +156,10 @@ func main() {
 	}
 
 	r := gin.New()
+
+	// OpenTelemetry server spans (no-op when telemetry disabled) — before all
+	// other middleware so traces span the full request lifecycle.
+	r.Use(telemetry.GinMiddleware("api-gateway"))
 
 	// Configure Gin to handle trailing slashes
 	r.RedirectTrailingSlash = true

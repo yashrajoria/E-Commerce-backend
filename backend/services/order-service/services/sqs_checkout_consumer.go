@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"github.com/yashrajoria/common/events"
+	"github.com/yashrajoria/common/telemetry"
 	promotionservices "order-service/promotion/services"
 )
 
@@ -63,6 +64,9 @@ func (c *SQSCheckoutConsumer) Start(ctx context.Context) {
 }
 
 func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) error {
+	// OpenTelemetry consumer span (no-op when telemetry disabled).
+	ctx, endSpan := telemetry.StartSQSConsumerSpan(ctx, "checkout-events", "")
+	defer endSpan()
 	log.Printf("[DEBUG] Raw SQS message: %s", body)
 
 	// Try to unwrap SNS envelope if present

@@ -39,6 +39,7 @@ import (
 	commondb "github.com/yashrajoria/common/db"
 	apperrors "github.com/yashrajoria/common/errors"
 	"github.com/yashrajoria/common/internalauth"
+	"github.com/yashrajoria/common/telemetry"
 	"go.uber.org/zap"
 )
 
@@ -58,6 +59,10 @@ func main() {
 	if err != nil {
 		logger.Fatal("Config load failed", zap.Error(err))
 	}
+
+	// --- OpenTelemetry (optional, no-op when OTEL_EXPORTER_OTLP_ENDPOINT unset) ---
+	shutdownTelemetry := telemetry.Init(context.Background(), "order-service")
+	defer shutdownTelemetry()
 
 	if err := database.Connect(); err != nil {
 		logger.Fatal("DB connection failed", zap.Error(err))
@@ -80,6 +85,9 @@ func main() {
 	// --- HTTP router ---
 	r := gin.New()
 	r.Use(gin.Recovery())
+	// OpenTelemetry server spans (no-op when telemetry disabled) — before all
+	// other middleware so traces span the full request lifecycle.
+	r.Use(telemetry.GinMiddleware("order-service"))
 	r.Use(apperrors.ErrorMiddleware())
 	r.Use(middleware.ConfigMiddleware(cfg.ProductServiceURL))
 
