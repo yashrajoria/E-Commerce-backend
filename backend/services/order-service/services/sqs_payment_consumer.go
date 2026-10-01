@@ -13,6 +13,7 @@ import (
 
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"github.com/yashrajoria/common/events"
+	"github.com/yashrajoria/common/telemetry"
 )
 
 // SQSPaymentConsumer consumes payment events from SQS and updates order status
@@ -52,6 +53,11 @@ func (c *SQSPaymentConsumer) Start(ctx context.Context) {
 }
 
 func (c *SQSPaymentConsumer) handleMessage(ctx context.Context, body string) error {
+	// OpenTelemetry consumer span (no-op when telemetry disabled).
+	// Message ID isn't available in this handler signature; use order ID
+	// after parse instead — start with empty id for span boundary.
+	ctx, endSpan := telemetry.StartSQSConsumerSpan(ctx, "payment-events", "")
+	defer endSpan()
 	log.Printf("[DEBUG] Raw payment event: %s", body)
 
 	// Try to unwrap SNS envelope if present

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"github.com/yashrajoria/common/telemetry"
 	"go.uber.org/zap"
 )
 
@@ -109,11 +110,15 @@ func (p *OutboxPublisher) publish(ctx context.Context, event models.OutboxEvent)
 		if p.sqs == nil {
 			return fmt.Errorf("SQS publisher is not configured")
 		}
+		ctx, endSpan := telemetry.StartSNSSendSpan(ctx, event.Destination)
+		defer endSpan()
 		return p.sqs.Publish(ctx, event.Destination, event.Payload)
 	case models.OutboxDestinationSNS:
 		if p.sns == nil {
 			return fmt.Errorf("SNS publisher is not configured")
 		}
+		ctx, endSpan := telemetry.StartSNSSendSpan(ctx, event.Destination)
+		defer endSpan()
 		return p.sns.Publish(ctx, event.Destination, event.Payload)
 	default:
 		return fmt.Errorf("unsupported outbox destination %q", event.DestinationType)
