@@ -1,8 +1,10 @@
 """asyncpg-backed audit trail for every tool invocation the agent proposes.
 
 One row per tool call. Read tools land straight in `completed`/`failed`. A
-mutating tool starts at `pending_confirmation` and the same row is updated
-in place through `confirmed`/`rejected`/`executed`/`failed` — this table is
+mutating tool starts at `pending_confirmation`, is atomically claimed to
+`confirmed` (single winner via conditional UPDATE ... WHERE
+status='pending_confirmation') before its handler runs, and the same row is
+then updated in place to `rejected`/`executed`/`failed` — this table is
 both the audit log and the pending-mutation store (single source of truth,
 per ROADMAP.md Phase 2).
 """
@@ -74,17 +76,44 @@ async def get_pending(request_id: UUID) -> Optional[asyncpg.Record]:
     )
 
 
-async def mark_rejected(request_id: UUID, confirmed_by: Optional[str]) -> None:
+async def claim_pending_mutation(
+    request_id: UUID, confirmed_by: Optional[str]
+) -> Optional[asyncpg.Record]:
+    """Atomically claim a pending mutation for execution.
+
+    Single conditional UPDATE moves the row from `pending_confirmation` to
+    `confirmed` and returns it. Concurrent confirmers race on the same row:
+    exactly one wins (non-None row), the rest get None and must surface
+    404/409 without invoking the handler. Must be called *before* the
+    mutating handler runs.
+    """
     pool = await get_pool()
-    await pool.execute(
+    return await pool.fetchrow(
         """
         UPDATE agent_audit_log
-        SET status = 'rejected', confirmed_by = $2, confirmed_at = now(), updated_at = now()
-        WHERE request_id = $1
+        SET status = 'confirmed', confirmed_by = $2, confirmed_at = now(), updated_at = now()
+        WHERE request_id = $1 AND mutating = true AND status = 'pending_confirmation'
+        RETURNING *
         """,
         request_id,
         _to_uuid_or_none(confirmed_by),
     )
+
+
+async def mark_rejected(request_id: UUID, confirmed_by: Optional[str]) -> bool:
+    """Atomically reject a pending mutation. Returns True if this call won the claim."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        UPDATE agent_audit_log
+        SET status = 'rejected', confirmed_by = $2, confirmed_at = now(), updated_at = now()
+        WHERE request_id = $1 AND status = 'pending_confirmation'
+        RETURNING request_id
+        """,
+        request_id,
+        _to_uuid_or_none(confirmed_by),
+    )
+    return row is not None
 
 
 async def mark_confirmed_and_executed(
@@ -98,9 +127,9 @@ async def mark_confirmed_and_executed(
     await pool.execute(
         """
         UPDATE agent_audit_log
-        SET status = $2, confirmed_by = $3, confirmed_at = now(),
+        SET status = $2, confirmed_by = $3, confirmed_at = COALESCE(confirmed_at, now()),
             result = $4, error = $5, updated_at = now()
-        WHERE request_id = $1
+        WHERE request_id = $1 AND status = 'confirmed'
         """,
         request_id,
         status,

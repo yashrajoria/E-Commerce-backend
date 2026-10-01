@@ -66,6 +66,9 @@ async def test_confirm_approve_invokes_handler_once_and_marks_executed(monkeypat
         "arguments": '{"order_id": "o1", "reason": null}',
     }
 
+    async def fake_claim_pending(rid, confirmed_by):
+        return row
+
     async def fake_get_pending(rid):
         return row
 
@@ -80,6 +83,7 @@ async def test_confirm_approve_invokes_handler_once_and_marks_executed(monkeypat
     async def fake_mark_confirmed_and_executed(rid, confirmed_by, result, error):
         executed.update(rid=rid, confirmed_by=confirmed_by, result=result, error=error)
 
+    monkeypatch.setattr(routes, "claim_pending_mutation", fake_claim_pending)
     monkeypatch.setattr(routes, "get_pending", fake_get_pending)
     monkeypatch.setattr(routes, "mark_confirmed_and_executed", fake_mark_confirmed_and_executed)
     monkeypatch.setattr(routes, "TOOL_REGISTRY", {"cancel_order": SimpleNamespace(handler=fake_handler)})
@@ -95,12 +99,46 @@ async def test_confirm_approve_invokes_handler_once_and_marks_executed(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_confirm_reject_never_invokes_handler(monkeypatch):
+async def test_confirm_approve_loser_gets_409_without_invoking_handler(monkeypatch):
     request_id = uuid4()
-    row = {"status": "pending_confirmation", "tool": "cancel_order", "arguments": "{}"}
+    existing = {"status": "confirmed", "tool": "cancel_order", "arguments": "{}"}
+
+    async def fake_claim_pending(rid, confirmed_by):
+        return None
 
     async def fake_get_pending(rid):
-        return row
+        return existing
+
+    handler_called = False
+
+    async def fake_handler(**kwargs):
+        nonlocal handler_called
+        handler_called = True
+        return {}
+
+    async def fake_mark_confirmed_and_executed(rid, confirmed_by, result, error):
+        raise AssertionError("loser must not record execution")
+
+    monkeypatch.setattr(routes, "claim_pending_mutation", fake_claim_pending)
+    monkeypatch.setattr(routes, "get_pending", fake_get_pending)
+    monkeypatch.setattr(routes, "mark_confirmed_and_executed", fake_mark_confirmed_and_executed)
+    monkeypatch.setattr(routes, "TOOL_REGISTRY", {"cancel_order": SimpleNamespace(handler=fake_handler)})
+
+    req = _FakeRequest(headers=_admin_headers())
+    body = routes.MutationConfirmRequest(approve=True)
+
+    with pytest.raises(Exception) as exc_info:
+        await routes.confirm_mutation(str(request_id), body, req)
+    assert getattr(exc_info.value, "status_code", None) == 409
+    assert handler_called is False
+
+
+@pytest.mark.asyncio
+async def test_confirm_reject_never_invokes_handler(monkeypatch):
+    request_id = uuid4()
+
+    async def fake_get_pending(rid):
+        raise AssertionError("get_pending must not be called on successful reject")
 
     handler_called = False
 
@@ -113,6 +151,7 @@ async def test_confirm_reject_never_invokes_handler(monkeypatch):
 
     async def fake_mark_rejected(rid, confirmed_by):
         rejected.update(rid=rid, confirmed_by=confirmed_by)
+        return True
 
     monkeypatch.setattr(routes, "get_pending", fake_get_pending)
     monkeypatch.setattr(routes, "mark_rejected", fake_mark_rejected)
@@ -129,13 +168,39 @@ async def test_confirm_reject_never_invokes_handler(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_confirm_reject_loser_gets_409(monkeypatch):
+    request_id = uuid4()
+    existing = {"status": "executed", "tool": "cancel_order", "arguments": "{}"}
+
+    async def fake_mark_rejected(rid, confirmed_by):
+        return False
+
+    async def fake_get_pending(rid):
+        return existing
+
+    monkeypatch.setattr(routes, "mark_rejected", fake_mark_rejected)
+    monkeypatch.setattr(routes, "get_pending", fake_get_pending)
+
+    req = _FakeRequest(headers=_admin_headers())
+    body = routes.MutationConfirmRequest(approve=False)
+
+    with pytest.raises(Exception) as exc_info:
+        await routes.confirm_mutation(str(request_id), body, req)
+    assert getattr(exc_info.value, "status_code", None) == 409
+
+
+@pytest.mark.asyncio
 async def test_confirm_on_already_terminal_row_returns_409(monkeypatch):
     request_id = uuid4()
     row = {"status": "executed", "tool": "cancel_order", "arguments": "{}"}
 
+    async def fake_claim_pending(rid, confirmed_by):
+        return None
+
     async def fake_get_pending(rid):
         return row
 
+    monkeypatch.setattr(routes, "claim_pending_mutation", fake_claim_pending)
     monkeypatch.setattr(routes, "get_pending", fake_get_pending)
 
     req = _FakeRequest(headers=_admin_headers())

@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 
 from app.agent.schemas import AgentQueryRequestV2, AgentResponseV2
 from app.agent.orchestrator import run_agent
-from app.audit.repository import get_pending, mark_confirmed_and_executed, mark_rejected
+from app.audit.repository import claim_pending_mutation, get_pending, mark_confirmed_and_executed, mark_rejected
 from app.core.session import clear_session, get_history
 from app.core.logging import get_logger
 from app.tools.registry import TOOL_REGISTRY, get_tool_registry_json
@@ -118,17 +118,25 @@ async def confirm_mutation(request_id: str, body: MutationConfirmRequest, req: R
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid request_id")
 
-    row = await get_pending(request_uuid)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Mutation not found")
-    if row["status"] != "pending_confirmation":
-        raise HTTPException(status_code=409, detail=f"Mutation already {row['status']}")
-
     confirmed_by = req.headers.get("x-user-id")
 
     if not body.approve:
-        await mark_rejected(request_uuid, confirmed_by)
+        claimed = await mark_rejected(request_uuid, confirmed_by)
+        if not claimed:
+            row = await get_pending(request_uuid)
+            if row is None:
+                raise HTTPException(status_code=404, detail="Mutation not found")
+            raise HTTPException(status_code=409, detail=f"Mutation already {row['status']}")
         return {"request_id": request_id, "status": "rejected"}
+
+    # Approve path: atomically claim pending_confirmation -> confirmed BEFORE
+    # invoking the handler so concurrent confirms/retries can't double-execute.
+    row = await claim_pending_mutation(request_uuid, confirmed_by)
+    if row is None:
+        existing = await get_pending(request_uuid)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Mutation not found")
+        raise HTTPException(status_code=409, detail=f"Mutation already {existing['status']}")
 
     spec = TOOL_REGISTRY.get(row["tool"])
     if spec is None:
