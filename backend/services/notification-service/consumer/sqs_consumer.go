@@ -12,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/google/uuid"
 	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"github.com/yashrajoria/common/telemetry"
 	"go.uber.org/zap"
 )
 
@@ -79,6 +80,9 @@ type snsEnvelope struct {
 }
 
 func (c *SQSConsumer) processMessage(ctx context.Context, body *string, receiptHandle *string) {
+	// OpenTelemetry consumer span (no-op when telemetry disabled).
+	ctx, endSpan := telemetry.StartSQSConsumerSpan(ctx, c.queueURL, "")
+	defer endSpan()
 	if body == nil || *body == "" {
 		c.logger.Error("received empty SQS message body")
 		// Don't delete; let it retry / get sent to DLQ if configured.

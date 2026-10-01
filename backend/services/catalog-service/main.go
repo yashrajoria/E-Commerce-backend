@@ -27,6 +27,7 @@ import (
 	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"github.com/yashrajoria/common/internalauth"
 	commonmw "github.com/yashrajoria/common/middleware"
+	"github.com/yashrajoria/common/telemetry"
 	"go.uber.org/zap"
 )
 
@@ -58,6 +59,10 @@ func main() {
 	if internalauth.Token() == "" {
 		zap.L().Warn("INTERNAL_SERVICE_TOKEN is not set — internal-only calls to/from catalog-service will be rejected")
 	}
+
+	// --- OpenTelemetry (optional, no-op when OTEL_EXPORTER_OTLP_ENDPOINT unset) ---
+	shutdownTelemetry := telemetry.Init(context.Background(), "catalog-service")
+	defer shutdownTelemetry()
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -139,6 +144,9 @@ func main() {
 	// --- HTTP router ---
 	r := gin.New()
 	r.Use(gin.Recovery())
+	// OpenTelemetry server spans (no-op when telemetry disabled) — before all
+	// other middleware so traces span the full request lifecycle.
+	r.Use(telemetry.GinMiddleware("catalog-service"))
 	if metricsClient != nil {
 		r.Use(commonmw.MetricsMiddleware(metricsClient, "catalog-service"))
 	}
