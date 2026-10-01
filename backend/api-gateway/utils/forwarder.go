@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/yashrajoria/common/internalauth"
+	"github.com/yashrajoria/common/telemetry"
 	"go.uber.org/zap"
 )
 
@@ -43,11 +44,13 @@ var forwardHTTPClient = &http.Client{
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		return http.ErrUseLastResponse
 	},
-	Transport: &http.Transport{
+	// telemetry.HTTPTransport injects W3C traceparent into outbound requests
+	// when OpenTelemetry is enabled; returns the base transport unchanged otherwise.
+	Transport: telemetry.HTTPTransport(&http.Transport{
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 20, // gateway fans out to ~11 upstream services; default of 2 causes connection churn
 		IdleConnTimeout:     90 * time.Second,
-	},
+	}),
 }
 
 func ForwardRequest(c *gin.Context, opts ForwardOptions) {
