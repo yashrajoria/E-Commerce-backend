@@ -8,6 +8,9 @@ on:
     types:
       - completed
 
+permissions:
+  contents: read
+
 env:
   DEPLOY_DIR: /home/${{ secrets.INPUT_USERNAME }}/E-Commerce-backend/backend
 
@@ -15,13 +18,27 @@ jobs:
   build-and-test:
     name: Build and test services
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
+      fail-fast: false
       matrix:
         service:
           - identity-service
           - catalog-service
           - order-service
+          - api-gateway
+          - notification-service
+        include:
+          - service: api-gateway
+            go_module: api-gateway
+          - service: notification-service
+            go_module: services/notification-service
+          - service: identity-service
+            go_module: services/identity-service
+          - service: catalog-service
+            go_module: services/catalog-service
+          - service: order-service
+            go_module: services/order-service
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -30,27 +47,92 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: "1.25"
-          cache-dependency-path: backend/services/${{ matrix.service }}/go.sum
+          cache-dependency-path: |
+            backend/services/${{ matrix.service }}/go.sum
+            backend/api-gateway/go.sum
 
       - name: Download modules
         run: go mod download
-        working-directory: backend/services/${{ matrix.service }}
+        working-directory: backend/${{ matrix.go_module }}
 
-      - name: Run tests
-        run: go test ./... -v
-        working-directory: backend/services/${{ matrix.service }}
+      - name: Run tests with coverage
+        run: |
+          go test ./... -coverprofile=coverage.out -covermode=atomic -v
+          echo "=== Coverage Summary ==="
+          go tool cover -func=coverage.out | tail -1
+          # Coverage floor: measured baseline 2026-10-01
+          # gateway: 14.1%, catalog: 2.2%, order: 24.3%, notification: 12.1%, identity: 18.5%
+          # Threshold: 10% global floor — blocks regressions below current baseline
+          COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | tr -d '%')
+          if (( $(echo "$COVERAGE < 10" | bc -l) )); then
+            echo "FAIL: Coverage $COVERAGE% is below 10% threshold"
+            exit 1
+          fi
+          echo "PASS: Coverage $COVERAGE% meets 10% threshold"
+        working-directory: backend/${{ matrix.go_module }}
+
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+        working-directory: backend/${{ matrix.go_module }}
+
+  agent-service-test:
+    name: Test agent-service (Python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/services/agent-service/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+        working-directory: backend/services/agent-service
+
+      - name: Run pytest
+        run: python -m pytest -q
+        working-directory: backend/services/agent-service
+
+      - name: Run pip-audit (vulnerability scan)
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt
+        working-directory: backend/services/agent-service
 
   docker-build-and-push:
     name: Build and push Docker images
-    needs: build-and-test
+    needs: [build-and-test, agent-service-test]
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     strategy:
+      fail-fast: false
       matrix:
-        service:
-          - identity-service
-          - catalog-service
-          - order-service
+        include:
+          - service: identity-service
+            dockerfile: services/identity-service/Dockerfile
+            context: ./backend
+          - service: catalog-service
+            dockerfile: services/catalog-service/Dockerfile
+            context: ./backend
+          - service: order-service
+            dockerfile: services/order-service/Dockerfile
+            context: ./backend
+          - service: notification-service
+            dockerfile: services/notification-service/Dockerfile
+            context: ./backend
+          - service: api-gateway
+            dockerfile: api-gateway/Dockerfile
+            context: ./backend
+          - service: agent-service
+            dockerfile: services/agent-service/Dockerfile
+            context: ./backend/services/agent-service
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -67,12 +149,11 @@ jobs:
       - name: Build and push image
         uses: docker/build-push-action@v7
         with:
-          # Build context must be backend/ — the service Dockerfiles COPY paths
-          # relative to that root (pkg/aws, services/common, services/<name>).
-          # Matches the context used by backend/docker-compose.yml.
-          # `file:` is resolved against the workspace root, not the context.
-          context: ./backend
-          file: ./backend/services/${{ matrix.service }}/Dockerfile
+          # Build context must match each Dockerfile's COPY paths.
+          # Go services COPY relative to backend/ (pkg/aws, services/common, ...).
+          # agent-service is Python and self-contained with its own context.
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:latest
@@ -143,7 +224,15 @@ jobs:
           source: "backend/docker-compose.yml"
           target: "${{ env.DEPLOY_DIR }}"
           strip_components: 0
-  
+      - name: Copy docker-compose.deploy.yml to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.INPUT_HOST }}
+          username: ${{ secrets.INPUT_USERNAME }}
+          key: ${{ secrets.INPUT_KEY }}
+          source: "backend/docker-compose.deploy.yml"
+          target: "${{ env.DEPLOY_DIR }}"
+          strip_components: 0
       - name: Copy .env to EC2
         uses: appleboy/scp-action@v0.1.7
         with:

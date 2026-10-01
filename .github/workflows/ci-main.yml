@@ -1,23 +1,46 @@
-# CI for the `main` branch — run tests for each microservice (local/dev checks)
+# CI for pull requests and feature branches — vet + test every Go module,
+# pytest for agent-service, Spectral OpenAPI lint. No image pushes, no deploys.
 #
-# Secrets: none required for this workflow. This runs Go tests per-service.
+# Secrets: none required. Deploy/publish lives in ci-aws.yml (main branch only).
 
 name: CI - main
 
 on:
-  push:
-    branches: [ main ]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+  push:
+    branches-ignore: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-main-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
-    name: Test services
+  go-vet-and-test:
+    name: Go ${{ matrix.module }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
-        service: [identity-service, catalog-service, order-service]
-
+        include:
+          - module: api-gateway
+            path: backend/api-gateway
+          - module: pkg/aws
+            path: backend/pkg/aws
+          - module: common
+            path: backend/services/common
+          - module: identity-service
+            path: backend/services/identity-service
+          - module: catalog-service
+            path: backend/services/catalog-service
+          - module: order-service
+            path: backend/services/order-service
+          - module: notification-service
+            path: backend/services/notification-service
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -25,13 +48,59 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.25'
-          cache-dependency-path: backend/services/${{ matrix.service }}/go.sum
+          go-version: "1.25"
+          cache-dependency-path: |
+            backend/api-gateway/go.sum
+            backend/pkg/aws/go.sum
+            backend/services/common/go.sum
+            backend/services/identity-service/go.sum
+            backend/services/catalog-service/go.sum
+            backend/services/order-service/go.sum
+            backend/services/notification-service/go.sum
 
       - name: Download modules
         run: go mod download
-        working-directory: backend/services/${{ matrix.service }}
+        working-directory: ${{ matrix.path }}
 
-      - name: Run tests
-        run: go test ./... -v
-        working-directory: backend/services/${{ matrix.service }}
+      - name: go vet
+        run: go vet ./...
+        working-directory: ${{ matrix.path }}
+
+      - name: go test
+        run: go test ./... -count=1
+        working-directory: ${{ matrix.path }}
+
+  agent-pytest:
+    name: Python agent-service
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/services/agent-service/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+        working-directory: backend/services/agent-service
+
+      - name: Run pytest
+        run: python -m pytest -q
+        working-directory: backend/services/agent-service
+
+  openapi-lint:
+    name: Spectral OpenAPI lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Lint OpenAPI spec
+        run: npx @stoplight/spectral-cli lint docs/openapi.yaml
+        working-directory: backend
