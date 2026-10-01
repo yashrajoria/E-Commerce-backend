@@ -31,6 +31,7 @@ var (
 // InventoryRepository defines the interface for inventory data access
 type InventoryRepository interface {
 	Get(ctx context.Context, productID string) (*models.Inventory, error)
+	BatchGet(ctx context.Context, productIDs []string) (map[string]*models.Inventory, error)
 	Set(ctx context.Context, inv *models.Inventory) error
 	Update(ctx context.Context, productID string, updates map[string]interface{}) error
 	ReserveAll(ctx context.Context, orderID string, items []models.ReserveItem) error
@@ -93,6 +94,80 @@ func (r *DynamoInventoryRepository) Get(ctx context.Context, productID string) (
 		inv.UpdatedAt = t
 	}
 	return inv, nil
+}
+
+// BatchGet fetches multiple inventory records in as few DynamoDB round-trips
+// as possible (one BatchGetItem per 100 keys, plus retries for UnprocessedKeys).
+// Missing products are simply absent from the returned map — callers map that
+// to insufficient stock, mirroring CheckStock's ErrNotFound behavior.
+func (r *DynamoInventoryRepository) BatchGet(ctx context.Context, productIDs []string) (map[string]*models.Inventory, error) {
+	result := make(map[string]*models.Inventory, len(productIDs))
+	if len(productIDs) == 0 {
+		return result, nil
+	}
+
+	// Dedupe IDs so a cart with the same product twice sends one key.
+	seen := make(map[string]struct{}, len(productIDs))
+	unique := make([]string, 0, len(productIDs))
+	for _, id := range productIDs {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
+	}
+
+	const batchSize = 100
+	for start := 0; start < len(unique); start += batchSize {
+		end := start + batchSize
+		if end > len(unique) {
+			end = len(unique)
+		}
+		chunk := unique[start:end]
+
+		keys := make([]map[string]types.AttributeValue, 0, len(chunk))
+		for _, pid := range chunk {
+			k, err := attributevalue.MarshalMap(map[string]string{"id": pid})
+			if err != nil {
+				return nil, fmt.Errorf("marshal key %s: %w", pid, err)
+			}
+			keys = append(keys, k)
+		}
+
+		requestItems := map[string]types.KeysAndAttributes{
+			r.table: {Keys: keys},
+		}
+
+		// Retry UnprocessedKeys (throttling) until drained.
+		for len(requestItems) > 0 {
+			out, err := r.client.BatchGetItem(ctx, &dynamodb.BatchGetItemInput{
+				RequestItems: requestItems,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("dynamodb BatchGetItem failed: %w", err)
+			}
+			for _, item := range out.Responses[r.table] {
+				var di ddbInventory
+				if err := attributevalue.UnmarshalMap(item, &di); err != nil {
+					return nil, fmt.Errorf("unmarshal batch item: %w", err)
+				}
+				inv := &models.Inventory{
+					ProductID:         di.ProductID,
+					Available:         di.Available,
+					Reserved:          di.Reserved,
+					Threshold:         di.Threshold,
+					OrderReservations: di.OrderReservations,
+				}
+				if t, err := time.Parse(time.RFC3339, di.UpdatedAt); err == nil {
+					inv.UpdatedAt = t
+				}
+				result[di.ProductID] = inv
+			}
+			requestItems = out.UnprocessedKeys
+		}
+	}
+
+	return result, nil
 }
 
 func (r *DynamoInventoryRepository) Set(ctx context.Context, inv *models.Inventory) error {

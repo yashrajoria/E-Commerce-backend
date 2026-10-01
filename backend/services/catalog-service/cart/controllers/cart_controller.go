@@ -88,6 +88,11 @@ type AddItemsRequest struct {
 	} `json:"items" binding:"required,dive"`
 }
 
+const (
+	maxQuantityPerProduct = 999
+	maxDistinctItems      = 100
+)
+
 func (cc *CartController) AddItems(c *gin.Context) {
 	userID := c.GetHeader("X-User-ID")
 	if userID == "" {
@@ -127,11 +132,19 @@ func (cc *CartController) AddItems(c *gin.Context) {
 		for i, existing := range cart.Items {
 			if existing.ProductID == newItem.ProductID {
 				cart.Items[i].Quantity += newItem.Quantity
+				if cart.Items[i].Quantity > maxQuantityPerProduct {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "quantity exceeds per-product limit of 999"})
+					return
+				}
 				found = true
 				break
 			}
 		}
 		if !found {
+			if len(cart.Items) >= maxDistinctItems {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "cart exceeds distinct-item limit of 100"})
+				return
+			}
 			cart.Items = append(cart.Items, models.CartItem{
 				ProductID: newItem.ProductID,
 				Quantity:  newItem.Quantity,

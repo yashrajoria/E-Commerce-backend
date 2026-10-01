@@ -906,12 +906,19 @@ func (s *ProductServiceDDB) uploadImageFromURL(ctx context.Context, imageURL, sk
 	if err != nil {
 		return "", fmt.Errorf("failed to read downloaded image: %w", err)
 	}
+	detected := http.DetectContentType(data[:min(len(data), 512)])
+	switch detected {
+	case "image/jpeg", "image/png", "image/webp", "image/gif":
+		// allowed
+	default:
+		return "", fmt.Errorf("downloaded file is not an allowed image (detected %s)", detected)
+	}
 	key := fmt.Sprintf("%sproduct_img_%s_%d", s.prefix, sku, index)
 	_, err = s.s3Client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(s.bucket),
 		Key:         aws.String(key),
 		Body:        bytes.NewReader(data),
-		ContentType: aws.String(http.DetectContentType(data)),
+		ContentType: aws.String(detected),
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to upload to s3: %w", err)

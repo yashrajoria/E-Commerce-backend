@@ -84,6 +84,13 @@ func (ic *InventoryController) UpdateStock(c *gin.Context) {
 		return
 	}
 
+	userID := c.GetHeader("X-User-ID")
+	zap.L().Info("[AUDIT] admin update stock",
+		zap.String("user_id", userID),
+		zap.String("product_id", productID),
+		zap.Any("updates", req),
+	)
+
 	inv, err := ic.service.UpdateStock(c.Request.Context(), productID, &req)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {

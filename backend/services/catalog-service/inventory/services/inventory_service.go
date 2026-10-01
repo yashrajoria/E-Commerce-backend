@@ -7,6 +7,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"catalog-service/inventory/models"
 	"catalog-service/inventory/repository"
@@ -160,35 +161,75 @@ func (s *InventoryService) ConfirmStock(ctx context.Context, req *models.Confirm
 	return nil
 }
 
-// CheckStock checks stock availability for multiple items
+// CheckStock checks stock availability for multiple items with a single
+// batched DynamoDB read instead of one GetItem per line item.
 func (s *InventoryService) CheckStock(ctx context.Context, items []models.ReserveItem) ([]models.StockCheckResult, error) {
-	results := make([]models.StockCheckResult, 0, len(items))
+	if len(items) == 0 {
+		return []models.StockCheckResult{}, nil
+	}
 
+	ids := make([]string, 0, len(items))
 	for _, item := range items {
-		check, err := s.repo.CheckStock(ctx, item.ProductID, item.Quantity)
-		if err != nil {
-			return nil, fmt.Errorf("failed to check stock for product=%s: %w", item.ProductID, err)
+		ids = append(ids, item.ProductID)
+	}
+	invMap, err := s.repo.BatchGet(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to batch check stock for %d products: %w", len(items), err)
+	}
+
+	results := make([]models.StockCheckResult, 0, len(items))
+	for _, item := range items {
+		inv, ok := invMap[item.ProductID]
+		if !ok {
+			results = append(results, models.StockCheckResult{
+				ProductID:    item.ProductID,
+				Available:    0,
+				Reserved:     0,
+				Requested:    item.Quantity,
+				IsSufficient: false,
+			})
+			continue
 		}
-		results = append(results, *check)
+		results = append(results, models.StockCheckResult{
+			ProductID:    item.ProductID,
+			Available:    inv.Available,
+			Reserved:     inv.Reserved,
+			Requested:    item.Quantity,
+			IsSufficient: inv.Available >= item.Quantity,
+		})
 	}
 
 	return results, nil
 }
 
-// ListAllStock returns all inventory items with pagination.
-// Uses DynamoDB Scan with cursor-based pagination internally, but exposes
-// offset-style page/pageSize to callers for consistency with other services.
+// ListAllStock returns inventory page `page` (1-indexed) with `pageSize` items.
+// Walks DynamoDB Scan cursors to skip (page-1)*pageSize items instead of
+// returning the first page for every `page` value.
 func (s *InventoryService) ListAllStock(ctx context.Context, page, pageSize int) ([]models.Inventory, error) {
-	// For DynamoDB, we scan with a limit and skip pages by iterating
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
 	limit := int32(pageSize)
-	var lastKey map[string]interface{}
-	_ = lastKey
 
-	// Skip (page-1) pages worth of items
-	var exclusiveStartKey map[string]interface{}
-	_ = exclusiveStartKey
+	var startKey map[string]types.AttributeValue
+	for p := 1; p < page; p++ {
+		_, nextKey, err := s.repo.ListAll(ctx, limit, startKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list inventory: %w", err)
+		}
+		if len(nextKey) == 0 {
+			return []models.Inventory{}, nil
+		}
+		startKey = nextKey
+	}
 
-	items, _, err := s.repo.ListAll(ctx, limit, nil)
+	items, _, err := s.repo.ListAll(ctx, limit, startKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list inventory: %w", err)
 	}

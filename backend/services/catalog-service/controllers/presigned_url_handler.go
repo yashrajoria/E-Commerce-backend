@@ -149,6 +149,10 @@ func (h *PresignedURLHandler) parsePresignParams(c *gin.Context) (*presignParams
 	filename := c.DefaultQuery("filename", "upload")
 	contentType := c.DefaultQuery("content_type", "image/jpeg")
 
+	if !isAllowedImageFilename(filename) {
+		return nil, fmt.Errorf("invalid filename extension. Allowed: .jpg, .jpeg, .png, .webp, .gif")
+	}
+
 	expiresStr := c.DefaultQuery("expires", "900")
 	expires, err := strconv.ParseInt(expiresStr, 10, 64)
 	if err != nil || expires <= 0 {
@@ -175,6 +179,16 @@ func isAllowedImageContentType(contentType string) bool {
 		"image/gif":  true,
 	}
 	return allowedTypes[contentType]
+}
+
+func isAllowedImageFilename(filename string) bool {
+	lower := strings.ToLower(strings.TrimSpace(filename))
+	for _, ext := range []string{".jpg", ".jpeg", ".png", ".webp", ".gif"} {
+		if strings.HasSuffix(lower, ext) {
+			return true
+		}
+	}
+	return false
 }
 
 func getAllowedImageTypes() []string {

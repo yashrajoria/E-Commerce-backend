@@ -24,6 +24,14 @@ func (m *MockInventoryRepository) Get(ctx context.Context, productID string) (*m
 	return args.Get(0).(*models.Inventory), args.Error(1)
 }
 
+func (m *MockInventoryRepository) BatchGet(ctx context.Context, productIDs []string) (map[string]*models.Inventory, error) {
+	args := m.Called(ctx, productIDs)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]*models.Inventory), args.Error(1)
+}
+
 func (m *MockInventoryRepository) Set(ctx context.Context, inv *models.Inventory) error {
 	return m.Called(ctx, inv).Error(0)
 }

@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"mime/multipart"
+	"net/http"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -243,9 +245,19 @@ func (rv *RequestValidator) ParseCreateProductJSONRequest(c *gin.Context) (servi
 	return serviceReq, nil
 }
 
-// IsValidImageType checks if the file is a valid image
+// IsValidImageType checks if the file is a valid image.
+// Verifies magic bytes via http.DetectContentType (first 512 bytes) against
+// the allow-list, then falls back to header + extension. Spoofed Content-Type
+// headers or extensions alone do not pass.
 func (rv *RequestValidator) IsValidImageType(file *multipart.FileHeader) bool {
-	// Check by content type
+	if file == nil {
+		return false
+	}
+	if sniffed, ok := sniffImageContentType(file); ok {
+		return allowedImageTypes[sniffed]
+	}
+
+	// Fallback: check by content type
 	if allowedImageTypes[file.Header.Get("Content-Type")] {
 		return true
 	}
@@ -258,6 +270,38 @@ func (rv *RequestValidator) IsValidImageType(file *multipart.FileHeader) bool {
 	}
 
 	return false
+}
+
+// sniffImageContentType opens the upload and sniffs magic bytes.
+// Returns (contentType, true) on success, ("", false) if unreadable.
+func sniffImageContentType(file *multipart.FileHeader) (string, bool) {
+	f, err := file.Open()
+	if err != nil {
+		return "", false
+	}
+	defer f.Close()
+	buf := make([]byte, 512)
+	n, err := f.Read(buf)
+	if err != nil && err != io.EOF {
+		return "", false
+	}
+	if n == 0 {
+		return "", false
+	}
+	return http.DetectContentType(buf[:n]), true
+}
+
+// ValidateImageContentType validates raw bytes (bulk-import URL fetch,
+// S3 post-upload verification) against the image allow-list.
+func ValidateImageContentType(data []byte) bool {
+	if len(data) == 0 {
+		return false
+	}
+	n := len(data)
+	if n > 512 {
+		n = 512
+	}
+	return allowedImageTypes[http.DetectContentType(data[:n])]
 }
 
 // IsValidCSVFile checks if the file is a valid CSV

@@ -65,10 +65,11 @@ func main() {
 	}
 
 	// --- Shared Redis (product cache + cart state + bulk-import queue) ---
+	// Accepts redis:// URIs and bare host:port for .env compatibility.
 	redisOpts, err := redis.ParseURL(cfg.RedisURL)
 	if err != nil {
-		zap.L().Warn("Failed to parse REDIS_URL, falling back to default", zap.Error(err))
-		redisOpts = &redis.Options{Addr: "redis:6379", DB: 0}
+		zap.L().Warn("REDIS_URL is not a URI, using as host:port", zap.String("redis_url", cfg.RedisURL), zap.Error(err))
+		redisOpts = &redis.Options{Addr: cfg.RedisURL, DB: 0}
 	}
 	rdb := redis.NewClient(redisOpts)
 	defer rdb.Close()
