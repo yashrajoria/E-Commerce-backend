@@ -151,11 +151,21 @@ func (s *AuthService) ProvisionUser(ctx context.Context, in ProvisionUserInput) 
 	if role == "" {
 		role = "user"
 	}
+	in.Role = role
+
+	// Allow unit tests to exercise registration without a *gorm.DB.
+	if s.db == nil {
+		return s.provisionWithRepo(ctx, s.userRepo, in)
+	}
 
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		txRepo := repository.NewUserRepository(tx)
+		return s.provisionWithRepo(ctx, txRepo, in)
+	})
+}
 
-		_, err := txRepo.FindByEmail(ctx, in.Email)
+func (s *AuthService) provisionWithRepo(ctx context.Context, repo IUserRepository, in ProvisionUserInput) error {
+		_, err := repo.FindByEmail(ctx, in.Email)
 		if err == nil {
 			return ErrEmailAlreadyExists
 		}
@@ -178,7 +188,7 @@ func (s *AuthService) ProvisionUser(ctx context.Context, in ProvisionUserInput) 
 			Email:         in.Email,
 			Name:          in.Name,
 			Password:      string(hashedPassword),
-			Role:          role,
+			Role:          in.Role,
 			StoreName:     "",
 			EmailVerified: in.EmailVerified,
 		}
@@ -186,7 +196,7 @@ func (s *AuthService) ProvisionUser(ctx context.Context, in ProvisionUserInput) 
 			newUser.VerificationCode = hashVerificationCode(verificationCode)
 		}
 
-		if err := txRepo.Create(ctx, newUser); err != nil {
+		if err := repo.Create(ctx, newUser); err != nil {
 			return fmt.Errorf("failed to create account: %w", err)
 		}
 
@@ -203,7 +213,6 @@ func (s *AuthService) ProvisionUser(ctx context.Context, in ProvisionUserInput) 
 		}
 
 		return nil
-	})
 }
 
 // BootstrapAdminFromEnv creates the first admin when none exist.

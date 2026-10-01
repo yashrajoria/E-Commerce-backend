@@ -45,6 +45,8 @@ func cookieSettings() (http.SameSite, bool) {
 }
 
 // clearAuthCookies expires all session/identity cookies on the client.
+// Flags must match the login cookies (HttpOnly true) or browsers keep the
+// original script-inaccessible cookies alongside the cleared ones.
 func clearAuthCookies(c *gin.Context) {
 	domain := os.Getenv("COOKIE_DOMAIN")
 	sameSite, secure := cookieSettings()
@@ -52,8 +54,8 @@ func clearAuthCookies(c *gin.Context) {
 	c.SetSameSite(sameSite)
 	c.SetCookie("__session", "", -1, "/", domain, secure, true)
 	c.SetCookie("refresh_token", "", -1, "/", domain, secure, true)
-	c.SetCookie("user_id", "", -1, "/", domain, secure, false)
-	c.SetCookie("user_role", "", -1, "/", domain, secure, false)
+	c.SetCookie("user_id", "", -1, "/", domain, secure, true)
+	c.SetCookie("user_role", "", -1, "/", domain, secure, true)
 }
 
 func (ctrl *AuthController) Login(c *gin.Context) {
