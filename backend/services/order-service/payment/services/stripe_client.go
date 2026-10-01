@@ -34,6 +34,12 @@ type StripeService struct {
 
 func NewStripeService(secretKey, webhookKey string) *StripeService {
 	stripe.Key = secretKey
+	// Explicit retries: stripe-go defaults to 2 network retries, but pin it
+	// here so transient Stripe timeouts don't become single-try failures.
+	// SQS redelivery remains the outer retry (payment claim is idempotent).
+	if be := stripe.GetBackend(stripe.APIBackend); be != nil {
+		be.SetMaxNetworkRetries(2)
+	}
 	return &StripeService{SecretKey: secretKey, WebhookKey: webhookKey}
 }
 
@@ -50,6 +56,10 @@ func (s *StripeService) CreatePaymentIntent(amount int64, currency string) (*str
 }
 
 func (s *StripeService) CreateCheckoutSession(amount int64, currency, orderID, userID string) (*stripe.CheckoutSession, error) {
+	return s.CreateCheckoutSessionWithIdempotency(amount, currency, orderID, userID, "")
+}
+
+func (s *StripeService) CreateCheckoutSessionWithIdempotency(amount int64, currency, orderID, userID, idempotencyKey string) (*stripe.CheckoutSession, error) {
 	frontend := frontendURL()
 	params := &stripe.CheckoutSessionParams{
 		PaymentMethodTypes: stripe.StringSlice([]string{"card"}),
@@ -72,6 +82,9 @@ func (s *StripeService) CreateCheckoutSession(amount int64, currency, orderID, u
 	params.AddMetadata("order_id", orderID)
 	if userID != "" {
 		params.AddMetadata("user_id", userID)
+	}
+	if idempotencyKey != "" {
+		params.SetIdempotencyKey(idempotencyKey)
 	}
 
 	sess, err := session.New(params)

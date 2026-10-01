@@ -38,7 +38,7 @@ func (pc *PaymentController) respondError(c *gin.Context, status int, msg string
 // updatePaymentStatus applies a set of column updates to a payment row by order UUID.
 // updated_at is always set automatically.
 func (pc *PaymentController) updatePaymentStatus(orderID uuid.UUID, updates map[string]interface{}) error {
-	updates["updated_at"] = time.Now()
+	updates["updated_at"] = time.Now().UTC()
 	return pc.Repo.Update(context.Background(), orderID, updates)
 }
 

@@ -18,11 +18,15 @@ func NewInternalDynamicProvider() *InternalDynamicProvider {
 // rather than a genuine (but uncommon) international destination.
 var ErrUnserviceableDestination = fmt.Errorf("unserviceable destination")
 
+// ErrInvalidWeight signals a non-positive weight — a client validation error,
+// not a provider failure.
+var ErrInvalidWeight = fmt.Errorf("invalid weight")
+
 var iso2CountryCode = regexp.MustCompile(`^[A-Z]{2}$`)
 
 func (p *InternalDynamicProvider) GetRates(weightKg float64, destination models.Address) ([]models.ShippingRate, error) {
 	if weightKg <= 0 {
-		return nil, fmt.Errorf("invalid weight: %f", weightKg)
+		return nil, fmt.Errorf("%w: must be positive, got %f", ErrInvalidWeight, weightKg)
 	}
 
 	country := strings.ToUpper(strings.TrimSpace(destination.Country))

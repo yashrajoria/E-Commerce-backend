@@ -198,9 +198,9 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		CouponCode:     evt.CouponCode,
 		DiscountAmount: discountAmount,
 		Status:         "pending_payment",
-		OrderNumber:    "ORD-" + time.Now().Format("20060102-150405") + "-" + uuid.New().String()[:8],
-		CreatedAt:      time.Now(),
-		UpdatedAt:      time.Now(),
+		OrderNumber:    "ORD-" + time.Now().UTC().Format("20060102-150405") + "-" + uuid.New().String()[:8],
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
 		OrderItems:     orderItems,
 	}
 	if evt.IdempotencyKey != "" {

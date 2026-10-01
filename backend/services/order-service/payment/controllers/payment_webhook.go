@@ -110,7 +110,7 @@ func (pc *PaymentController) handleCheckoutCompleted(event stripe.Event, rawPayl
 		return nil
 	}
 
-	now := time.Now()
+	now := time.Now().UTC()
 	outboxEvt, err := pc.paymentOutboxEvent(payment.OrderID, models.PaymentEvent{
 		Type:          "payment_succeeded",
 		OrderID:       orderID,
@@ -197,7 +197,7 @@ func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, statu
 		return nil
 	}
 
-	now := time.Now()
+	now := time.Now().UTC()
 	updates := map[string]interface{}{
 		"status":               status,
 		"stripe_event_payload": string(rawPayload),

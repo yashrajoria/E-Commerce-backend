@@ -155,7 +155,7 @@ func main() {
 		logger,
 	)
 	shippingProvider := shippingproviders.NewInternalDynamicProvider()
-	shippingService := shippingservices.NewShippingService(shippingProvider, logger)
+	shippingService := shippingservices.NewShippingService(shippingProvider, logger, cfg.StoreCurrency)
 
 	// --- Get queue URLs early (needed for payment services) ---
 	checkoutQueueURL := cfg.CheckoutQueueURL
@@ -182,6 +182,24 @@ func main() {
 			paymentRequestQueueURL = url
 		} else {
 			logger.Warn("Could not get payment request queue URL", zap.Error(err))
+		}
+	}
+
+	// Fail fast in production when messaging is unconfigured — degraded
+	// start (Warn + serve HTTP) is intentional for dev/LocalStack only.
+	if os.Getenv("ENV") == "production" {
+		var missing []string
+		if checkoutQueueURL == "" {
+			missing = append(missing, "CHECKOUT_QUEUE_URL/order-processing-queue")
+		}
+		if paymentRequestQueueURL == "" {
+			missing = append(missing, "PAYMENT_REQUEST_QUEUE_URL/payment-request-queue")
+		}
+		if cfg.OrderSNSTopicARN == "" {
+			missing = append(missing, "ORDER_SNS_TOPIC_ARN")
+		}
+		if len(missing) > 0 {
+			logger.Fatal("missing required messaging config in production", zap.Strings("missing", missing))
 		}
 	}
 

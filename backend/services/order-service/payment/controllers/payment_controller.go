@@ -205,8 +205,8 @@ func (pc *PaymentController) CreateCheckoutSession(c *gin.Context) {
 		Currency:        strings.ToLower(req.Currency),
 		Status:          "pending",
 		StripePaymentID: &pi.ID,
-		CreatedAt:       time.Now(),
-		UpdatedAt:       time.Now(),
+		CreatedAt:       time.Now().UTC(),
+		UpdatedAt:       time.Now().UTC(),
 	}
 
 	if err := pc.Repo.CreatePayment(c.Request.Context(), &payment); err != nil {

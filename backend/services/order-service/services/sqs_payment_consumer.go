@@ -75,7 +75,7 @@ func (c *SQSPaymentConsumer) handleMessage(ctx context.Context, body string) err
 
 	log.Printf("ℹ️  [OrderService][SQSPaymentConsumer] received event: order_id=%s type=%s", evt.OrderID, evt.Type)
 
-	now := time.Now()
+	now := time.Now().UTC()
 	switch evt.Type {
 	case "payment_succeeded":
 		// Gate side effects on the update actually applying: a duplicate/redelivered

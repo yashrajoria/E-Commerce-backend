@@ -45,10 +45,16 @@ func (oc *OrderController) CreateOrder(ctx *gin.Context) {
 		}
 	}
 
-	// Support idempotency: accept Idempotency-Key header and attach to context for downstream handling
+	// Support idempotency: accept Idempotency-Key header and attach to context for downstream handling.
+	// Validate format synchronously so malformed keys fail fast with 400
+	// instead of being accepted (202) and failing async later.
 	idemKey := ctx.GetHeader("Idempotency-Key")
 	reqCtx := ctx.Request.Context()
 	if idemKey != "" {
+		if !services.ValidateIdempotencyKey(idemKey) {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid Idempotency-Key format: must match ^[a-zA-Z0-9_:\\-]{1,128}$"})
+			return
+		}
 		reqCtx = context.WithValue(reqCtx, services.IdempotencyKeyContextKey, idemKey)
 	}
 

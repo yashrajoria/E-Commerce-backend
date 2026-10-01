@@ -3,6 +3,8 @@ package services
 import (
 	"context"
 	"errors"
+	"strings"
+
 	"go.uber.org/zap"
 	"order-service/shipping/models"
 	"order-service/shipping/providers"
@@ -24,16 +26,24 @@ type ShippingService interface {
 type shippingServiceImpl struct {
 	provider providers.ShippingProvider
 	logger   *zap.Logger
+	currency string
 }
 
 // NewShippingService creates a new ShippingService.
+// currency overrides the provider default (e.g. STORE_CURRENCY); empty keeps USD.
 func NewShippingService(
 	provider providers.ShippingProvider,
 	logger *zap.Logger,
+	currency ...string,
 ) ShippingService {
+	cur := "USD"
+	if len(currency) > 0 && currency[0] != "" {
+		cur = strings.ToUpper(strings.TrimSpace(currency[0]))
+	}
 	return &shippingServiceImpl{
 		provider: provider,
 		logger:   logger,
+		currency: cur,
 	}
 }
 
@@ -45,12 +55,22 @@ func (s *shippingServiceImpl) GetRates(ctx context.Context, req *models.Shipping
 			s.logger.Warn("GetRates: unserviceable destination", zap.Error(err))
 			return nil, &ServiceError{StatusCode: 422, Message: err.Error()}
 		}
+		if errors.Is(err, providers.ErrInvalidWeight) {
+			s.logger.Warn("GetRates: invalid weight", zap.Error(err))
+			return nil, &ServiceError{StatusCode: 400, Message: err.Error()}
+		}
 		s.logger.Error("GetRates failed", zap.Error(err))
 		return nil, &ServiceError{StatusCode: 500, Message: "Failed to retrieve shipping rates: " + err.Error()}
 	}
 
 	if len(rates) == 0 {
 		return nil, &ServiceError{StatusCode: 404, Message: "No shipping rates available for the given destination"}
+	}
+
+	for i := range rates {
+		if s.currency != "" {
+			rates[i].Currency = s.currency
+		}
 	}
 
 	return rates, nil

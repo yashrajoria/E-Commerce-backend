@@ -215,7 +215,7 @@ func (s *couponServiceImpl) publishCouponAppliedEvent(ctx context.Context, coupo
 	event.Data["coupon_id"] = coupon.ID.String()
 	event.Data["coupon_type"] = string(coupon.Type)
 	event.Data["cart_total"] = cartTotal
-	event.Data["timestamp"] = time.Now()
+	event.Data["timestamp"] = time.Now().UTC()
 
 	eventBytes, err := json.Marshal(event)
 	if err != nil {

@@ -34,6 +34,7 @@ type PaymentRequestConsumer struct {
 
 type StripeCheckoutCreator interface {
 	CreateCheckoutSession(amount int64, currency, orderID, userID string) (*stripe.CheckoutSession, error)
+	CreateCheckoutSessionWithIdempotency(amount int64, currency, orderID, userID, idempotencyKey string) (*stripe.CheckoutSession, error)
 }
 
 func NewPaymentRequestConsumer(
@@ -86,7 +87,7 @@ func (c *PaymentRequestConsumer) handleMessage(ctx context.Context, body string)
 	}
 	if !validIdempotencyKey.MatchString(req.IdempotencyKey) {
 		c.logger.Warn("Invalid Idempotency-Key format", zap.String("idempotency_key", req.IdempotencyKey))
-		return fmt.Errorf("invalid Idempotency-Key format: must match ^[a-zA-Z0-9_-]{1,128}$")
+		return fmt.Errorf("invalid Idempotency-Key format: must match ^[a-zA-Z0-9_:\\-]{1,128}$")
 	}
 
 	orderID, err := uuid.Parse(req.OrderID)
@@ -147,7 +148,8 @@ func (c *PaymentRequestConsumer) handleMessage(ctx context.Context, body string)
 	// Create Stripe Checkout Session (provides a hosted URL for the user to complete payment)
 	// Amount is already in the smallest currency unit for the configured store currency.
 	// Do NOT multiply by 100 here; prices are stored and passed in cents throughout the system.
-	sess, err := c.stripeSvc.CreateCheckoutSession(int64(req.Amount), currency, req.OrderID, req.UserID)
+	// Idempotency key is forwarded so Stripe-side retries are safe.
+	sess, err := c.stripeSvc.CreateCheckoutSessionWithIdempotency(int64(req.Amount), currency, req.OrderID, req.UserID, req.IdempotencyKey)
 	if err != nil {
 		c.logger.Error("Failed to create Stripe Checkout Session", zap.Error(err))
 		payment.Status = "failed"

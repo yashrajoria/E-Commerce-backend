@@ -109,7 +109,7 @@ func (s *OrderService) CreateOrder(ctx context.Context, userID, email string, re
 		Email:     email,
 		OrderID:   orderID,
 		Items:     eventItems,
-		Timestamp: time.Now(),
+		Timestamp: time.Now().UTC(),
 	}
 
 	if idemKey, ok := ctx.Value(IdempotencyKeyContextKey).(string); ok && idemKey != "" {
@@ -261,7 +261,7 @@ func (s *OrderService) CancelOrder(ctx context.Context, orderID uuid.UUID, admin
 		}
 	}
 
-	now := time.Now()
+	now := time.Now().UTC()
 	if err := s.orderRepo.UpdateOrderStatus(ctx, orderID, order.Status, "cancelled", map[string]interface{}{"canceled_at": now}); err != nil {
 		if errors.Is(err, repositories.ErrStatusConflict) {
 			return nil, &ServiceError{StatusCode: 409, Message: "order status changed concurrently, please retry"}
