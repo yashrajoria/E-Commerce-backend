@@ -40,6 +40,7 @@ async def run_agent(
         user_id=user_id,
         user_role=user_role,
         logger=logger,
+        prompt=prompt,
     )
     formatted_results = format_all_results(tool_results)
 

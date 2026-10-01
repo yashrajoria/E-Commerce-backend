@@ -18,7 +18,14 @@ import (
 var (
 	secretKey       []byte
 	authBaseURL     string
-	refreshHTTP     = &http.Client{Timeout: 5 * time.Second}
+	refreshHTTP     = &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 10,
+			IdleConnTimeout:     90 * time.Second,
+		},
+	}
 	refreshInflight singleflight.Group
 )
 
@@ -30,7 +37,7 @@ func InitJWTConfig() error {
 	secretKey = []byte(secret)
 	authBaseURL = strings.TrimRight(strings.TrimSpace(os.Getenv("AUTH_SERVICE_URL")), "/")
 	if authBaseURL == "" {
-		authBaseURL = "http://auth-service:8081"
+		authBaseURL = "http://identity-service:8081"
 	}
 	return nil
 }
@@ -125,17 +132,17 @@ func applyClaims(c *gin.Context, claims jwt.MapClaims) bool {
 }
 
 // refreshResult carries everything trySilentRefresh's caller needs back out
-// of the (possibly shared, via singleflight) auth-service call.
+// of the (possibly shared, via singleflight) identity-service call.
 type refreshResult struct {
 	claims     jwt.MapClaims
 	setCookies []string
 }
 
-// trySilentRefresh calls auth-service refresh using the refresh_token cookie and
+// trySilentRefresh calls identity-service refresh using the refresh_token cookie and
 // forwards rotated Set-Cookie headers to the browser. Concurrent requests that
 // share the same refresh token are coalesced via singleflight so an expired
 // token shared across many in-flight requests doesn't trigger a thundering
-// herd of refresh calls (and doesn't race an auth-service that rotates/
+// herd of refresh calls (and doesn't race an identity-service that rotates/
 // single-uses refresh tokens).
 func trySilentRefresh(c *gin.Context) (jwt.MapClaims, bool) {
 	refreshToken, err := c.Cookie("refresh_token")
@@ -162,7 +169,7 @@ func trySilentRefresh(c *gin.Context) (jwt.MapClaims, bool) {
 	return result.claims, true
 }
 
-// doRefresh performs the actual HTTP call to auth-service. It intentionally
+// doRefresh performs the actual HTTP call to identity-service. It intentionally
 // uses its own bounded context (not the initiating request's context) since
 // singleflight may share this call's result with other in-flight requests
 // whose own contexts must not cancel it.
@@ -182,7 +189,7 @@ func doRefresh(refreshToken, correlationID, path string) (refreshResult, error) 
 
 	resp, err := refreshHTTP.Do(req)
 	if err != nil {
-		logger.Log.Warn("silent refresh failed: auth-service unreachable", zap.Error(err))
+		logger.Log.Warn("silent refresh failed: identity-service unreachable", zap.Error(err))
 		return refreshResult{}, err
 	}
 	defer resp.Body.Close()

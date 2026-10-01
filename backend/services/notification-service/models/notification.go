@@ -32,6 +32,14 @@ type NotificationLog struct {
 	CreatedAt  time.Time `json:"created_at" db:"created_at" gorm:"autoCreateTime"`
 }
 
+type NotificationEvent struct {
+	EventID     string    `gorm:"column:event_id;primaryKey"`
+	Status      string    `gorm:"column:status;not null"`
+	ProcessedAt time.Time `gorm:"column:processed_at"`
+}
+
+const NotificationEventDelivered = "delivered"
+
 type NotificationFilter struct {
 	UserID   string
 	Status   string
@@ -41,8 +49,10 @@ type NotificationFilter struct {
 }
 
 type EventPayload struct {
-	EventType string                 `json:"event_type"`
-	UserID    string                 `json:"user_id"`
-	Recipient string                 `json:"recipient"`
-	Data      map[string]interface{} `json:"data"`
+	EventID       string                 `json:"event_id,omitempty"`
+	EventType     string                 `json:"event_type"`
+	UserID        string                 `json:"user_id"`
+	Recipient     string                 `json:"recipient"`
+	Data          map[string]interface{} `json:"data"`
+	CorrelationID string                 `json:"correlation_id,omitempty"`
 }

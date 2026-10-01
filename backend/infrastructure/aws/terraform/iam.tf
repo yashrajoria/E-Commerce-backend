@@ -8,7 +8,7 @@ locals {
 
 data "aws_iam_policy_document" "github_oidc_trust" {
   statement {
-    effect = "Allow"
+    effect  = "Allow"
     actions = ["sts:AssumeRoleWithWebIdentity"]
     principals {
       type        = "Federated"
@@ -73,14 +73,14 @@ data "aws_iam_policy_document" "ci_policy" {
     effect = "Allow"
     actions = [
       "sqs:CreateQueue",
-      "sqs:SendMessage",
-      "sqs:ReceiveMessage",
+      "sqs:DeleteQueue",
       "sqs:GetQueueUrl",
-      "sqs:DeleteMessage",
-      "sqs:GetQueueAttributes"
+      "sqs:GetQueueAttributes",
+      "sqs:SetQueueAttributes",
+      "sqs:ChangeMessageVisibility"
     ]
     resources = [
-      for q in values(var.sqs_queues) : "arn:aws:sqs:${local.region}:${local.account_id}:${q}"
+      for q in concat(values(var.sqs_queues), values(var.sqs_dlqs)) : "arn:aws:sqs:${local.region}:${local.account_id}:${q}"
     ]
   }
 
@@ -96,9 +96,9 @@ data "aws_iam_policy_document" "ci_policy" {
   }
 
   statement {
-    sid    = "SecretsManager"
-    effect = "Allow"
-    actions = ["secretsmanager:GetSecretValue","secretsmanager:CreateSecret","secretsmanager:DescribeSecret"]
+    sid       = "SecretsManager"
+    effect    = "Allow"
+    actions   = ["secretsmanager:GetSecretValue", "secretsmanager:CreateSecret", "secretsmanager:DescribeSecret"]
     resources = ["arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:*"]
   }
 }

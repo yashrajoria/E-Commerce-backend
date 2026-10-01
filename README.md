@@ -14,36 +14,36 @@
 
 ## Overview
 
-ShopSwift backend is a Go (plus Python agent) microservices platform with an API gateway, BFF, and domain services. Local development uses Docker Compose + **LocalStack** for S3, DynamoDB, SNS, and SQS.
+ShopSwift backend is a Go (plus Python agent) microservices platform with an API gateway and domain services. Local development uses Docker Compose + **LocalStack** for S3, DynamoDB, SNS, and SQS.
 
 ## Architecture (short)
 
 | Layer | Role |
 |-------|------|
 | **API Gateway** `:8080` | Routing, cookies/auth headers, rate limits, correlation / request IDs |
-| **BFF** `:8088` | Frontend aggregation; Redis SetNX checkout idempotency |
-| **Domain services** | Auth, user, product, cart, order, payment, inventory, promotion, shipping, notification, agent |
-| **Data** | Postgres (transactions), DynamoDB (catalog/inventory), Redis (cart/cache/locks), S3 (images) |
+| **Domain services** | Identity, catalog, order, notification, agent |
+| **Data** | Postgres (transactions), DynamoDB (catalog/inventory), Redis (cart/cache/idempotency), S3 (images) |
 | **Messaging** | SNS topics → SQS queues (checkout, payment, notifications) |
 
-See [backend/docs/architecture.md](backend/docs/architecture.md), [backend/docs/data-and-messaging.md](backend/docs/data-and-messaging.md), and [backend/docs/best-practices-and-gaps.md](backend/docs/best-practices-and-gaps.md).
+See [MICROSERVICE_ARCHITECTURE.md](MICROSERVICE_ARCHITECTURE.md), [SERVICES_AND_DATABASES.md](SERVICES_AND_DATABASES.md), [SERVICE_ISSUES_AND_AUDIT.md](SERVICE_ISSUES_AND_AUDIT.md), [CLAUDE.md](CLAUDE.md), [backend/docs/architecture.md](backend/docs/architecture.md), [backend/docs/data-and-messaging.md](backend/docs/data-and-messaging.md), and [backend/docs/best-practices-and-gaps.md](backend/docs/best-practices-and-gaps.md).
+
+The order-service outbox publisher and its at-least-once delivery behavior are documented in [backend/services/order-service/README.md](backend/services/order-service/README.md).
+
+### Request correlation and reliability
+
+The gateway normalizes `X-Request-ID` and `X-Correlation-ID` to one value. Downstream HTTP calls forward both headers; checkout, payment, and notification events carry optional `correlation_id` metadata through SNS/SQS retries and outbox delivery. Payment records persist the value so Stripe webhook events retain the original checkout correlation. Missing IDs are generated only at the gateway or legacy event entry points.
+
+Phase 1 integrity protections are covered by regression tests: coupon usage increments are atomic, order persistence failures compensate inventory reservations, cart checkout validates products in one batch, and internal service authentication fails closed. User address ownership is currently N/A because no address CRUD routes are registered.
 
 ### Services and ports
 
 | Service | Port | Stack | Primary storage |
 |---------|------|-------|-----------------|
 | api-gateway | 8080 | Go / Gin | Redis (rate limit) |
-| auth-service | 8081 | Go | Postgres |
-| product-service | 8082 | Go | DynamoDB + Redis + S3 |
-| order-service | 8083 | Go | Postgres + SQS/SNS |
-| inventory-service | 8084 | Go | DynamoDB |
-| user-service | 8085 | Go | Postgres |
-| cart-service | 8086 | Go | Redis |
-| payment-service | 8087 | Go | Postgres + Stripe + SQS/SNS |
-| bff-service | 8088 | Go | Redis |
-| agent-service | 8089→8000 | Python FastAPI | Stateless (calls BFF) |
-| promotion-service | 8090 | Go | Postgres + SQS/SNS |
-| shipping-service | 8091 | Go | In-memory / JSON rates (no DB) |
+| identity-service | 8081 | Go | Postgres |
+| catalog-service | 8082 | Go | DynamoDB + Redis + S3 |
+| order-service | 8083 | Go | Postgres + SQS/SNS + Stripe |
+| agent-service | 8089→8000 | Python FastAPI | Stateless (via gateway) |
 | notification-service | 8092 | Go | Postgres + SQS |
 | docs (Swagger UI) | 8099 | swagger-ui | — |
 | LocalStack | 4566 | AWS emulator | S3/DDB/SNS/SQS |
@@ -53,10 +53,10 @@ See [backend/docs/architecture.md](backend/docs/architecture.md), [backend/docs/
 ## Tech stack
 
 - **Languages:** Go 1.25 (workspace), Python (agent-service)
-- **HTTP:** Gin; gateway proxies to services and BFF
-- **Postgres:** auth, user, order, payment, promotion, notification
+- **HTTP:** Gin; gateway proxies to domain services
+- **Postgres:** identity, order, notification
 - **DynamoDB:** products, categories, inventory (not MongoDB)
-- **Redis:** cart, BFF checkout locks, gateway rate limit, product cache
+- **Redis:** cart, checkout idempotency replay, gateway rate limit, product cache
 - **AWS (or LocalStack):** S3, SNS, SQS, Secrets Manager (optional), CloudWatch (optional)
 - **Payments:** Stripe + stripe-cli webhook forwarding in Compose
 
@@ -68,18 +68,11 @@ E-Commerce-backend/
     ├── api-gateway/
     ├── services/
     │   ├── agent-service/          # Python AI agent
-    │   ├── auth-service/
-    │   ├── bff-service/
-    │   ├── cart-service/
+    │   ├── catalog-service/
     │   ├── common/                 # Shared Go libs
-    │   ├── inventory-service/
+    │   ├── identity-service/
     │   ├── notification-service/
     │   ├── order-service/
-    │   ├── payment-service/
-    │   ├── product-service/
-    │   ├── promotion-service/
-    │   ├── shipping-service/
-    │   └── user-service/
     ├── docs/                       # Architecture, OpenAPI, API md
     ├── migrations/                 # SQL migrations (golang-migrate)
     ├── localstack/                 # LocalStack image + bootstrap
@@ -112,7 +105,6 @@ cp -n .env.example .env   # if needed
 Useful URLs:
 
 - Gateway: http://localhost:8080  
-- BFF: http://localhost:8088  
 - OpenAPI UI: http://localhost:8099  
 - LocalStack: http://localhost:4566  
 
@@ -131,6 +123,9 @@ Set `ALLOW_AUTO_MIGRATE=false` in production so schema comes only from SQL migra
 - [Data & messaging](backend/docs/data-and-messaging.md)
 - [API docs index](backend/docs/api/README.md)
 - [Best practices & gaps](backend/docs/best-practices-and-gaps.md)
+- [AWS queue infrastructure](backend/infrastructure/aws/terraform/README.md)
+
+LocalStack bootstraps five source SQS queues and five explicit DLQs. Existing source queues are reconciled with their redrive policy on startup. Run `backend/scripts/verify_sqs_dlq.sh` for policy checks, or pass `--exercise` to verify end-to-end redrive in a disposable environment.
 
 ## Security
 

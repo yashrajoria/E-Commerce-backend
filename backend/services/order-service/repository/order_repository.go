@@ -2,12 +2,17 @@ package repositories
 
 import (
 	"context"
+	"errors"
 	"order-service/models"
 	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+// ErrStatusConflict is returned by UpdateOrderStatus when the order's current
+// status does not match the expected from_status (optimistic locking failure).
+var ErrStatusConflict = errors.New("order status conflict: current status does not match expected from_status")
 
 // OrderRepository defines the interface for order data access
 type OrderRepository interface {
@@ -16,7 +21,14 @@ type OrderRepository interface {
 	FindByID(ctx context.Context, orderID uuid.UUID) (*models.Order, error)
 	FindByIDAndUserID(ctx context.Context, order_id, userID uuid.UUID) (*models.Order, error)
 	Create(ctx context.Context, order *models.Order) error
+	CreateWithOutbox(ctx context.Context, order *models.Order, events []models.OutboxEvent) error
 	Update(ctx context.Context, order *models.Order) error
+	// UpdateOrderStatus transitions an order's status from fromStatus to toStatus,
+	// optionally setting extra columns (e.g. completed_at) in the same update.
+	// It uses an optimistic-locking WHERE clause (AND status = fromStatus) so that
+	// concurrent updates on the same order surface as ErrStatusConflict rather than
+	// silently overwriting each other.
+	UpdateOrderStatus(ctx context.Context, orderID uuid.UUID, fromStatus, toStatus string, extra map[string]interface{}) error
 	FindByIdempotencyKey(ctx context.Context, key string) (*models.Order, error)
 	GetRevenueAnalytics(ctx context.Context) (map[string]interface{}, error)
 }
@@ -108,9 +120,41 @@ func (r *GormOrderRepository) Create(ctx context.Context, order *models.Order) e
 	return r.db.WithContext(ctx).Create(order).Error
 }
 
+func (r *GormOrderRepository) CreateWithOutbox(ctx context.Context, order *models.Order, events []models.OutboxEvent) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(order).Error; err != nil {
+			return err
+		}
+		for index := range events {
+			if err := tx.Create(&events[index]).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // Update updates an existing order
 func (r *GormOrderRepository) Update(ctx context.Context, order *models.Order) error {
 	return r.db.WithContext(ctx).Save(order).Error
+}
+
+func (r *GormOrderRepository) UpdateOrderStatus(ctx context.Context, orderID uuid.UUID, fromStatus, toStatus string, extra map[string]interface{}) error {
+	updates := map[string]interface{}{"status": toStatus}
+	for k, v := range extra {
+		updates[k] = v
+	}
+	res := r.db.WithContext(ctx).
+		Model(&models.Order{}).
+		Where("id = ? AND status = ?", orderID, fromStatus).
+		Updates(updates)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrStatusConflict
+	}
+	return nil
 }
 
 func (r *GormOrderRepository) FindByIdempotencyKey(ctx context.Context, key string) (*models.Order, error) {
@@ -147,10 +191,10 @@ func (r *GormOrderRepository) GetRevenueAnalytics(ctx context.Context) (map[stri
 		Select("SUM(amount), COUNT(*)").Row().Scan(&revenueYesterday, &countYesterday)
 
 	return map[string]interface{}{
-		"total_revenue":            totalRevenue,
-		"revenue_today":            revenueToday,
-		"revenue_yesterday":        revenueYesterday,
-		"total_orders_today":       countToday,
-		"total_orders_yesterday":   countYesterday,
+		"total_revenue":          totalRevenue,
+		"revenue_today":          revenueToday,
+		"revenue_yesterday":      revenueYesterday,
+		"total_orders_today":     countToday,
+		"total_orders_yesterday": countYesterday,
 	}, nil
 }

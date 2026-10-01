@@ -1,0 +1,96 @@
+package controllers
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"strings"
+	"time"
+
+	"order-service/payment/models"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"go.uber.org/zap"
+	"gorm.io/gorm"
+)
+
+// frontendURL returns the storefront base URL used for Stripe success/cancel redirects.
+// Prefer FRONTEND_URL / STOREFRONT_URL — must NOT point at the admin app (:3000).
+func (pc *PaymentController) frontendURL() string {
+	for _, key := range []string{"FRONTEND_URL", "STOREFRONT_URL"} {
+		if url := strings.TrimRight(strings.TrimSpace(os.Getenv(key)), "/"); url != "" {
+			return url
+		}
+	}
+	return "http://localhost:3001"
+}
+
+// respondError logs a warning and writes a JSON error response.
+// The status argument should be an http.Status* constant from the caller.
+func (pc *PaymentController) respondError(c *gin.Context, status int, msg string, err error) {
+	if err != nil {
+		pc.Logger.Warn(msg, zap.Error(err))
+	}
+	c.JSON(status, gin.H{"error": msg})
+}
+
+// updatePaymentStatus applies a set of column updates to a payment row by order UUID.
+// updated_at is always set automatically.
+func (pc *PaymentController) updatePaymentStatus(orderID uuid.UUID, updates map[string]interface{}) error {
+	updates["updated_at"] = time.Now().UTC()
+	return pc.Repo.Update(context.Background(), orderID, updates)
+}
+
+// setStripePaymentID safely assigns a Stripe session or intent ID to a payment record,
+// guarding against conflicts where the same Stripe ID is already assigned to another order.
+func (pc *PaymentController) setStripePaymentID(orderID uuid.UUID, stripeID string) error {
+	ctx := context.Background()
+	existing, err := pc.Repo.GetPaymentByStripeID(ctx, stripeID)
+
+	if err != nil && err != gorm.ErrRecordNotFound {
+		return err
+	}
+
+	if err == gorm.ErrRecordNotFound {
+		// No conflict — safe to assign.
+		return pc.Repo.Update(ctx, orderID, map[string]interface{}{
+			"stripe_payment_id": stripeID,
+		})
+	}
+
+	// A record with this stripe_payment_id already exists.
+	if existing.OrderID != orderID {
+		pc.Logger.Warn("Skipping stripe_payment_id: already assigned to a different payment",
+			zap.String("stripe_id", stripeID),
+			zap.String("conflicting_order_id", existing.OrderID.String()),
+		)
+		return nil
+	}
+
+	// Same record — idempotent re-assignment.
+	return pc.Repo.Update(ctx, orderID, map[string]interface{}{
+		"stripe_payment_id": stripeID,
+	})
+}
+
+// paymentOutboxEvent builds an outbox row for a PaymentEvent, to be inserted in the same DB
+// transaction as the status update that produced it — see UpdateIfStatusNotInWithOutbox. This
+// replaces a prior direct, non-transactional SNS.Publish call (a dual-write: if the publish
+// failed after the DB commit, order-service would never learn the payment outcome).
+func (pc *PaymentController) paymentOutboxEvent(orderID uuid.UUID, event models.PaymentEvent) (models.OutboxEvent, error) {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return models.OutboxEvent{}, err
+	}
+	return models.OutboxEvent{
+		AggregateType:   "payment",
+		AggregateID:     orderID,
+		EventType:       event.Type,
+		DestinationType: models.OutboxDestinationSNS,
+		Destination:     pc.TopicArn,
+		Payload:         payload,
+		Status:          models.OutboxStatusPending,
+		AvailableAt:     time.Now().UTC(),
+	}, nil
+}

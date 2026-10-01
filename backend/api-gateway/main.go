@@ -20,6 +20,9 @@ import (
 	"github.com/go-redis/redis/v8"
 	"github.com/joho/godotenv"
 	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	apperrors "github.com/yashrajoria/common/errors"
+	"github.com/yashrajoria/common/internalauth"
+	commonmw "github.com/yashrajoria/common/middleware"
 	"go.uber.org/zap"
 )
 
@@ -124,6 +127,13 @@ func main() {
 	defer logger.Sync()
 	logger.Log.Info("Starting API Gateway...")
 
+	// INTERNAL_SERVICE_TOKEN unset means internalauth.Apply() silently no-ops on
+	// every forwarded request — downstream services will then reject them at
+	// internalauth.Require(). Surface that misconfiguration at boot, not first request.
+	if internalauth.Token() == "" {
+		logger.Log.Warn("INTERNAL_SERVICE_TOKEN is not set — requests to internal-auth-gated downstream routes will be rejected")
+	}
+
 	if err := middlewares.InitJWTConfig(); err != nil {
 		logger.Log.Fatal("JWT middleware init failed", zap.Error(err))
 	}
@@ -145,25 +155,27 @@ func main() {
 	// Configure Gin to handle trailing slashes
 	r.RedirectTrailingSlash = true
 
-	// SECURITY: Gin's default trusted-proxy setting trusts everything and derives
-	// ClientIP() from X-Forwarded-For, which lets a caller spoof a fresh IP on every
-	// request and bypass the rate limiters below. There is no reverse proxy/load
-	// balancer in front of this gateway by default, so trust nothing unless the
-	// deployment explicitly configures one via TRUSTED_PROXIES (comma-separated CIDRs).
-	var trustedProxies []string
-	if tp := strings.TrimSpace(os.Getenv("TRUSTED_PROXIES")); tp != "" {
-		for _, p := range strings.Split(tp, ",") {
-			if p = strings.TrimSpace(p); p != "" {
-				trustedProxies = append(trustedProxies, p)
-			}
+	// The gateway is the edge — trust X-Forwarded-For only from a configured
+	// reverse proxy (or nobody, by default). Without this, gin.ClientIP()
+	// trusts client-supplied X-Forwarded-For, letting anyone spoof the IP
+	// used for rate limiting and audit logging.
+	if proxies := strings.TrimSpace(os.Getenv("TRUSTED_PROXIES")); proxies != "" {
+		trusted := strings.Split(proxies, ",")
+		for i := range trusted {
+			trusted[i] = strings.TrimSpace(trusted[i])
 		}
-	}
-	if err := r.SetTrustedProxies(trustedProxies); err != nil {
-		logger.Log.Fatal("Failed to set trusted proxies", zap.Error(err))
+		if err := r.SetTrustedProxies(trusted); err != nil {
+			logger.Log.Fatal("invalid TRUSTED_PROXIES", zap.Error(err))
+		}
+	} else if err := r.SetTrustedProxies(nil); err != nil {
+		logger.Log.Fatal("failed to disable trusted proxies", zap.Error(err))
 	}
 
+	r.Use(middlewares.RequestIDMiddleware())
 	r.Use(CustomRecovery(logger.Log))
 	r.Use(CORSMiddleware())
+	r.Use(commonmw.SecurityHeaders())
+	r.Use(apperrors.ErrorMiddleware())
 	r.Use(middlewares.StructuredRequestLogger())
 
 	// CloudWatch HTTP metrics middleware. Metric emission is offloaded to a
@@ -199,7 +211,13 @@ func main() {
 	if redisURL == "" {
 		redisURL = "redis:6379"
 	}
-	redisClient := redis.NewClient(&redis.Options{Addr: redisURL})
+	var redisClient *redis.Client
+	if opts, err := redis.ParseURL(redisURL); err == nil {
+		redisClient = redis.NewClient(opts)
+	} else {
+		// Not a redis:// URI (e.g. plain "host:port") — use it as Addr directly.
+		redisClient = redis.NewClient(&redis.Options{Addr: redisURL})
+	}
 	defer redisClient.Close()
 
 	routes.RegisterAllRoutes(r, redisClient)

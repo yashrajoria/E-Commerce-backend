@@ -16,16 +16,9 @@ jobs:
     strategy:
       matrix:
         service:
-          - auth-service
-          - bff-service
-          - cart-service
-          - inventory-service
+          - identity-service
+          - catalog-service
           - order-service
-          - payment-service
-          - product-service
-          - promotion-service
-          - shipping-service
-          - user-service
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,16 +45,9 @@ jobs:
     strategy:
       matrix:
         service:
-          - auth-service
-          - bff-service
-          - cart-service
-          - inventory-service
+          - identity-service
+          - catalog-service
           - order-service
-          - payment-service
-          - product-service
-          - promotion-service
-          - shipping-service
-          - user-service
     steps:
       - name: Checkout
         uses: actions/checkout@v4

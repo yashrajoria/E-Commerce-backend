@@ -1,6 +1,6 @@
-# Shipping Service API
+# Shipping Rates API (merged into order-service)
 
-Base URL: `http://localhost:8091` (service internal)  
+Base URL: `http://localhost:8083` (order-service, in-process since consolidation)
 Gateway prefix: `/shipping`
 
 ## Endpoints (runtime)
@@ -11,7 +11,7 @@ Gateway prefix: `/shipping`
   - **Request**: `{"weight_kg": 2.5, "destination": {"country": "US", "postal_code": "94117"}}`
   - **Response**: list of `{provider, service_level, amount, ...}`
 
-There are **no** shipment CRUD admin routes registered at runtime. A `shipments` SQL migration exists for future use but shipping-service does not connect to Postgres today.
+There are **no** shipment CRUD admin routes registered at runtime. A `shipments` SQL migration exists for future use; the in-process rate provider does not use Postgres today.
 
 ## Calculation logic (internal provider)
 

@@ -1,37 +1,42 @@
-# BFF Service API
+# Admin API (`/bff/admin/*`)
 
-Base URL: http://localhost:8088
+> The `bff-service` process is deleted. The `/bff/admin/*` path prefix is
+> retained as the admin/analytics contract (admin UI + agent tools); the
+> gateway forwards each path straight to the owning service. All routes
+> require JWT + `admin` role. Storefront `/bff/*` paths no longer exist —
+> use the domain routes (`/products`, `/cart`, `/orders`, …) directly.
 
-Security: uses API Gateway auth (cookie-based).  
-**Checkout requires** header `Idempotency-Key` (Redis SetNX). Checkout is **async**: cart publishes to SNS → order/payment SQS consumers → BFF polls payment for Stripe `checkout_url`.
+Base URL: http://localhost:8080 (via API Gateway)
 
-Endpoints (concise):
+## Aggregation
 
-- GET /bff/home — Home page data (products + categories)
-- GET /bff/profile — Profile + orders aggregation
-- POST /bff/auth/register — Register a user
-- POST /bff/auth/login — Login (sets auth cookies)
-- POST /bff/auth/logout — Logout (clear cookies)
-- POST /bff/auth/refresh — Refresh access token (uses refresh cookie)
-- GET /bff/auth/status — Get auth status
-- POST /bff/auth/verify-email — Verify email
+- GET /bff/admin/dashboard — KPI/top-products/activity summary. Computed in
+  `order-service` (`admin` package): order stats/counts/recents in-process,
+  user and product totals over the mesh.
 
-- GET /bff/products — Product list (query: page, perPage, filters: categoryId, price range, sort)
-- GET /bff/products/{id} — Product detail
-- GET /bff/categories — Category tree
+## Direct proxies (no aggregation)
 
-- GET /bff/cart — Current cart
-- POST /bff/cart/add — Add items to cart (supports `Idempotency-Key`)
-- DELETE /bff/cart/remove/{product_id} — Remove item from cart
-- DELETE /bff/cart/clear — Clear cart
-- POST /bff/cart/checkout — Checkout cart (uses **Redis SetNX** for idempotency)
-- POST /bff/checkout — Primary checkout endpoint (uses **Redis SetNX** for idempotency)
+- GET /bff/admin/reports/sales → `order-service` `GET /orders/admin/stats`
+- GET /bff/admin/reports/users → `identity-service` `GET /users`
+- GET /bff/admin/reports/inventory → `catalog-service` `GET /inventory`
+- GET|POST /bff/admin/products, PUT|POST|DELETE /bff/admin/products/* → `catalog-service` `/products/*`
+- GET /bff/admin/products/presign, POST /bff/admin/products/:id/images/presign → `catalog-service` presign
+- GET|POST /bff/admin/categories, PUT|DELETE /bff/admin/categories/* → `catalog-service` `/categories/*`
+- GET /bff/admin/users, PUT|DELETE /bff/admin/users/* → `identity-service` `/users/*`
+- POST /bff/admin/users → `identity-service` `POST /auth/admin/users`
+- GET /bff/admin/orders → `order-service` `GET /orders/admin/`
+- GET|PUT /bff/admin/orders/* → `order-service` `/orders/*`
+- GET /bff/admin/inventory, PUT /bff/admin/inventory/* → `catalog-service` `/inventory/*`
+- GET|POST|PUT|DELETE /bff/admin/coupons* → `order-service` `/coupons*`
+- GET /bff/admin/notifications, GET /bff/admin/notifications/log → `notification-service`
 
-Notes:
+## Removed storefront paths
 
-- **Idempotency**: `/bff/checkout` uses Redis SetNX. Concurrent duplicate keys return `409 Conflict`. Downstream order/payment also store `idempotency_key`.
-- **Aggregation**: Calls gateway/services for Product, Cart, Order, Promotion, Shipping, and Payment. Does not create orders synchronously via a single POST `/orders` in the happy path.
-- **Health**: `GET /health`, `GET /health/live`, `GET /health/ready`.
-- Responses reference shared schemas in `docs/openapi.yaml`.
+`GET /bff/home`, `GET /bff/profile`, `POST /bff/checkout`, `GET|POST|DELETE /bff/cart*`,
+`GET /bff/products*`, `GET /bff/categories*`, `GET|POST /bff/payment*`,
+`POST /bff/promotions/validate`, `POST|GET /bff/auth/*`, `PUT /bff/users/profile`,
+`POST /bff/users/change-password` — deleted with bff-service.
 
-- For examples, open `docs/openapi.yaml` and inspect request/response schemas under `components.schemas`.
+Migration: `POST /cart/checkout` (with `Idempotency-Key`) returns
+`{order_id, PENDING}`; poll `GET /payment/status/by-order/:order_id` for the
+Stripe `checkout_url`.

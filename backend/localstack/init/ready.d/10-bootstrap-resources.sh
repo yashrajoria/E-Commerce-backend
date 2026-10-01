@@ -23,6 +23,7 @@ PAYMENT_EVENTS_QUEUE_NAME="${PAYMENT_EVENTS_QUEUE_NAME:-payment-events-queue}"
 PAYMENT_REQUEST_QUEUE_NAME="${PAYMENT_REQUEST_QUEUE_NAME:-payment-request-queue}"
 NOTIFICATION_QUEUE_NAME="${NOTIFICATION_SQS_QUEUE_NAME:-notification-queue}"
 PROMOTION_ORDER_QUEUE_NAME="${PROMOTION_ORDER_QUEUE_NAME:-promotion-order-queue}"
+SQS_MAX_RECEIVE_COUNT="${SQS_MAX_RECEIVE_COUNT:-3}"
 
 # --------------------------------------------------
 # Retry helper (ONLY for transient failures)
@@ -74,7 +75,7 @@ create_products_table_if_missing() {
         return 0
     fi
 
-    echo "Creating DynamoDB table '$tbl_name' with sku-index and featured-index..."
+    echo "Creating DynamoDB table '$tbl_name' with sku-index, featured-index, and brand-index..."
 
     retry awslocal_cmd dynamodb create-table \
         --table-name "$tbl_name" \
@@ -83,6 +84,7 @@ create_products_table_if_missing() {
             AttributeName=sku,AttributeType=S \
             AttributeName=is_featured,AttributeType=S \
             AttributeName=created_at,AttributeType=S \
+            AttributeName=brand,AttributeType=S \
         --key-schema AttributeName=id,KeyType=HASH \
         --global-secondary-indexes \
             '[
@@ -95,6 +97,14 @@ create_products_table_if_missing() {
                 "IndexName": "featured-index",
                 "KeySchema": [
                   {"AttributeName":"is_featured","KeyType":"HASH"},
+                  {"AttributeName":"created_at","KeyType":"RANGE"}
+                ],
+                "Projection": {"ProjectionType":"ALL"}
+              },
+              {
+                "IndexName": "brand-index",
+                "KeySchema": [
+                  {"AttributeName":"brand","KeyType":"HASH"},
                   {"AttributeName":"created_at","KeyType":"RANGE"}
                 ],
                 "Projection": {"ProjectionType":"ALL"}
@@ -240,6 +250,11 @@ create_queue_with_dlq() {
         --query "Attributes.QueueArn" \
         --output text)
 
+    local redrive_policy
+    redrive_policy=$(printf '{"deadLetterTargetArn":"%s","maxReceiveCount":"%s"}' "$dlq_arn" "$max_receive_count")
+    local escaped_redrive_policy
+    escaped_redrive_policy=$(printf '%s' "$redrive_policy" | sed 's/"/\\"/g')
+
     # --------------------------------------------------
     # 2️⃣ Create Main Queue if missing
     # --------------------------------------------------
@@ -251,7 +266,7 @@ create_queue_with_dlq() {
         tmpfile=$(mktemp)
         cat > "$tmpfile" <<EOF
 {
-  "RedrivePolicy": "{\"deadLetterTargetArn\":\"$dlq_arn\",\"maxReceiveCount\":$max_receive_count}"
+    "RedrivePolicy": "$escaped_redrive_policy"
 }
 EOF
 
@@ -264,16 +279,47 @@ EOF
         echo "Main queue '$queue_name' already exists" >&2
     fi
 
-    # Return Queue URL
-    awslocal_cmd sqs get-queue-url --queue-name "$queue_name" --query "QueueUrl" --output text
+    # Reconcile attributes even when a queue predates this bootstrap version.
+    local queue_url
+    queue_url=$(awslocal_cmd sqs get-queue-url --queue-name "$queue_name" --query "QueueUrl" --output text)
+    local attrs_file
+    attrs_file=$(mktemp)
+    printf '{"RedrivePolicy":"%s"}\n' "$escaped_redrive_policy" > "$attrs_file"
+    retry awslocal_cmd sqs set-queue-attributes \
+        --queue-url "$queue_url" \
+        --attributes "file://$attrs_file" >/dev/null
+    rm -f "$attrs_file"
+
+    local actual_redrive_policy
+    actual_redrive_policy=$(awslocal_cmd sqs get-queue-attributes \
+        --queue-url "$queue_url" \
+        --attribute-names RedrivePolicy \
+        --query "Attributes.RedrivePolicy" \
+        --output text)
+    if ! python3 - "$actual_redrive_policy" "$redrive_policy" <<'PY'
+import json
+import sys
+
+actual = json.loads(sys.argv[1])
+expected = json.loads(sys.argv[2])
+if actual != expected:
+    print(f"RedrivePolicy mismatch: actual={actual!r} expected={expected!r}", file=sys.stderr)
+    raise SystemExit(1)
+PY
+    then
+        return 1
+    fi
+
+    echo "Queue '$queue_name' redrive verified: dlq='$dlq_name' maxReceiveCount=$max_receive_count" >&2
+    printf '%s\n' "$queue_url"
 }
 
 
-ORDER_QUEUE_URL=$(retry create_queue_with_dlq "$ORDER_QUEUE_NAME")
-PAYMENT_EVENTS_QUEUE_URL=$(retry create_queue_with_dlq "$PAYMENT_EVENTS_QUEUE_NAME")
-PAYMENT_REQUEST_QUEUE_URL=$(retry create_queue_with_dlq "$PAYMENT_REQUEST_QUEUE_NAME")
-NOTIFICATION_QUEUE_URL=$(retry create_queue_with_dlq "$NOTIFICATION_QUEUE_NAME")
-PROMOTION_ORDER_QUEUE_URL=$(retry create_queue_with_dlq "$PROMOTION_ORDER_QUEUE_NAME")
+ORDER_QUEUE_URL=$(retry create_queue_with_dlq "$ORDER_QUEUE_NAME" "$SQS_MAX_RECEIVE_COUNT")
+PAYMENT_EVENTS_QUEUE_URL=$(retry create_queue_with_dlq "$PAYMENT_EVENTS_QUEUE_NAME" "$SQS_MAX_RECEIVE_COUNT")
+PAYMENT_REQUEST_QUEUE_URL=$(retry create_queue_with_dlq "$PAYMENT_REQUEST_QUEUE_NAME" "$SQS_MAX_RECEIVE_COUNT")
+NOTIFICATION_QUEUE_URL=$(retry create_queue_with_dlq "$NOTIFICATION_QUEUE_NAME" "$SQS_MAX_RECEIVE_COUNT")
+PROMOTION_ORDER_QUEUE_URL=$(retry create_queue_with_dlq "$PROMOTION_ORDER_QUEUE_NAME" "$SQS_MAX_RECEIVE_COUNT")
 
 
 # --------------------------------------------------

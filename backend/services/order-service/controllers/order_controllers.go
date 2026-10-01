@@ -45,10 +45,16 @@ func (oc *OrderController) CreateOrder(ctx *gin.Context) {
 		}
 	}
 
-	// Support idempotency: accept Idempotency-Key header and attach to context for downstream handling
+	// Support idempotency: accept Idempotency-Key header and attach to context for downstream handling.
+	// Validate format synchronously so malformed keys fail fast with 400
+	// instead of being accepted (202) and failing async later.
 	idemKey := ctx.GetHeader("Idempotency-Key")
 	reqCtx := ctx.Request.Context()
 	if idemKey != "" {
+		if !services.ValidateIdempotencyKey(idemKey) {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid Idempotency-Key format: must match ^[a-zA-Z0-9_:\\-]{1,128}$"})
+			return
+		}
 		reqCtx = context.WithValue(reqCtx, services.IdempotencyKeyContextKey, idemKey)
 	}
 
@@ -164,6 +170,35 @@ func (oc *OrderController) GetOrderByID(ctx *gin.Context) {
 	}
 
 	order, serviceErr := oc.orderService.GetOrderByID(ctx.Request.Context(), userID, orderUUID)
+	if serviceErr != nil {
+		ctx.JSON(serviceErr.StatusCode, gin.H{"error": serviceErr.Message})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"order": order})
+}
+
+// CancelOrder handles admin cancellation of an order.
+func (oc *OrderController) CancelOrder(ctx *gin.Context) {
+	adminID, err := middleware.GetUserID(ctx)
+	if err != nil {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	orderID := ctx.Param("id")
+	orderUUID, err := uuid.Parse(orderID)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid order ID format"})
+		return
+	}
+
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	_ = ctx.ShouldBindJSON(&body) // reason is optional; ignore malformed/empty body
+
+	order, serviceErr := oc.orderService.CancelOrder(ctx.Request.Context(), orderUUID, adminID, body.Reason)
 	if serviceErr != nil {
 		ctx.JSON(serviceErr.StatusCode, gin.H{"error": serviceErr.Message})
 		return

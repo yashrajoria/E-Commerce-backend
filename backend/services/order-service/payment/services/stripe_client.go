@@ -1,0 +1,108 @@
+package services
+
+import (
+	"bytes"
+	"io/ioutil"
+	"net/http"
+	"os"
+	"strings"
+
+	"github.com/stripe/stripe-go/v80/checkout/session"
+
+	"github.com/stripe/stripe-go/v80"
+	"github.com/stripe/stripe-go/v80/paymentintent"
+	"github.com/stripe/stripe-go/v80/webhook"
+)
+
+// frontendURL returns the storefront base URL used for Stripe success/cancel
+// redirects. Mirrors controllers.PaymentController.frontendURL() — kept in
+// sync here since the async SQS checkout path builds sessions independently
+// of that handler.
+func frontendURL() string {
+	for _, key := range []string{"FRONTEND_URL", "STOREFRONT_URL"} {
+		if url := strings.TrimRight(strings.TrimSpace(os.Getenv(key)), "/"); url != "" {
+			return url
+		}
+	}
+	return "http://localhost:3001"
+}
+
+type StripeService struct {
+	SecretKey  string
+	WebhookKey string
+}
+
+func NewStripeService(secretKey, webhookKey string) *StripeService {
+	stripe.Key = secretKey
+	// Explicit retries: stripe-go defaults to 2 network retries, but pin it
+	// here so transient Stripe timeouts don't become single-try failures.
+	// SQS redelivery remains the outer retry (payment claim is idempotent).
+	if be := stripe.GetBackend(stripe.APIBackend); be != nil {
+		be.SetMaxNetworkRetries(2)
+	}
+	return &StripeService{SecretKey: secretKey, WebhookKey: webhookKey}
+}
+
+func (s *StripeService) CreatePaymentIntent(amount int64, currency string) (*stripe.PaymentIntent, error) {
+	params := &stripe.PaymentIntentParams{
+		Amount:   stripe.Int64(amount),
+		Currency: stripe.String(currency),
+	}
+	pi, err := paymentintent.New(params)
+	if err != nil {
+		return nil, err
+	}
+	return pi, nil
+}
+
+func (s *StripeService) CreateCheckoutSession(amount int64, currency, orderID, userID string) (*stripe.CheckoutSession, error) {
+	return s.CreateCheckoutSessionWithIdempotency(amount, currency, orderID, userID, "")
+}
+
+func (s *StripeService) CreateCheckoutSessionWithIdempotency(amount int64, currency, orderID, userID, idempotencyKey string) (*stripe.CheckoutSession, error) {
+	frontend := frontendURL()
+	params := &stripe.CheckoutSessionParams{
+		PaymentMethodTypes: stripe.StringSlice([]string{"card"}),
+		Mode:               stripe.String(string(stripe.CheckoutSessionModePayment)),
+		SuccessURL:         stripe.String(frontend + "/payment/success?session_id={CHECKOUT_SESSION_ID}"),
+		CancelURL:          stripe.String(frontend + "/payment/cancel"),
+		LineItems: []*stripe.CheckoutSessionLineItemParams{
+			{
+				PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
+					Currency: stripe.String(currency),
+					ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
+						Name: stripe.String("Order " + orderID),
+					},
+					UnitAmount: stripe.Int64(amount),
+				},
+				Quantity: stripe.Int64(1),
+			},
+		},
+	}
+	params.AddMetadata("order_id", orderID)
+	if userID != "" {
+		params.AddMetadata("user_id", userID)
+	}
+	if idempotencyKey != "" {
+		params.SetIdempotencyKey(idempotencyKey)
+	}
+
+	sess, err := session.New(params)
+	if err != nil {
+		return nil, err
+	}
+	return sess, nil
+}
+
+func (s *StripeService) ParseWebhook(r *http.Request) (stripe.Event, error) {
+	var event stripe.Event
+	payload, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		return event, err
+	}
+	r.Body = ioutil.NopCloser(bytes.NewBuffer(payload))
+	sigHeader := r.Header.Get("Stripe-Signature")
+	return webhook.ConstructEventWithOptions(payload, sigHeader, s.WebhookKey, webhook.ConstructEventOptions{
+		IgnoreAPIVersionMismatch: true,
+	})
+}

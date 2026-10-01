@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "type": "command",
+        "command": "if ! command -v jq >/dev/null 2>&1; then exit 0; fi; tool_name=$(jq -r '.tool_name // empty'); command_text=$(jq -r '.tool_input.command // empty'); if [ \"$tool_name\" = \"run_in_terminal\" ] && printf '%s' \"$command_text\" | grep -Eq '(^|[;&|[:space:]])git[[:space:]]+(reset|clean|checkout|restore|branch[[:space:]]+-D)([[:space:]]|$)|(^|[;&|[:space:]])git[[:space:]]+push([^;&|]*[[:space:]])?--force([[:space:]]|$)'; then printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"This command may discard Git history or working-tree changes. Confirm before running it.\"}}'; fi",
+        "timeout": 5
+      }
+    ]
+  }
+}

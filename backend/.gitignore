@@ -72,6 +72,11 @@ node_modules/
 # Dockerfile.prod
 # docker-compose.yml
 .dockerignore
+# Every service builds with `context: .` at this directory (see
+# docker-compose.yml), so this is the only .dockerignore Docker actually
+# reads — keep it tracked.
+!/.dockerignore
+!services/*/.dockerignore
 *.toml
 docker-compose.prod.yml
 .air.toml
@@ -84,4 +89,8 @@ tmp-*/
 *.swx
 *.bak
 *.md
+!README.md
+!SHOPSWIFT_PROGRESS.md
+!docs/**/*.md
+!docs/*.md
 *.mmd

@@ -5,12 +5,32 @@ import (
 	"notification-service/models"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type NotificationRepository interface {
 	SaveLog(ctx context.Context, log *models.NotificationLog) error
+	ClaimEvent(ctx context.Context, eventID string) (bool, error)
+	MarkEventDelivered(ctx context.Context, eventID string) error
+	ReleaseEvent(ctx context.Context, eventID string) error
 	GetLogs(ctx context.Context, filter models.NotificationFilter) ([]models.NotificationLog, int64, error)
 	GetLogByID(ctx context.Context, id int64) (*models.NotificationLog, error)
+}
+
+func (r *notificationRepository) ClaimEvent(ctx context.Context, eventID string) (bool, error) {
+	event := &models.NotificationEvent{EventID: eventID, Status: "processing"}
+	tx := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(event)
+	return tx.RowsAffected > 0, tx.Error
+}
+
+func (r *notificationRepository) MarkEventDelivered(ctx context.Context, eventID string) error {
+	return r.db.WithContext(ctx).Model(&models.NotificationEvent{}).
+		Where("event_id = ?", eventID).
+		Updates(map[string]interface{}{"status": models.NotificationEventDelivered, "processed_at": gorm.Expr("NOW()")}).Error
+}
+
+func (r *notificationRepository) ReleaseEvent(ctx context.Context, eventID string) error {
+	return r.db.WithContext(ctx).Where("event_id = ?", eventID).Delete(&models.NotificationEvent{}).Error
 }
 
 type notificationRepository struct {

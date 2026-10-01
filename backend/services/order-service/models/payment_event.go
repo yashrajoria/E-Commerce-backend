@@ -2,7 +2,7 @@ package models
 
 import "time"
 
-// From cart-service → order-service
+// From catalog cart → order-service
 type CheckoutEvent struct {
 	Event          string         `json:"event"`   // expected: "checkout.requested"
 	UserID         string         `json:"user_id"` // must be UUID string
@@ -12,6 +12,7 @@ type CheckoutEvent struct {
 	Timestamp      time.Time      `json:"timestamp"`
 	OrderID        string         `json:"order_id"`
 	CouponCode     string         `json:"coupon_code,omitempty"`
+	CorrelationID  string         `json:"correlation_id,omitempty"`
 }
 
 type CheckoutItem struct {
@@ -19,24 +20,27 @@ type CheckoutItem struct {
 	Quantity  int    `json:"quantity"`
 }
 
-// order-service → payment-service
+// order-service checkout consumer → order-service payment consumer (same binary)
 type PaymentRequest struct {
+	EventID        string `json:"event_id,omitempty"`
 	OrderID        string `json:"order_id"`
 	UserID         string `json:"user_id"`
 	Email          string `json:"email,omitempty"`
 	Amount         int    `json:"amount"` // minor units
 	Currency       string `json:"currency,omitempty"`
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
+	CorrelationID  string `json:"correlation_id,omitempty"`
 }
 
-// payment-service → order-service
+// order-service payment consumer → order-service payment-events consumer (same binary)
 type PaymentEvent struct {
-	Type      string    `json:"type"` // "payment_succeeded" | "payment_failed"
-	OrderID   string    `json:"order_id"`
-	UserID    string    `json:"user_id"` // <-- Add this line
-	Email     string    `json:"email,omitempty"`
-	PaymentID string    `json:"payment_id,omitempty"`
-	Amount    int       `json:"amount,omitempty"`
-	Currency  string    `json:"currency,omitempty"`
-	Timestamp time.Time `json:"timestamp,omitempty"`
+	Type          string    `json:"type"` // "payment_succeeded" | "payment_failed"
+	OrderID       string    `json:"order_id"`
+	UserID        string    `json:"user_id"` // <-- Add this line
+	Email         string    `json:"email,omitempty"`
+	PaymentID     string    `json:"payment_id,omitempty"`
+	Amount        int       `json:"amount,omitempty"`
+	Currency      string    `json:"currency,omitempty"`
+	Timestamp     time.Time `json:"timestamp,omitempty"`
+	CorrelationID string    `json:"correlation_id,omitempty"`
 }
