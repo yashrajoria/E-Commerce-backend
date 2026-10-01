@@ -20,6 +20,9 @@ async def get_http_client() -> httpx.AsyncClient:
     global _http_client
     if _http_client is None:
         _http_client = httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True)
+        # OpenTelemetry — no-op when telemetry disabled.
+        from app.core.telemetry import instrument_httpx_client
+        instrument_httpx_client(_http_client)
     return _http_client
 
 

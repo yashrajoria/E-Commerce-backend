@@ -7,10 +7,14 @@ from app.core.logging import logger
 from app.api.routes import router
 from app.tools.executor import close_http_client
 from app.tools.executor import get_http_client
+from app.core.telemetry import init_telemetry, instrument_app
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     logger.info(f"Starting {settings.APP_NAME}")
+    # OpenTelemetry — no-op when OTEL_EXPORTER_OTLP_ENDPOINT unset.
+    if init_telemetry(settings.APP_NAME):
+        instrument_app(application)
     await get_http_client()
     await get_pool()
     yield
