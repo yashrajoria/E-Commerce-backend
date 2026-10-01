@@ -2417,6 +2417,33 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /inventory/restock:
+    post:
+      tags:
+        - Inventory Service
+      summary: Restock confirmed stock after paid order cancellation
+      description: |
+        **Internal — paid cancellation compensation.** Returns confirmed quantities to the
+        available pool when a paid order is cancelled/refunded. Unlike release, no
+        reservation entry is expected since ConfirmStock already removed it.
+
+        > This endpoint is intended for internal service-to-service calls only and should be
+        > protected at the network level.
+      operationId: restockStock
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RestockRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/MessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # ── Promotion Service ────────────────────────────────────────────────────────
 
   /coupons:
@@ -4345,6 +4372,36 @@ components:
           type: string
           format: uuid
           description: The order whose reservation should be confirmed.
+          example: f1e2d3c4-b5a6-7890-1234-abcdef123456
+        items:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required:
+              - product_id
+              - quantity
+            properties:
+              product_id:
+                type: string
+                format: uuid
+                example: 8a0e4f45-8b2a-4c85-9f0b-9bf8d7c8b4b1
+              quantity:
+                type: integer
+                minimum: 1
+                example: 2
+
+    RestockRequest:
+      type: object
+      required:
+        - order_id
+        - items
+      description: Request to restock confirmed quantities when a paid order is cancelled. Adds quantities back to available stock.
+      properties:
+        order_id:
+          type: string
+          format: uuid
+          description: The paid order whose confirmed stock should be restocked.
           example: f1e2d3c4-b5a6-7890-1234-abcdef123456
         items:
           type: array

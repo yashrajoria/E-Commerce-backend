@@ -161,6 +161,17 @@ func (s *InventoryService) ConfirmStock(ctx context.Context, req *models.Confirm
 	return nil
 }
 
+// RestockStock returns confirmed quantities to available stock when a paid
+// order is cancelled/refunded. Must only be called for orders whose
+// reservation was already confirmed (and thus removed).
+func (s *InventoryService) RestockStock(ctx context.Context, req *models.RestockRequest) error {
+	if err := s.repo.RestockAll(ctx, req.OrderID, req.Items); err != nil {
+		return err
+	}
+	log.Printf("[InventoryService] Transactional restock success for order=%s items=%d", req.OrderID, len(req.Items))
+	return nil
+}
+
 // CheckStock checks stock availability for multiple items with a single
 // batched DynamoDB read instead of one GetItem per line item.
 func (s *InventoryService) CheckStock(ctx context.Context, items []models.ReserveItem) ([]models.StockCheckResult, error) {

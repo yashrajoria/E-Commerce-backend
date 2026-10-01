@@ -52,6 +52,12 @@ type InventoryConfirmRequest struct {
 	Items   []ReserveItem `json:"items"`
 }
 
+// RestockRequest is the payload sent to POST /inventory/restock
+type InventoryRestockRequest struct {
+	OrderID string        `json:"order_id"`
+	Items   []ReserveItem `json:"items"`
+}
+
 // StockCheckResult is the response from check/reserve
 type StockCheckResult struct {
 	ProductID    string `json:"product_id"`
@@ -205,5 +211,39 @@ func (c *InventoryClient) ConfirmStock(ctx context.Context, orderID string, item
 	}
 
 	log.Printf("[InventoryClient] Stock confirmed for order=%s items=%d", orderID, len(items))
+	return nil
+}
+
+// RestockStock returns confirmed inventory to available stock (paid order cancelled/refunded)
+func (c *InventoryClient) RestockStock(ctx context.Context, orderID string, items []ReserveItem) error {
+	payload := InventoryRestockRequest{
+		OrderID: orderID,
+		Items:   items,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf("%s/inventory/restock", c.baseURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	internalauth.Apply(req)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("inventory restock request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("inventory restock failed: status %d", resp.StatusCode)
+	}
+
+	log.Printf("[InventoryClient] Stock restocked for order=%s items=%d", orderID, len(items))
 	return nil
 }

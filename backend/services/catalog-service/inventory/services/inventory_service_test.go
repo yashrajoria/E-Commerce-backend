@@ -52,6 +52,10 @@ func (m *MockInventoryRepository) ConfirmAll(ctx context.Context, orderID string
 	return m.Called(ctx, orderID, items).Error(0)
 }
 
+func (m *MockInventoryRepository) RestockAll(ctx context.Context, orderID string, items []models.ReserveItem) error {
+	return m.Called(ctx, orderID, items).Error(0)
+}
+
 func (m *MockInventoryRepository) CheckStock(ctx context.Context, productID string, quantity int) (*models.StockCheckResult, error) {
 	args := m.Called(ctx, productID, quantity)
 	return args.Get(0).(*models.StockCheckResult), args.Error(1)

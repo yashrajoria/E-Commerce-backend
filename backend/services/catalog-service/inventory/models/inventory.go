@@ -51,6 +51,14 @@ type ConfirmRequest struct {
 	Items   []ReserveItem `json:"items" binding:"required,dive"`
 }
 
+// RestockRequest is used when a paid (already confirmed) order is cancelled —
+// adds the confirmed quantities back to available stock. Unlike ReleaseRequest
+// there is no reservation left to remove since ConfirmStock already cleared it.
+type RestockRequest struct {
+	OrderID string        `json:"order_id" binding:"required"`
+	Items   []ReserveItem `json:"items" binding:"required,dive"`
+}
+
 // StockCheckResult represents availability info for a single product
 type StockCheckResult struct {
 	ProductID    string `json:"product_id"`
