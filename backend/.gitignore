@@ -103,3 +103,6 @@ backups/*.dump
 
 # k6 / load-test artifacts
 tools/loadtest/*.summary.json
+!tools/loadtest/*.md
+!tools/loadtest/*.js
+!tools/loadtest/*.sh
