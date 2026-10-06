@@ -169,3 +169,21 @@ jobs:
           push: false
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  deploy-render:
+    name: Deploy to Render
+    needs: [go-vet-and-test, python-test, openapi-lint, docker-build-dry-run]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render Deploy Hook
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -n "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "Triggering Render deployment..."
+            curl -f -X POST "$RENDER_DEPLOY_HOOK_URL"
+            echo "Render deployment triggered successfully!"
+          else
+            echo "RENDER_DEPLOY_HOOK_URL secret not set, skipping automatic deploy hook."
+          fi
