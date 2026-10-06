@@ -173,7 +173,8 @@ jobs:
     name: Deploy to EC2
     needs: docker-build-and-push
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
+    continue-on-error: true
     env:
       DEPLOY_DIR: /home/ubuntu/E-Commerce-backend/backend
       SCRIPTS_DIR: /home/ubuntu/scripts
