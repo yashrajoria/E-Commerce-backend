@@ -4,14 +4,14 @@ import (
 	"time"
 )
 
-// Inventory represents the stock details of a product in DynamoDB
+// Inventory represents the stock details of a product.
 type Inventory struct {
-	ProductID         string            `json:"product_id" dynamodbav:"id"`
-	Available         int               `json:"available" dynamodbav:"available"`
-	Reserved          int               `json:"reserved" dynamodbav:"reserved"`
-	Threshold         int               `json:"threshold" dynamodbav:"threshold"`
-	OrderReservations map[string]int    `json:"order_reservations,omitempty" dynamodbav:"order_reservations,omitempty"`
-	UpdatedAt         time.Time         `json:"updated_at" dynamodbav:"updated_at"`
+	ProductID         string         `json:"product_id"`
+	Available         int            `json:"available"`
+	Reserved          int            `json:"reserved"`
+	Threshold         int            `json:"threshold"`
+	OrderReservations map[string]int `json:"order_reservations,omitempty"`
+	UpdatedAt         time.Time      `json:"updated_at"`
 }
 
 // SetStockRequest is used to initialize or overwrite inventory for a product

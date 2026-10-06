@@ -2431,6 +2431,8 @@ curl -s localhost:8082/inventory/$PID     # back to the original numbers
 ```
 Expected: numbers move as commented. (If the route needs a different auth header, use whatever `inventory/middleware/internal_auth.go` expects.)
 
+Executed 2026-10-07: 8 inventory repo tests + 2 service tests pass (also under `-race -count=3`). Mutation checks proved the tests have teeth: removing the `mergeItems` sort made the opposite-order test fail with `deadlock detected` 3/3 runs; removing `available >= ?` made the oversell tests fail (the CHECK constraint is a second line of defense). Live stack: 21/21 inventory lifecycle checks (reserve/replay/conflict/insufficient/confirm/release/restock/check/admin list/SetStock/update) and product create → stock sync passed. LocalStack inventory was identical to the seed with no open reservations, so reseeding from JSON lost nothing.
+
 - [ ] **Step 11: Commit**
 
 ```bash

@@ -2,12 +2,10 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"catalog-service/inventory/models"
 	"catalog-service/inventory/repository"
@@ -36,53 +34,15 @@ func (s *InventoryService) GetStock(ctx context.Context, productID string) (*mod
 	return inv, nil
 }
 
-// SetStock initializes or updates inventory for a product (upsert).
-// If the product already has an inventory record the available count and
-// threshold are updated while preserving the current reserved count.
+// SetStock adds req.Available to the product's stock (creating the record if
+// needed) and overwrites the threshold, atomically. The reserved count is kept.
 func (s *InventoryService) SetStock(ctx context.Context, req *models.SetStockRequest) (*models.Inventory, error) {
-	existing, err := s.repo.Get(ctx, req.ProductID)
-	if err != nil && !errors.Is(err, repository.ErrNotFound) {
-		return nil, fmt.Errorf("failed to check existing stock: %w", err)
-	}
-
-	now := time.Now().UTC()
-
-	if existing != nil {
-		// Upsert: add incoming available to current stock, update threshold
-		newAvailable := existing.Available + req.Available
-		updates := map[string]interface{}{
-			"available":  newAvailable,
-			"threshold":  req.Threshold,
-			"updated_at": now.Format(time.RFC3339),
-		}
-		if err := s.repo.Update(ctx, req.ProductID, updates); err != nil {
-			return nil, fmt.Errorf("failed to update stock: %w", err)
-		}
-		existing.Available = newAvailable
-		existing.Threshold = req.Threshold
-		existing.UpdatedAt = now
-		log.Printf("[InventoryService] Stock updated (upsert) for product=%s available=%d (+%d) threshold=%d reserved=%d",
-			req.ProductID, newAvailable, req.Available, req.Threshold, existing.Reserved)
-		return existing, nil
-	}
-
-	// First time: create a new inventory record (empty order_reservations for nested SET on reserve)
-	inv := &models.Inventory{
-		ProductID:         req.ProductID,
-		Available:         req.Available,
-		Reserved:          0,
-		Threshold:         req.Threshold,
-		OrderReservations: map[string]int{},
-		UpdatedAt:         now,
-	}
-
-	if err := s.repo.Set(ctx, inv); err != nil {
+	inv, err := s.repo.AddStock(ctx, req.ProductID, req.Available, req.Threshold)
+	if err != nil {
 		return nil, fmt.Errorf("failed to set stock: %w", err)
 	}
-
-	log.Printf("[InventoryService] Stock created for product=%s available=%d threshold=%d",
-		req.ProductID, req.Available, req.Threshold)
-
+	log.Printf("[InventoryService] Stock set for product=%s available=%d (+%d) threshold=%d reserved=%d",
+		req.ProductID, inv.Available, req.Available, inv.Threshold, inv.Reserved)
 	return inv, nil
 }
 
@@ -173,7 +133,7 @@ func (s *InventoryService) RestockStock(ctx context.Context, req *models.Restock
 }
 
 // CheckStock checks stock availability for multiple items with a single
-// batched DynamoDB read instead of one GetItem per line item.
+// batched read instead of one query per line item.
 func (s *InventoryService) CheckStock(ctx context.Context, items []models.ReserveItem) ([]models.StockCheckResult, error) {
 	if len(items) == 0 {
 		return []models.StockCheckResult{}, nil
@@ -214,8 +174,6 @@ func (s *InventoryService) CheckStock(ctx context.Context, items []models.Reserv
 }
 
 // ListAllStock returns inventory page `page` (1-indexed) with `pageSize` items.
-// Walks DynamoDB Scan cursors to skip (page-1)*pageSize items instead of
-// returning the first page for every `page` value.
 func (s *InventoryService) ListAllStock(ctx context.Context, page, pageSize int) ([]models.Inventory, error) {
 	if page < 1 {
 		page = 1
@@ -226,24 +184,10 @@ func (s *InventoryService) ListAllStock(ctx context.Context, page, pageSize int)
 	if pageSize > 100 {
 		pageSize = 100
 	}
-	limit := int32(pageSize)
 
-	var startKey map[string]types.AttributeValue
-	for p := 1; p < page; p++ {
-		_, nextKey, err := s.repo.ListAll(ctx, limit, startKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list inventory: %w", err)
-		}
-		if len(nextKey) == 0 {
-			return []models.Inventory{}, nil
-		}
-		startKey = nextKey
-	}
-
-	items, _, err := s.repo.ListAll(ctx, limit, startKey)
+	items, err := s.repo.ListAll(ctx, pageSize, (page-1)*pageSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list inventory: %w", err)
 	}
-
 	return items, nil
 }

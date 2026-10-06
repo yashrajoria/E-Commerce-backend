@@ -67,3 +67,10 @@ for p in prods:
 print("-- product_categories")
 for l in links:
     print(f"INSERT INTO catalog.product_categories (category_id, product_id) VALUES ({q(l['category_id'])}, {q(l['product_id'])}) ON CONFLICT DO NOTHING;")
+
+print("-- inventory")
+for i in rows("inventory"):
+    if i["id"] not in live_prods:
+        continue
+    print("INSERT INTO catalog.inventory (product_id, available, reserved, threshold) VALUES "
+          f"({q(i['id'])}, {i.get('available', 0)}, {i.get('reserved', 0)}, {i.get('threshold', 0)}) ON CONFLICT (product_id) DO NOTHING;")

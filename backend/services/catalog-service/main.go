@@ -19,7 +19,6 @@ import (
 	"catalog-service/services"
 	cartroutes "catalog-service/cart/routes"
 
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -85,7 +84,6 @@ func main() {
 	if err != nil {
 		zap.L().Fatal("Failed to load AWS config", zap.Error(err))
 	}
-	ddbClient := dynamodb.NewFromConfig(awsCfg)
 	s3Client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
 		o.UsePathStyle = true // Important for LocalStack compatibility
 	})
@@ -110,7 +108,7 @@ func main() {
 	// --- Repositories ---
 	productRepo := repository.NewPGProductRepo(gdb)
 	categoryRepo := repository.NewPGCategoryRepo(gdb)
-	inventoryRepo := inventoryrepository.NewDynamoInventoryRepository(ddbClient, cfg.DDBTableInventory)
+	inventoryRepo := inventoryrepository.NewPGInventoryRepository(gdb)
 
 	// --- CloudWatch (Logs + Metrics) ---
 	cwLogsClient, err := awspkg.NewCloudWatchLogsClient(context.Background(), "catalog-service")
@@ -139,6 +137,12 @@ func main() {
 	)
 	categoryService := services.NewCategoryServiceDDB(categoryRepo, productRepo)
 	productService.SetCategoryService(categoryService)
+
+	// Finished reservations are history; owners purge unbounded tables (see backend/CLAUDE.md).
+	purgeCtx, stopPurge := context.WithCancel(context.Background())
+	defer stopPurge()
+	commondb.StartPurger(purgeCtx, gdb, time.Hour,
+		commondb.PurgeJob{Table: "catalog.stock_reservations", Where: "status <> 'reserved' AND updated_at < now() - interval '30 days'"})
 
 	// --- Controllers ---
 	productController := controllers.NewProductController(productService, rdb)

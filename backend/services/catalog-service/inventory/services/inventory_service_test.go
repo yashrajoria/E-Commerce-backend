@@ -5,7 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"catalog-service/inventory/models"
@@ -32,8 +31,12 @@ func (m *MockInventoryRepository) BatchGet(ctx context.Context, productIDs []str
 	return args.Get(0).(map[string]*models.Inventory), args.Error(1)
 }
 
-func (m *MockInventoryRepository) Set(ctx context.Context, inv *models.Inventory) error {
-	return m.Called(ctx, inv).Error(0)
+func (m *MockInventoryRepository) AddStock(ctx context.Context, productID string, delta, threshold int) (*models.Inventory, error) {
+	args := m.Called(ctx, productID, delta, threshold)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.Inventory), args.Error(1)
 }
 
 func (m *MockInventoryRepository) Update(ctx context.Context, productID string, updates map[string]interface{}) error {
@@ -61,9 +64,12 @@ func (m *MockInventoryRepository) CheckStock(ctx context.Context, productID stri
 	return args.Get(0).(*models.StockCheckResult), args.Error(1)
 }
 
-func (m *MockInventoryRepository) ListAll(ctx context.Context, limit int32, exclusiveStartKey map[string]types.AttributeValue) ([]models.Inventory, map[string]types.AttributeValue, error) {
-	// Not needed for this test
-	return nil, nil, nil
+func (m *MockInventoryRepository) ListAll(ctx context.Context, limit, offset int) ([]models.Inventory, error) {
+	args := m.Called(ctx, limit, offset)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]models.Inventory), args.Error(1)
 }
 
 func TestReserveStock_TransactionalSuccess(t *testing.T) {
@@ -107,5 +113,30 @@ func TestReserveStock_TransactionalFailure(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, results)
 	assert.Equal(t, "insufficient stock", err.Error())
+	repo.AssertExpectations(t)
+}
+
+func TestSetStock_UpsertsAtomicallyViaRepo(t *testing.T) {
+	repo := new(MockInventoryRepository)
+	service := NewInventoryService(repo, nil)
+	want := &models.Inventory{ProductID: "p1", Available: 15, Threshold: 3}
+	repo.On("AddStock", mock.Anything, "p1", 5, 3).Return(want, nil)
+
+	got, err := service.SetStock(context.Background(), &models.SetStockRequest{ProductID: "p1", Available: 5, Threshold: 3})
+
+	assert.NoError(t, err)
+	assert.Equal(t, want, got)
+	repo.AssertExpectations(t)
+}
+
+func TestListAllStock_PageBecomesOffset(t *testing.T) {
+	repo := new(MockInventoryRepository)
+	service := NewInventoryService(repo, nil)
+	repo.On("ListAll", mock.Anything, 20, 40).Return([]models.Inventory{{ProductID: "p"}}, nil)
+
+	items, err := service.ListAllStock(context.Background(), 3, 20)
+
+	assert.NoError(t, err)
+	assert.Len(t, items, 1)
 	repo.AssertExpectations(t)
 }
