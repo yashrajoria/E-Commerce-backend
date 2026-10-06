@@ -22,6 +22,14 @@ export NOTIFICATION_SERVICE_URL="http://localhost:8092"
 export ALLOW_AUTO_MIGRATE="${ALLOW_AUTO_MIGRATE:-true}"
 export GIN_MODE="${GIN_MODE:-release}"
 
+# Disable AWS IMDS metadata lookups and AWS Secrets Manager on non-AWS hosts
+export AWS_REGION="${AWS_REGION:-us-east-1}"
+export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-test}"
+export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-test}"
+export AWS_EC2_METADATA_DISABLED="${AWS_EC2_METADATA_DISABLED:-true}"
+export AWS_USE_SECRETS="${AWS_USE_SECRETS:-false}"
+export CLOUDWATCH_ENABLED="${CLOUDWATCH_ENABLED:-false}"
+
 # Graceful shutdown handler
 cleanup() {
     echo "Shutting down services..."
