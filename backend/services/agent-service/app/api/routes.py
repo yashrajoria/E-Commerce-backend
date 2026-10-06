@@ -6,10 +6,17 @@ from uuid import UUID, uuid4
 
 from app.agent.schemas import AgentQueryRequestV2, AgentResponseV2
 from app.agent.orchestrator import run_agent
-from app.audit.repository import claim_pending_mutation, get_pending, mark_confirmed_and_executed, mark_rejected
+from app.audit.repository import (
+    claim_pending_mutation,
+    get_pending,
+    list_pending_mutations,
+    mark_confirmed_and_executed,
+    mark_rejected,
+)
 from app.core.session import clear_session, get_history
 from app.core.logging import get_logger
 from app.tools.registry import TOOL_REGISTRY, get_tool_registry_json
+from app.watchdog.sentry import run_watchdog_scan
 
 router = APIRouter()
 
@@ -96,7 +103,22 @@ def _row_to_dict(row) -> dict:
     return data
 
 
+@router.get("/agent/mutations/pending")
+async def list_pending(req: Request, limit: int = 50):
+    _require_admin(req)
+    rows = await list_pending_mutations(limit=limit)
+    return [_row_to_dict(r) for r in rows]
+
+
+@router.post("/agent/watchdog/scan")
+async def trigger_watchdog_scan(req: Request):
+    _require_admin(req)
+    scan_result = await run_watchdog_scan()
+    return scan_result
+
+
 @router.get("/agent/mutations/{request_id}")
+
 async def get_mutation(request_id: str, req: Request):
     _require_admin(req)
     try:

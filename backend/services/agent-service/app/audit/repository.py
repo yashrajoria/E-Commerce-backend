@@ -76,6 +76,20 @@ async def get_pending(request_id: UUID) -> Optional[asyncpg.Record]:
     )
 
 
+async def list_pending_mutations(limit: int = 50) -> list[asyncpg.Record]:
+    pool = await get_pool()
+    return await pool.fetch(
+        """
+        SELECT * FROM agent_audit_log
+        WHERE mutating = true AND status = 'pending_confirmation'
+        ORDER BY created_at DESC
+        LIMIT $1
+        """,
+        limit,
+    )
+
+
+
 async def claim_pending_mutation(
     request_id: UUID, confirmed_by: Optional[str]
 ) -> Optional[asyncpg.Record]:

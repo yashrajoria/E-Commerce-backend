@@ -80,6 +80,18 @@ var eventConfigs = map[string]eventConfig{
 		channels: []string{models.ChannelSMS},
 		toKeys:   map[string]string{models.ChannelSMS: "phone"},
 	},
+	models.TypePriceDropRefund: {
+		tmplFile: "templates/price_drop_refund.html",
+		channels: []string{models.ChannelEmail},
+		subject:  "Price Drop Refund Issued – ShopSwift Guarantee",
+		toKeys:   map[string]string{models.ChannelEmail: "email"},
+	},
+	models.TypePriceDropRefundAlias: {
+		tmplFile: "templates/price_drop_refund.html",
+		channels: []string{models.ChannelEmail},
+		subject:  "Price Drop Refund Issued – ShopSwift Guarantee",
+		toKeys:   map[string]string{models.ChannelEmail: "email"},
+	},
 }
 
 type notificationService struct {

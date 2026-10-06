@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ShopSwift Price Drop Guarantee Refund</title>
+    <style>
+      body {
+        background: #f0ede8;
+        font-family: "DM Sans", Arial, sans-serif;
+        color: #1a1a1a;
+        margin: 0;
+        padding: 24px;
+      }
+      .card {
+        max-width: 580px;
+        margin: 0 auto;
+        background: #faf8f5;
+        border-radius: 14px;
+        overflow: hidden;
+        border: 1px solid #e2ded7;
+      }
+      .hero {
+        background: linear-gradient(145deg, #102a43 0%, #1e3a5f 100%);
+        color: #f5f0e8;
+        padding: 28px;
+      }
+      .logo {
+        font-family: "Playfair Display", serif;
+        font-size: 24px;
+        font-weight: 600;
+      }
+      .logo span {
+        color: #38bdf8;
+      }
+      .title {
+        margin-top: 10px;
+        font-size: 24px;
+        font-family: "Playfair Display", serif;
+      }
+      .body {
+        padding: 28px;
+      }
+      .refund-badge {
+        margin-top: 16px;
+        background: #ecfdf5;
+        border: 1px solid #a7f3d0;
+        border-radius: 8px;
+        padding: 18px;
+        text-align: center;
+      }
+      .refund-amount {
+        font-size: 28px;
+        font-weight: 800;
+        color: #065f46;
+      }
+      .details-table {
+        width: 100%;
+        margin-top: 20px;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+      .details-table td {
+        padding: 8px 0;
+        border-bottom: 1px solid #e5e7eb;
+      }
+      .label {
+        color: #6b7280;
+      }
+      .value {
+        font-weight: 600;
+        text-align: right;
+      }
+      .footer {
+        margin-top: 24px;
+        font-size: 12px;
+        color: #6b7280;
+        line-height: 1.5;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="hero">
+        <div class="logo">Shop<span>Swift</span></div>
+        <div class="title">Price Drop Guarantee Refund</div>
+      </div>
+      <div class="body">
+        <p>Hello,</p>
+        <p>Great news! An item you recently purchased has dropped in price, and our <strong>14-Day Price Drop Guarantee</strong> automatically credited your account with the price difference.</p>
+        
+        <div class="refund-badge">
+          <div style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #047857; margin-bottom: 4px;">Refund Issued</div>
+          <div class="refund-amount">{{.refund_formatted}}</div>
+        </div>
+
+        <table class="details-table">
+          <tr>
+            <td class="label">Product</td>
+            <td class="value">{{.product_name}}</td>
+          </tr>
+          <tr>
+            <td class="label">Order ID</td>
+            <td class="value">{{.order_id}}</td>
+          </tr>
+          <tr>
+            <td class="label">Quantity</td>
+            <td class="value">{{.quantity}}</td>
+          </tr>
+          <tr>
+            <td class="label">Original Price</td>
+            <td class="value">${{printf "%.2f" .old_price}}</td>
+          </tr>
+          <tr>
+            <td class="label">New Price</td>
+            <td class="value">${{printf "%.2f" .new_price}}</td>
+          </tr>
+        </table>
+
+        <div class="footer">
+          <p>No action is needed on your part. The refund has been queued and will be posted back to your original payment method within 3–5 business days.</p>
+          <p>Thank you for shopping with ShopSwift!</p>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

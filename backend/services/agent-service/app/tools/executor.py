@@ -577,7 +577,50 @@ async def create_restock_request(
     )
 
 
+async def redrive_stuck_outbox(
+    params: Dict[str, Any],
+    auth_header: Optional[str] = None,
+    cookie_header: Optional[str] = None,
+    correlation_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    user_role: Optional[str] = None,
+) -> Dict[str, Any]:
+    batch_size = int(params.get("batch_size") or 50)
+    return await _request(
+        "POST",
+        "/orders/admin/outbox/redrive",
+        json_body={"batch_size": batch_size},
+        auth_header=auth_header,
+        cookie_header=cookie_header,
+        correlation_id=correlation_id,
+        user_id=user_id,
+        user_role=user_role,
+    )
+
+
+async def acknowledge_incident(
+    params: Dict[str, Any],
+    auth_header: Optional[str] = None,
+    cookie_header: Optional[str] = None,
+    correlation_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    user_role: Optional[str] = None,
+) -> Dict[str, Any]:
+    incident_id = params.get("incident_id")
+    action_taken = params.get("action_taken", "acknowledged")
+    notes = params.get("notes")
+    return {
+        "status": "incident_resolved",
+        "incident_id": incident_id,
+        "action_taken": action_taken,
+        "notes": notes,
+        "acknowledged_by": user_id or "admin",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 _ToolHandler = Callable[..., Coroutine[Any, Any, Dict[str, Any]]]
+
 
 
 async def execute_tool(

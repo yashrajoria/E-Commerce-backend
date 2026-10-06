@@ -98,6 +98,7 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	payment := forwardTo(orderBase + "/payment")
 	inventory := forwardTo(inventoryBase + "/inventory")
 	coupons := forwardTo(orderBase + "/coupons")
+	promotions := forwardTo(orderBase + "/promotions")
 	shipping := forwardTo(orderBase + "/shipping")
 	authProxy := forwardTo(authBase + "/auth")
 	notifications := forwardTo(notificationBase + "/notifications")
@@ -146,6 +147,13 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 
 	// Coupons — guest checkout can validate without login
 	public.POST("/coupons/validate", coupons)
+
+	// Flash sale waiting room — public entrance & queue status
+	public.POST("/inventory/flash-sale/enter", inventory)
+	public.GET("/inventory/flash-sale/status", inventory)
+
+	// Dynamic Basket Optimizer — public / guest cart incentives
+	public.POST("/promotions/optimize-basket", promotions)
 
 	// ── Storefront aggregation (ex-BFF) ─────────────────────────────────────
 	// bff-service is deleted. Its storefront fan-outs (home, profile,
@@ -248,6 +256,8 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	// Inventory — read
 	protected.GET("/inventory/:productId", inventory)
 	protected.POST("/inventory/check", inventory)
+	protected.POST("/inventory/flash-sale/claim", inventory)
+	protected.POST("/inventory/flash-sale/release", inventory)
 
 	// Coupons — authenticated lookup of a single code
 	protected.GET("/coupons/:code", coupons)
@@ -280,6 +290,8 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	admin.GET("/inventory", inventory)
 	admin.POST("/inventory", inventory)
 	admin.PUT("/inventory/:productId", inventory)
+	admin.POST("/inventory/flash-sale/configure", inventory)
+	admin.POST("/inventory/flash-sale/reset", inventory)
 
 	// Coupons — write
 	admin.POST("/coupons", coupons)

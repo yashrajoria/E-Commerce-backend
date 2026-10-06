@@ -31,7 +31,11 @@ cd backend/tools/loadtest
 Or directly:
 
 ```bash
+# Standard gateway baseline
 k6 run --env GATEWAY_URL=http://localhost:8080 k6-loadtest.js
+
+# High-concurrency flash sale waiting room & FairPass contention test (100 VUs vs 25 slots)
+k6 run --env GATEWAY_URL=http://localhost:8080 k6-flashsale.js
 ```
 
 If `LOADTEST_EMAIL` / `LOADTEST_PASSWORD` are unset, the login scenario is
@@ -44,6 +48,10 @@ skipped (logged as a warning) instead of failing the run.
 | health   | `/health`        | GET  | none |
 | products | `/products`      | GET  | none |
 | login    | `/auth/login`    | POST | demo credentials (env vars) |
+| flash-sale | `/inventory/flash-sale/enter` | POST | none (or demo user) |
+| flash-status | `/inventory/flash-sale/status` | GET | none |
+| flash-claim | `/inventory/flash-sale/claim` | POST | demo user |
+| flash-config | `/inventory/flash-sale/configure` | POST | admin role |
 
 Thresholds (tuned after first baseline run — see `baseline-notes.md`):
 
