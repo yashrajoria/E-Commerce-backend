@@ -87,7 +87,22 @@ TOOL_REGISTRY: Dict[str, ToolSpec] = {
         mutating=True,
         min_role="admin",
     ),
+    "redrive_stuck_outbox": ToolSpec(
+        description="Trigger outbox event redrive for pending events in order-service. MUTATING — requires admin confirmation before it executes.",
+        params_model=schemas.RedriveStuckOutboxParams,
+        handler=executor.redrive_stuck_outbox,
+        mutating=True,
+        min_role="admin",
+    ),
+    "acknowledge_incident": ToolSpec(
+        description="Acknowledge and mark an ops watchdog incident as triaged. MUTATING — requires admin confirmation before it executes.",
+        params_model=schemas.AcknowledgeIncidentParams,
+        handler=executor.acknowledge_incident,
+        mutating=True,
+        min_role="admin",
+    ),
 }
+
 
 READ_TOOLS: Dict[str, ToolSpec] = {name: spec for name, spec in TOOL_REGISTRY.items() if not spec.mutating}
 MUTATING_TOOLS: Dict[str, ToolSpec] = {name: spec for name, spec in TOOL_REGISTRY.items() if spec.mutating}

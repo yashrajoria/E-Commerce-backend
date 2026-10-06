@@ -18,6 +18,8 @@ const (
 	TypeCouponApplied          = "coupon_applied"
 	TypePaymentFailed          = "payment_failed"
 	TypeOTPSMS                 = "otp_sms"
+	TypePriceDropRefund        = "order.price_drop_refund.requested"
+	TypePriceDropRefundAlias   = "price_drop_refund"
 )
 
 type NotificationLog struct {

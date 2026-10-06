@@ -133,6 +133,8 @@ func main() {
 	productController := controllers.NewProductController(productService, rdb)
 	categoryController := controllers.NewCategoryController(categoryService, rdb)
 	inventoryController := inventorycontrollers.NewInventoryController(inventoryService)
+	waitingRoomService := inventoryservices.NewWaitingRoomService(rdb, logger)
+	waitingRoomController := inventorycontrollers.NewWaitingRoomController(waitingRoomService)
 
 	// Start bulk import worker (consumes persisted files from storage)
 	storageDir := os.Getenv("BULK_STORAGE_DIR")
@@ -164,7 +166,7 @@ func main() {
 	routes.RegisterRoutesLegacy(r, productController, categoryController)
 
 	// Inventory routes (paths unchanged from inventory-service)
-	inventoryroutes.RegisterRoutes(r, inventoryController)
+	inventoryroutes.RegisterRoutes(r, inventoryController, waitingRoomController)
 
 	// Cart routes (paths unchanged from cart-service; validation is in-process)
 	cartroutes.RegisterCartRoutes(r, rdb, snsClient, cfg.CartTTL, productService)

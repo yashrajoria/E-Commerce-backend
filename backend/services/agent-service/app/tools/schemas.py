@@ -57,3 +57,14 @@ class CancelOrderParams(BaseModel):
 class CreateRestockRequestParams(BaseModel):
     product_id: str = Field(..., min_length=1, max_length=64)
     quantity: int = Field(..., gt=0, le=100_000)
+
+
+class RedriveStuckOutboxParams(BaseModel):
+    batch_size: int = Field(default=50, ge=1, le=500)
+
+
+class AcknowledgeIncidentParams(BaseModel):
+    incident_id: str = Field(..., min_length=1, max_length=128)
+    action_taken: str = Field(default="acknowledged", max_length=200)
+    notes: Optional[str] = Field(default=None, max_length=500)
+

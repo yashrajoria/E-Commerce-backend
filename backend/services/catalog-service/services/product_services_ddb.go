@@ -20,6 +20,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
+	"github.com/yashrajoria/common/events"
 	"go.uber.org/zap"
 )
 
@@ -31,18 +32,25 @@ type StockSyncer interface {
 	SetStock(ctx context.Context, productID string, quantity int) error
 }
 
+// PriceDropPublisher notifies downstream subscribers of price reductions
+// for the 14-Day Price Drop Guarantee.
+type PriceDropPublisher interface {
+	PublishPriceDrop(ctx context.Context, evt events.ProductPriceDecreasedEvent) error
+}
+
 // ProductServiceDDB is a DynamoDB-backed product service
 type ProductServiceDDB struct {
-	productRepo      repository.ProductRepo
-	categoryRepo     repository.CategoryRepo
-	categoryService  *CategoryServiceDDB // For updating product counts when products change
-	s3Client         *s3.Client
-	presignClient    *s3.PresignClient
-	bucket           string
-	prefix           string
-	endpoint         string
-	cdnDomain        string
-	inventoryClient  StockSyncer
+	productRepo         repository.ProductRepo
+	categoryRepo        repository.CategoryRepo
+	categoryService     *CategoryServiceDDB // For updating product counts when products change
+	s3Client            *s3.Client
+	presignClient       *s3.PresignClient
+	bucket              string
+	prefix              string
+	endpoint            string
+	cdnDomain           string
+	inventoryClient     StockSyncer
+	priceDropPublisher  PriceDropPublisher
 }
 
 func NewProductServiceDDB(
@@ -70,6 +78,11 @@ func NewProductServiceDDB(
 // Called after service initialization to avoid circular dependency.
 func (s *ProductServiceDDB) SetCategoryService(cs *CategoryServiceDDB) {
 	s.categoryService = cs
+}
+
+// SetPriceDropPublisher wires downstream price drop notifications for guarantees.
+func (s *ProductServiceDDB) SetPriceDropPublisher(p PriceDropPublisher) {
+	s.priceDropPublisher = p
 }
 
 // GeneratePresignedUpload returns a presigned PUT URL, the object key, and the public URL
@@ -321,6 +334,34 @@ func (s *ProductServiceDDB) UpdateProduct(ctx context.Context, id uuid.UUID, req
 		if err := s.inventoryClient.SetStock(ctx, id.String(), *req.Quantity); err != nil {
 			zap.L().Warn("Failed to sync inventory on product update",
 				zap.String("product_id", id.String()), zap.Error(err))
+		}
+	}
+
+	// 14-Day Price Drop Guarantee: check if price was lowered
+	if req.Price != nil && *req.Price < oldProduct.Price {
+		oldPrice := oldProduct.Price
+		newPrice := *req.Price
+		zap.L().Info("Detected product price reduction",
+			zap.String("product_id", id.String()),
+			zap.Float64("old_price", oldPrice),
+			zap.Float64("new_price", newPrice),
+			zap.Float64("delta", oldPrice-newPrice),
+		)
+
+		if s.priceDropPublisher != nil {
+			evt := events.NewProductPriceDecreasedEvent(
+				id.String(),
+				oldPrice,
+				newPrice,
+				time.Now().Unix(),
+			)
+			go func() {
+				if err := s.priceDropPublisher.PublishPriceDrop(context.Background(), evt); err != nil {
+					zap.L().Warn("Failed to publish price drop guarantee event",
+						zap.String("product_id", id.String()),
+						zap.Error(err))
+				}
+			}()
 		}
 	}
 

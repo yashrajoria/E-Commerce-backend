@@ -242,10 +242,13 @@ func main() {
 
 	// Promotion controller & routes
 	promoController := promotioncontrollers.NewCouponController(promoService)
+	basketOptService := promotionservices.NewBasketOptimizerService(logger)
+	basketOptController := promotioncontrollers.NewBasketOptimizerController(basketOptService)
 	shippingController := shippingcontrollers.NewShippingController(shippingService)
 	paymentController := paymentcontrollers.NewPaymentController(stripeSvc, snsClient, cfg.PaymentSNSTopicARN, cfg.NotificationSNSTopicARN, cfg.StoreCurrency, paymentRepo, logger)
 	routes.RegisterOrderRoutes(r, orderController)
-	promotionroutes.RegisterCouponRoutes(r, promoController)
+	promotionroutes.RegisterPromotionRoutes(r, promoController, basketOptController)
+
 	shippingroutes.RegisterShippingRoutes(r, shippingController)
 	paymentroutes.RegisterPaymentRoutes(r, paymentController)
 	adminroutes.RegisterDashboardRoutes(r, adminroutes.NewDashboardController(orderRepository, logger))

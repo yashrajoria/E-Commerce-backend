@@ -26,3 +26,14 @@ func RegisterCouponRoutes(r *gin.Engine, cc *promotioncontrollers.CouponControll
 	adminRoutes.GET("", cc.ListCoupons)
 	adminRoutes.DELETE("/:code", cc.DeactivateCoupon)
 }
+
+// RegisterPromotionRoutes sets up coupon routes and basket optimizer routes.
+func RegisterPromotionRoutes(r *gin.Engine, cc *promotioncontrollers.CouponController, optCtrl *promotioncontrollers.BasketOptimizerController) {
+	RegisterCouponRoutes(r, cc)
+
+	promoRoutes := r.Group("/promotions")
+	{
+		// Public or guest basket optimization
+		promoRoutes.POST("/optimize-basket", optCtrl.Optimize)
+	}
+}

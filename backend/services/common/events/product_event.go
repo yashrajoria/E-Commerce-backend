@@ -62,3 +62,27 @@ func NewProductBulkImportedEvent(categoryIDs []string) ProductEvent {
 		},
 	}
 }
+
+// ProductPriceDecreasedEvent is fired when a product price is reduced in catalog-service.
+// Used by order-service to initiate automated 14-day price drop refunds.
+type ProductPriceDecreasedEvent struct {
+	EventType     string  `json:"event_type"` // "product_price_decreased"
+	ProductID     string  `json:"product_id"`
+	OldPrice      float64 `json:"old_price"`
+	NewPrice      float64 `json:"new_price"`
+	DeltaPrice    float64 `json:"delta_price"`
+	EffectiveDate int64   `json:"effective_date"`
+}
+
+// NewProductPriceDecreasedEvent creates a price drop event.
+func NewProductPriceDecreasedEvent(productID string, oldPrice, newPrice float64, timestamp int64) ProductPriceDecreasedEvent {
+	return ProductPriceDecreasedEvent{
+		EventType:     "product_price_decreased",
+		ProductID:     productID,
+		OldPrice:      oldPrice,
+		NewPrice:      newPrice,
+		DeltaPrice:    oldPrice - newPrice,
+		EffectiveDate: timestamp,
+	}
+}
+
