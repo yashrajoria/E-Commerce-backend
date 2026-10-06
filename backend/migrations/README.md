@@ -28,7 +28,7 @@ All active and historical SQL in this folder is written to be **re-runnable**:
 
 Unique constraints are enforced via **named unique indexes**, not inline `UNIQUE` column attrs, so a re-run still creates them if a prior AutoMigrate left the table without them. Phase 1 outbox and consumer-deduplication changes are intentionally combined in one migration so their schema is applied and rolled back as one unit.
 
-Historical one-off scripts (`20260125_*.sql`, etc.) are kept for reference; they are **not** executed by golang-migrate. Prefer the baseline + new versioned files going forward.
+Historical one-off scripts (`legacy/20260125_*.sql`, etc.) are archived in `legacy/` for reference; they are **not** executed by golang-migrate. Prefer the baseline + new versioned files going forward.
 
 Shipments table is included for future use; shipping-service does not use Postgres at runtime today.
 
