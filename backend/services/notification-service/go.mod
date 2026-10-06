@@ -96,4 +96,4 @@ require (
 
 replace github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws => ../../pkg/aws
 
-replace github.com/yashrajoria/common => ../common
+replace github.com/yashrajoria/common => ../../pkg/common

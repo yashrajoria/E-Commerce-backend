@@ -19,7 +19,7 @@ require (
 
 replace github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws => ../../pkg/aws
 
-replace github.com/yashrajoria/common => ../common
+replace github.com/yashrajoria/common => ../../pkg/common
 
 require (
 	github.com/bytedance/sonic v1.15.2 // indirect

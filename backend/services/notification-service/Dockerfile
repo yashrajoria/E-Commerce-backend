@@ -5,7 +5,7 @@ WORKDIR /app
 RUN apk add --no-cache git
 
 COPY pkg/aws /pkg/aws
-COPY services/common /common
+COPY pkg/common /pkg/common
 
 COPY services/notification-service/go.mod services/notification-service/go.sum ./
 COPY services/notification-service/templates /templates

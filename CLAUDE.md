@@ -122,7 +122,7 @@ Each Go domain microservice follows standard clean architecture boundaries:
 - `routes/`: Gin route group registrations.
 
 ### 4.3 Standard Error Handling
-- Use `services/common/errors` middleware for consistent API error responses.
+- Use `pkg/common/errors` middleware for consistent API error responses.
 - Always return standard structured JSON error responses with proper HTTP status codes (`400`, `401`, `403`, `404`, `409`, `500`).
 
 ### 4.4 Auth & Header Injection Rules
