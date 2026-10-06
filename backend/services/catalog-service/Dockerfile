@@ -5,7 +5,7 @@ WORKDIR /app
 RUN apk add --no-cache git
 
 COPY pkg/aws /pkg/aws
-COPY services/common /common
+COPY pkg/common /pkg/common
 
 COPY services/catalog-service/go.mod services/catalog-service/go.sum ./
 RUN go mod download

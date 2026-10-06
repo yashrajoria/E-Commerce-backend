@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"api-gateway/middlewares"
+	"api-gateway/middleware"
 	"api-gateway/utils"
 
 	"github.com/gin-gonic/gin"
@@ -28,16 +28,16 @@ func getEnv(key, fallback string) string {
 // site remembering to attach it.
 func newAdminGroup(parent *gin.RouterGroup, relativePath string) *gin.RouterGroup {
 	g := parent.Group(relativePath)
-	g.Use(middlewares.AdminRoleMiddleware())
+	g.Use(middleware.AdminRoleMiddleware())
 	return g
 }
 
 func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 
 	// ── Global Middlewares ────────────────────────────────────────────────────
-	r.Use(middlewares.RequestIDMiddleware())
+	r.Use(middleware.RequestIDMiddleware())
 	if redisClient != nil {
-		r.Use(middlewares.GlobalRateLimiter(redisClient))
+		r.Use(middleware.GlobalRateLimiter(redisClient))
 	}
 
 	r.GET("/health", func(c *gin.Context) {
@@ -107,7 +107,7 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	// ── route groups ──────────────────────────────────────────────────────────
 	public := r.Group("/")
 	protected := r.Group("/")
-	protected.Use(middlewares.JWTMiddleware())
+	protected.Use(middleware.JWTMiddleware())
 	admin := newAdminGroup(protected, "/")
 
 	// =========================================================================
@@ -120,7 +120,7 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	// Auth — sensitive public actions (strict rate limiting)
 	authStrict := public.Group("/auth")
 	if redisClient != nil {
-		authStrict.Use(middlewares.StrictRateLimiter(redisClient))
+		authStrict.Use(middleware.StrictRateLimiter(redisClient))
 	}
 	authStrict.POST("/login", authProxy)
 	authStrict.POST("/register", authProxy)
@@ -212,7 +212,7 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	agentAdmin.Any("", agent)
 	agentAdmin.Any("/*any", agent)
 
-	// Agent BFF aliases (frontend contract: admin-new pages/api/agent/*
+	// Agent BFF aliases (frontend contract: admin pages/api/agent/*
 	// tries bff/admin/agent/* then bff/agent/* then agent/*).
 	// Without these the admin AI assistant gets 404 on tools/query/session.
 	// Single wildcard per group (gin panics on static + wildcard siblings).

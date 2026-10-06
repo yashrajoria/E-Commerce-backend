@@ -18,7 +18,7 @@ require github.com/yashrajoria/common v0.0.0
 
 replace github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws => ../../pkg/aws
 
-replace github.com/yashrajoria/common => ../common
+replace github.com/yashrajoria/common => ../../pkg/common
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.41.1

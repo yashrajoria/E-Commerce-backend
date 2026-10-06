@@ -20,7 +20,7 @@ require (
 	gorm.io/gorm v1.31.1
 )
 
-replace github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws => ../../pkg/aws
+replace github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws => ../aws
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.41.1 // indirect

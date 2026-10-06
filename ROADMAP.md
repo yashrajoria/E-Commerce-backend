@@ -74,7 +74,7 @@ Phase 1 coverage target.
 
 ## Phase 7 — 14-Day Price Drop Guarantee & Auto-Refund Worker
 
-- [x] Product price decrease detection in catalog-service (`services/product_services_ddb.go`) emitting `ProductPriceDecreasedEvent` (`common/events/product_event.go`)
+- [x] Product price decrease detection in catalog-service (`services/product_service_ddb.go`) emitting `ProductPriceDecreasedEvent` (`common/events/product_event.go`)
 - [x] PriceDropService (`order-service/services/price_drop_service.go`) querying eligible delivered/paid orders within the 14-day retroactive guarantee window
 - [x] Atomic transactional outbox refund event generation (`order.price_drop_refund.requested`) with per-unit price delta calculations
 - [x] Responsive customer notification template (`notification-service/templates/price_drop_refund.html`) and event handling (`models.TypePriceDropRefund`)

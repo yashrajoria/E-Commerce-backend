@@ -2,7 +2,7 @@ package main
 
 import (
 	"api-gateway/logger"
-	"api-gateway/middlewares"
+	"api-gateway/middleware"
 	"api-gateway/routes"
 	"context"
 	"fmt"
@@ -139,7 +139,7 @@ func main() {
 		logger.Log.Warn("INTERNAL_SERVICE_TOKEN is not set — requests to internal-auth-gated downstream routes will be rejected")
 	}
 
-	if err := middlewares.InitJWTConfig(); err != nil {
+	if err := middleware.InitJWTConfig(); err != nil {
 		logger.Log.Fatal("JWT middleware init failed", zap.Error(err))
 	}
 
@@ -180,12 +180,12 @@ func main() {
 		logger.Log.Fatal("failed to disable trusted proxies", zap.Error(err))
 	}
 
-	r.Use(middlewares.RequestIDMiddleware())
+	r.Use(middleware.RequestIDMiddleware())
 	r.Use(CustomRecovery(logger.Log))
 	r.Use(CORSMiddleware())
 	r.Use(commonmw.SecurityHeaders())
 	r.Use(apperrors.ErrorMiddleware())
-	r.Use(middlewares.StructuredRequestLogger())
+	r.Use(middleware.StructuredRequestLogger())
 
 	// CloudWatch HTTP metrics middleware. Metric emission is offloaded to a
 	// bounded worker pool (metricsWorkers) rather than one goroutine per

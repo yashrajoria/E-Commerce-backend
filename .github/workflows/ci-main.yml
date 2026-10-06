@@ -7,15 +7,15 @@ name: CI - main
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, develop]
   push:
-    branches-ignore: [main]
+    branches: [main, develop]
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-main-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
@@ -32,7 +32,7 @@ jobs:
           - module: pkg/aws
             path: backend/pkg/aws
           - module: common
-            path: backend/services/common
+            path: backend/pkg/common
           - module: identity-service
             path: backend/services/identity-service
           - module: catalog-service
@@ -52,7 +52,7 @@ jobs:
           cache-dependency-path: |
             backend/api-gateway/go.sum
             backend/pkg/aws/go.sum
-            backend/services/common/go.sum
+            backend/pkg/common/go.sum
             backend/services/identity-service/go.sum
             backend/services/catalog-service/go.sum
             backend/services/order-service/go.sum
@@ -66,8 +66,18 @@ jobs:
         run: go vet ./...
         working-directory: ${{ matrix.path }}
 
+      - name: go build
+        run: go build ./...
+        working-directory: ${{ matrix.path }}
+
       - name: go test
         run: go test ./... -count=1
+        working-directory: ${{ matrix.path }}
+
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
         working-directory: ${{ matrix.path }}
 
   agent-pytest:
@@ -89,8 +99,18 @@ jobs:
         run: pip install -r requirements.txt
         working-directory: backend/services/agent-service
 
+      - name: Byte-compile Python files (syntax check)
+        run: python -m compileall app/
+        working-directory: backend/services/agent-service
+
       - name: Run pytest
         run: python -m pytest -q
+        working-directory: backend/services/agent-service
+
+      - name: Run pip-audit (vulnerability scan)
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt
         working-directory: backend/services/agent-service
 
   openapi-lint:
@@ -104,3 +124,46 @@ jobs:
       - name: Lint OpenAPI spec
         run: npx @stoplight/spectral-cli lint docs/openapi.yaml
         working-directory: backend
+
+  docker-build-check:
+    name: Docker build ${{ matrix.service }}
+    needs: [go-vet-and-test, agent-pytest]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: identity-service
+            dockerfile: backend/services/identity-service/Dockerfile
+            context: ./backend
+          - service: catalog-service
+            dockerfile: backend/services/catalog-service/Dockerfile
+            context: ./backend
+          - service: order-service
+            dockerfile: backend/services/order-service/Dockerfile
+            context: ./backend
+          - service: notification-service
+            dockerfile: backend/services/notification-service/Dockerfile
+            context: ./backend
+          - service: api-gateway
+            dockerfile: backend/api-gateway/Dockerfile
+            context: ./backend
+          - service: agent-service
+            dockerfile: backend/services/agent-service/Dockerfile
+            context: ./backend/services/agent-service
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Validate Docker build (dry-run, no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: false
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}

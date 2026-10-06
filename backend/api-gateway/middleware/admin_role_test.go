@@ -1,11 +1,11 @@
-package middlewares_test
+package middleware_test
 
 import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"api-gateway/middlewares"
+	"api-gateway/middleware"
 
 	"github.com/gin-gonic/gin"
 )
@@ -17,7 +17,7 @@ func TestAdminRoleMiddleware_AllowsAdmin(t *testing.T) {
 		c.Set("role", "admin")
 		c.Next()
 	})
-	r.GET("/admin", middlewares.AdminRoleMiddleware(), func(c *gin.Context) {
+	r.GET("/admin", middleware.AdminRoleMiddleware(), func(c *gin.Context) {
 		c.Status(http.StatusOK)
 	})
 
@@ -36,7 +36,7 @@ func TestAdminRoleMiddleware_RejectsNonAdmin(t *testing.T) {
 		c.Set("role", "user")
 		c.Next()
 	})
-	r.GET("/admin", middlewares.AdminRoleMiddleware(), func(c *gin.Context) {
+	r.GET("/admin", middleware.AdminRoleMiddleware(), func(c *gin.Context) {
 		c.Status(http.StatusOK)
 	})
 
@@ -51,7 +51,7 @@ func TestAdminRoleMiddleware_RejectsNonAdmin(t *testing.T) {
 func TestAdminRoleMiddleware_RejectsMissingRole(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.GET("/admin", middlewares.AdminRoleMiddleware(), func(c *gin.Context) {
+	r.GET("/admin", middleware.AdminRoleMiddleware(), func(c *gin.Context) {
 		c.Status(http.StatusOK)
 	})
 

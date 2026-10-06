@@ -6,7 +6,7 @@ use (
 	./pkg/aws
 	./services/identity-service
 	./services/catalog-service
-	./services/common
+	./pkg/common
 	./services/notification-service
 	./services/order-service
 	./services/agent-service
