@@ -14,12 +14,12 @@ import (
 // AutoMigrate over the same table.
 type User struct {
 	ID       uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
-	Email    string    `gorm:"unique;not null"`
+	Email    string    `gorm:"not null;uniqueIndex:idx_users_email,where:deleted_at IS NULL"`
 	Password string    `gorm:"not null"`
 	Name     string    `gorm:"not null"`
 
 	// Identity columns (ex-auth-service).
-	EmailVerified bool   `gorm:"default:false"`
+	EmailVerified bool `gorm:"default:false"`
 	// VerificationCode stores the SHA-256 hex hash of the emailed code, not
 	// the plaintext (a DB read alone shouldn't hand over a usable code).
 	VerificationCode string `gorm:"size:64"`
@@ -35,9 +35,9 @@ type User struct {
 	LoginLockedUntil *time.Time `gorm:""`
 
 	// Profile columns (ex-user-service).
-	StoreName         string     `gorm:"size:100"`
-	Role              string     `gorm:"type:varchar(50);default:'user'"`
-	PhoneNumber       *string    `gorm:"unique"`
+	StoreName         string  `gorm:"size:100"`
+	Role              string  `gorm:"type:varchar(50);default:'user'"`
+	PhoneNumber       *string `gorm:"uniqueIndex:idx_users_phone_number,where:deleted_at IS NULL"`
 	BillingAddressID  *uuid.UUID
 	ShippingAddressID *uuid.UUID
 	BillingAddress    Address `gorm:"foreignKey:BillingAddressID"`
@@ -67,12 +67,12 @@ type Address struct {
 // reuse of an already-rotated token (a sign of theft) can revoke the whole
 // lineage instead of just the one token.
 type RefreshToken struct {
-	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
-	TokenID   string    `gorm:"unique;not null"`
-	UserID    uuid.UUID `gorm:"type:uuid;not null;index"`
-	FamilyID  uuid.UUID `gorm:"type:uuid;not null;index"`
-	Revoked   bool      `gorm:"default:false"`
+	ID        uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	TokenID   string     `gorm:"unique;not null"`
+	UserID    uuid.UUID  `gorm:"type:uuid;not null;index"`
+	FamilyID  uuid.UUID  `gorm:"type:uuid;not null;index"`
+	Revoked   bool       `gorm:"default:false"`
 	RevokedAt *time.Time `gorm:""`
-	ExpiresAt time.Time `gorm:"not null;index"`
-	CreatedAt time.Time `gorm:"autoCreateTime"`
+	ExpiresAt time.Time  `gorm:"not null;index"`
+	CreatedAt time.Time  `gorm:"autoCreateTime"`
 }
