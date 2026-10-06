@@ -16,6 +16,7 @@ type Order struct {
 	CouponCode     string     `gorm:"type:varchar(50)"`
 	CouponID       *uuid.UUID `gorm:"type:uuid;index"`
 	DiscountAmount int        `gorm:"default:0"`
+	Currency       string     `gorm:"type:varchar(10);not null;default:'usd'"`
 	Status         string     `gorm:"type:varchar(20);not null;default:'pending_payment'"`
 	CanceledAt     *time.Time
 	CompletedAt    *time.Time

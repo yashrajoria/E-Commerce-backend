@@ -7,6 +7,7 @@ import (
 	"order-service/models"
 	promotionmodels "order-service/promotion/models"
 	repositories "order-service/repository"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -207,6 +208,7 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		CouponCode:     evt.CouponCode,
 		CouponID:       couponID,
 		DiscountAmount: discountAmount,
+		Currency:       strings.ToLower(c.storeCurrency),
 		Status:         "pending_payment",
 		OrderNumber:    "ORD-" + time.Now().UTC().Format("20060102-150405") + "-" + uuid.New().String()[:8],
 		CreatedAt:      time.Now().UTC(),
