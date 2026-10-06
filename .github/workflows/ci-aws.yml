@@ -124,22 +124,22 @@ jobs:
       matrix:
         include:
           - service: identity-service
-            dockerfile: services/identity-service/Dockerfile
+            dockerfile: backend/services/identity-service/Dockerfile
             context: ./backend
           - service: catalog-service
-            dockerfile: services/catalog-service/Dockerfile
+            dockerfile: backend/services/catalog-service/Dockerfile
             context: ./backend
           - service: order-service
-            dockerfile: services/order-service/Dockerfile
+            dockerfile: backend/services/order-service/Dockerfile
             context: ./backend
           - service: notification-service
-            dockerfile: services/notification-service/Dockerfile
+            dockerfile: backend/services/notification-service/Dockerfile
             context: ./backend
           - service: api-gateway
-            dockerfile: api-gateway/Dockerfile
+            dockerfile: backend/api-gateway/Dockerfile
             context: ./backend
           - service: agent-service
-            dockerfile: services/agent-service/Dockerfile
+            dockerfile: backend/services/agent-service/Dockerfile
             context: ./backend/services/agent-service
     steps:
       - name: Checkout
@@ -183,13 +183,18 @@ jobs:
   
       # Sync .env from Terraform outputs
       - name: Populate .env from Terraform outputs
+        continue-on-error: true
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: ${{ secrets.AWS_REGION }}
         run: |
-          chmod +x backend/infrastructure/aws/populate_env_from_terraform.sh
-          backend/infrastructure/aws/populate_env_from_terraform.sh
+          if [ -f backend/infrastructure/terraform/terraform-outputs.json ]; then
+            chmod +x backend/infrastructure/aws/populate_env_from_terraform.sh
+            backend/infrastructure/aws/populate_env_from_terraform.sh
+          else
+            echo "terraform-outputs.json not found, proceeding with checked-in .env"
+          fi
   
       # Ensure target directories exist on EC2
       - name: Ensure DEPLOY_DIR and SCRIPTS_DIR exist
