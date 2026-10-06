@@ -172,7 +172,7 @@ jobs:
 
   deploy-render:
     name: Deploy to Render
-    needs: [go-vet-and-test, python-test, openapi-lint, docker-build-dry-run]
+    needs: [go-vet-and-test, agent-pytest, openapi-lint, docker-build-check]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:

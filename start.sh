@@ -40,7 +40,14 @@ cleanup() {
 trap cleanup SIGINT SIGTERM
 
 echo "-> Starting embedded DynamoDB on :8000..."
-java -Xmx64m -Djava.library.path=/opt/dynamodb/DynamoDBLocal_Data -jar /opt/dynamodb/DynamoDBLocal.jar -inMemory -sharedDb -port 8000 &
+if [ -d "/home/dynamodblocal" ] && [ -f "/home/dynamodblocal/DynamoDBLocal.jar" ]; then
+    (cd /home/dynamodblocal && java -Xmx64m -jar DynamoDBLocal.jar -inMemory -sharedDb -port 8000) &
+elif [ -f "/opt/dynamodb/DynamoDBLocal.jar" ]; then
+    (cd /opt/dynamodb && java -Xmx64m -jar DynamoDBLocal.jar -inMemory -sharedDb -port 8000) &
+else
+    echo "Warning: DynamoDBLocal.jar not found, attempting generic java start..."
+    java -Xmx64m -jar DynamoDBLocal.jar -inMemory -sharedDb -port 8000 &
+fi
 
 # Wait for DynamoDB to accept connections
 sleep 2

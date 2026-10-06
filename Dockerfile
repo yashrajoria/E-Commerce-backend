@@ -3,7 +3,7 @@ FROM golang:1.25-alpine AS builder
 
 WORKDIR /build
 
-RUN apk add --no-cache git tzdata ca-certificates wget tar
+RUN apk add --no-cache git tzdata ca-certificates
 
 # Copy go workspace files
 COPY backend/go.work backend/go.work.sum ./
@@ -25,23 +25,14 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /out/order-service ./s
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /out/notification-service ./services/notification-service
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /out/init-dynamo ./tools/init-dynamo
 
-# Download official AWS DynamoDB Local for embedded catalog storage
-WORKDIR /opt/dynamodb
-RUN wget -q https://d1niqa97ap6et874.cloudfront.net/dynamodb_local_latest.tar.gz && \
-    tar -xzf dynamodb_local_latest.tar.gz && \
-    rm dynamodb_local_latest.tar.gz
+# Runtime stage uses official Amazon DynamoDB Local image (Java + DynamoDB pre-installed)
+FROM amazon/dynamodb-local:latest
 
-# Final lightweight runtime image
-FROM alpine:3.19
-
-RUN apk add --no-cache ca-certificates tzdata bash curl openjdk17-jre-headless
+USER root
 
 WORKDIR /app
 
-# Copy DynamoDB Local
-COPY --from=builder /opt/dynamodb /opt/dynamodb
-
-# Copy compiled binaries
+# Copy compiled Go binaries
 COPY --from=builder /out/ /app/
 
 # Copy email templates
@@ -52,8 +43,5 @@ COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh /app/*
 
 EXPOSE 8080
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -f http://127.0.0.1:${PORT:-8080}/health || exit 1
 
 ENTRYPOINT ["/app/start.sh"]
