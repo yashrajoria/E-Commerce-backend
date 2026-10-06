@@ -25,7 +25,12 @@ jobs:
         env:
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
         run: |
-          cat > badge.json << EOF
+          if [ -z "$GIST_TOKEN" ]; then
+            echo "GIST_TOKEN secret is not set. Skipping gist update."
+            exit 0
+          fi
+
+          cat > badge.json << 'EOF'
           {
             "schemaVersion": 1,
             "label": "commits",
@@ -33,9 +38,14 @@ jobs:
             "color": "blue"
           }
           EOF
-          
-          curl -X PATCH \
+
+          PAYLOAD=$(python3 -c 'import json, sys; content = sys.stdin.read().strip(); print(json.dumps({"files": {"commits-badge.json": {"content": content}}}))' < badge.json)
+
+          curl -s -f -X PATCH \
             -H "Authorization: token $GIST_TOKEN" \
             -H "Content-Type: application/json" \
-            -d '{"files":{"commits-badge.json":{"content":"'$(cat badge.json | tr -d '\n')'"}}}' \
-            https://api.github.com/gists/68669c1c711655a41895753490af2898
+            -d "$PAYLOAD" \
+            https://api.github.com/gists/68669c1c711655a41895753490af2898 || {
+              echo "Warning: Failed to update gist badge"
+              exit 0
+            }
