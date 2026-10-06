@@ -14,10 +14,7 @@ COPY backend/pkg ./pkg
 
 # Copy services and gateway
 COPY backend/api-gateway ./api-gateway
-COPY backend/services/identity-service ./services/identity-service
-COPY backend/services/catalog-service ./services/catalog-service
-COPY backend/services/order-service ./services/order-service
-COPY backend/services/notification-service ./services/notification-service
+COPY backend/services ./services
 
 # Build all 5 Go services into /out
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /out/api-gateway ./api-gateway
