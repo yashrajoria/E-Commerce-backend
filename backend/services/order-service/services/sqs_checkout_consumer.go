@@ -132,14 +132,15 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 			continue
 		}
 
+		priceCents := priceToCents(product.Price)
 		orderItem := models.OrderItem{
 			ID:        uuid.New(),
 			ProductID: pid,
 			Quantity:  it.Quantity,
-			Price:     int(product.Price),
+			Price:     priceCents,
 		}
 
-		totalAmount += it.Quantity * int(product.Price)
+		totalAmount += it.Quantity * priceCents
 		orderItems = append(orderItems, orderItem)
 		inventoryItems = append(inventoryItems, ReserveItem{
 			ProductID: it.ProductID,
@@ -223,7 +224,7 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 
 	notifEvent := events.NewOrderCreatedEvent(
 		evt.UserID, evt.Email, "", "", order.ID.String(), order.CouponCode,
-		float64(order.Amount), notificationItems,
+		float64(order.Amount)/100, notificationItems,
 	)
 	notifEvent.EventID = uuid.New().String()
 	notifEvent.CorrelationID = evt.CorrelationID

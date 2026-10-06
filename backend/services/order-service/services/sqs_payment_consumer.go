@@ -273,7 +273,7 @@ func (c *SQSPaymentConsumer) publishOrderConfirmedNotification(ctx context.Conte
 	// Use email propagated from the payment event so notification-service can route
 	// order_confirmed events to the recipient address.
 	notifEvent := events.NewOrderConfirmedEvent(
-		evt.UserID, evt.Email, "", evt.OrderID, float64(order.Amount), notifItems,
+		evt.UserID, evt.Email, "", evt.OrderID, float64(order.Amount)/100, notifItems,
 	)
 	notifEvent.CorrelationID = evt.CorrelationID
 	notifBytes, err := json.Marshal(notifEvent)

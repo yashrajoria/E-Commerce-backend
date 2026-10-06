@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"time"
 
@@ -16,6 +17,12 @@ type Product struct {
 	Name  string    `json:"name"`
 	Price float64   `json:"price"`
 	Stock int       `json:"stock"`
+}
+
+// priceToCents converts the catalog's dollar price to the integer minor units
+// (cents) used by orders, payments and Stripe.
+func priceToCents(price float64) int {
+	return int(math.Round(price * 100))
 }
 
 func FetchProductByID(ctx context.Context, baseURL string, productID uuid.UUID) (*Product, error) {

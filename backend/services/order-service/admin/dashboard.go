@@ -281,25 +281,25 @@ func (d *DashboardController) GetDashboardSummary(c *gin.Context) {
 
 	for i, order := range allOrders {
 		if order.Status != "CANCELLED" && order.Status != "REFUNDED" && order.Status != "canceled" && order.Status != "refunded" {
-			totalRevenue += float64(order.Amount)
+			totalRevenue += float64(order.Amount) / 100
 			if !order.CreatedAt.Before(startOfToday) {
-				revenueToday += float64(order.Amount)
+				revenueToday += float64(order.Amount) / 100
 				totalOrdersToday++
 			} else if !order.CreatedAt.Before(startOfYesterday) {
-				revenueYesterday += float64(order.Amount)
+				revenueYesterday += float64(order.Amount) / 100
 				totalOrdersYesterday++
 			}
 		}
 
 		for _, item := range order.OrderItems {
 			stats := productSales[item.ProductID.String()]
-			stats.revenue += float64(item.Price) * float64(item.Quantity)
+			stats.revenue += float64(item.Price) * float64(item.Quantity) / 100
 			stats.units += item.Quantity
 			productSales[item.ProductID.String()] = stats
 		}
 
 		if i < 5 {
-			desc := fmt.Sprintf("Order %s placed for $%v", order.ID.String()[:8], order.Amount)
+			desc := fmt.Sprintf("Order %s placed for $%.2f", order.ID.String()[:8], float64(order.Amount)/100)
 			variant := "success"
 			if order.Status == "pending_payment" || order.Status == "PENDING_PAYMENT" {
 				variant = "warning"
