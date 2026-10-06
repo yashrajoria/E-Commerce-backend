@@ -28,7 +28,7 @@
 
 | # | Change | Why |
 |---|---|---|
-| 1 | `ProductRepo.FindByID` now excludes soft-deleted products (Dynamo returned them). | Fixes `GET /products/:id` returning deleted items; double-delete now 404s. |
+| 1 | `ProductRepo.FindByID` now excludes soft-deleted products (Dynamo returned them). | Fixes `GET /products/:id` returning deleted items. A second `DELETE` still answers 500 (as before): the controller maps every service error to 500, only the error text changed ("not found" instead of a Dynamo conditional failure). |
 | 2 | Live SKUs are unique (partial unique index). Soft-deleted SKUs can be reused. | Services check duplicates in app code (racy); DB now guarantees it. |
 | 3 | Product lists are ordered newest first, deterministic (`created_at DESC, id`). | Dynamo `Scan` order was arbitrary; paging was unstable. |
 | 4 | Products must reference existing categories (FK). Inventory rows must reference existing products (FK). | Referential integrity; services already validate categories. |
@@ -44,6 +44,10 @@
 
 - `inventoryStockSync.SetStock` (main.go) calls the upsert-**add** `SetStock` on every product update that has a quantity, so repeated updates inflate stock; and `DeleteProduct`'s `SetStock(0)` adds 0, so deleted products keep sellable stock. Pre-existing; behavior is preserved by this plan.
 - `CategoryServiceDDB.attachProductCounts` runs one `Count` per category (N+1). One grouped query would replace it.
+- Product **list cache key omits `brand` and `in_stock`** (`controllers/cache_manager.go` `generateListCacheKey`): a brand-filtered request can be served a cached unfiltered page for 10 minutes. Same under Dynamo. Fix is two more key components.
+- The `sort` query param is validated and cache-keyed but never applied (`ListProducts` ignores `params.Sort`). Listing order is now newest-first because of the repo's `ORDER BY`.
+- `DELETE /products/:id` returns 500 (not 404) for a missing/already-deleted product: the controller maps every service error to 500. `handleServiceError(c, err, "Product not found")` would fix it.
+- Product-list pages cached under the old (Dynamo) ordering mix with new pages for up to 10 minutes after cutover, producing duplicates/gaps across pages. Bump the app's own version key at cutover: `redis-cli incr products:version`.
 - `products.quantity` duplicates `inventory.available`.
 
 ## File Structure
@@ -1556,6 +1560,8 @@ python3 backend/scripts/seed_catalog_postgres.py /tmp/real_data.json | psql "$DA
 ```
 Check counts against `aws dynamodb scan --select COUNT` per table. Skip if reseeding.
 
+Executed 2026-10-07: rebuilt only catalog-service; all 17 read checks (every one of the 125 products, filters, categories tree + counts, error paths) and 13/14 admin CRUD checks passed against the Postgres-backed API (the one failure is the pre-existing 500 on double delete noted above). After switching, run `redis-cli incr products:version` locally too.
+
 - [ ] **Step 7: Commit**
 
 ```bash
@@ -2573,6 +2579,10 @@ Reseed: `DATABASE_URL=$ADMIN_URL ./backend/scripts/seed_catalog.sh`. Or, if real
 - [ ] **Step 5: Configure and deploy catalog-service**
 
 On Render set: `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER=catalog_svc`, `POSTGRES_PASSWORD=<from step 3>`, `POSTGRES_DB`, `POSTGRES_SSLMODE=require`. Remove all `DDB_TABLE_*` vars. Deploy the `feat/catalog-postgres` branch (after review/merge).
+
+- [ ] **Step 5b: Invalidate the product list cache**
+
+Right after the new catalog-service is live, bump the version key so cached pages built under the old ordering are dropped (otherwise paging can show duplicates/gaps for up to 10 minutes): `redis-cli -u "$REDIS_URL" incr products:version`.
 
 - [ ] **Step 6: Smoke test production**
 

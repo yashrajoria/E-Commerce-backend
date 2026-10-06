@@ -136,7 +136,17 @@ services:
       - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-/ecommerce/services}
       - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ECommerce}
       - BULK_STORAGE_DIR=/tmp/bulk_imports
+      # Catalog data lives in schema `catalog`. Local dev connects as postgres;
+      # production uses the least-privilege catalog_svc role.
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${CATALOG_DB_USER:-postgres}
+      - POSTGRES_PASSWORD=${CATALOG_DB_PASSWORD:-${POSTGRES_PASSWORD}}
+      - POSTGRES_DB=ecommerce
+      - POSTGRES_SSLMODE=disable
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     networks:

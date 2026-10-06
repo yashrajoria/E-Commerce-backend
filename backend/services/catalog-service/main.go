@@ -25,6 +25,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
 	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	commondb "github.com/yashrajoria/common/db"
 	"github.com/yashrajoria/common/internalauth"
 	commonmw "github.com/yashrajoria/common/middleware"
 	"github.com/yashrajoria/common/telemetry"
@@ -91,14 +92,24 @@ func main() {
 	presignClient := s3.NewPresignClient(s3Client)
 	snsClient := awspkg.NewSNSClient(awsCfg)
 
-	// --- Repositories ---
-	productRepo := repository.NewDynamoAdapter(ddbClient, cfg.DDBTableProducts)
-	productRepo.WithCategoryLinksTable(cfg.DDBTableLinks)
-	if err := productRepo.EnsureIndexes(context.Background()); err != nil {
-		zap.L().Warn("Failed to ensure product indexes", zap.Error(err))
+	// --- Postgres (schema catalog; SQL migrations own the schema, so no AutoMigrate) ---
+	gdb, err := commondb.ConnectPostgres()
+	if err != nil {
+		zap.L().Fatal("Failed to connect to Postgres", zap.Error(err))
 	}
-	categoryRepo := repository.NewDynamoCategoryAdapter(ddbClient, cfg.DDBTableCategories, cfg.DDBTableProducts).
-		WithProductLinks(productRepo)
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		zap.L().Fatal("Failed to get Postgres handle", zap.Error(err))
+	}
+	// Small fixed pool: five services share one Supabase connection budget.
+	// ponytail: constants, not config; make them env-driven if tuning is ever needed.
+	sqlDB.SetMaxOpenConns(10)
+	sqlDB.SetMaxIdleConns(5)
+	sqlDB.SetConnMaxLifetime(30 * time.Minute)
+
+	// --- Repositories ---
+	productRepo := repository.NewPGProductRepo(gdb)
+	categoryRepo := repository.NewPGCategoryRepo(gdb)
 	inventoryRepo := inventoryrepository.NewDynamoInventoryRepository(ddbClient, cfg.DDBTableInventory)
 
 	// --- CloudWatch (Logs + Metrics) ---
@@ -173,7 +184,15 @@ func main() {
 
 	r.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	r.GET("/health/live", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
-	r.GET("/health/ready", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ready"}) })
+	r.GET("/health/ready", func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		defer cancel()
+		if err := sqlDB.PingContext(ctx); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "unavailable"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ready"})
+	})
 
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: r}
 
