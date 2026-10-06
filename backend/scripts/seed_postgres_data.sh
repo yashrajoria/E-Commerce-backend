@@ -240,13 +240,14 @@ ON CONFLICT (id) DO NOTHING;
 
 -- Coupons
 -- Real schema uses type/value column names (not discount_type/discount_value);
--- usage_limit is NOT NULL so unlimited is represented as 0.
+-- usage_limit is NOT NULL so unlimited is represented as 0. Money is integer
+-- cents like orders/payments: flat value and min_order_value are cents.
 INSERT INTO coupons (id, code, type, value, min_order_value, usage_limit, used_count, expires_at, active, created_at, updated_at) VALUES
-  ('33333333-3333-4333-8333-333333333301', 'WELCOME10', 'percentage', 10, 20, 500, 42, now() + interval '60 days', true, now() - interval '90 days', now()),
-  ('33333333-3333-4333-8333-333333333302', 'SUMMER25',  'percentage', 25, 100, 200, 118, now() + interval '10 days', true, now() - interval '45 days', now()),
-  ('33333333-3333-4333-8333-333333333303', 'FREESHIP',  'flat', 8, 0, 0, 300, now() + interval '30 days', true, now() - interval '30 days', now()),
-  ('33333333-3333-4333-8333-333333333304', 'VIP15',     'percentage', 15, 50, 50, 12, now() + interval '20 days', true, now() - interval '15 days', now()),
-  ('33333333-3333-4333-8333-333333333305', 'EXPIRED5',  'flat', 5, 0, 100, 100, now() - interval '5 days', false, now() - interval '120 days', now() - interval '5 days')
+  ('33333333-3333-4333-8333-333333333301', 'WELCOME10', 'percentage', 10, 2000, 500, 42, now() + interval '60 days', true, now() - interval '90 days', now()),
+  ('33333333-3333-4333-8333-333333333302', 'SUMMER25',  'percentage', 25, 10000, 200, 118, now() + interval '10 days', true, now() - interval '45 days', now()),
+  ('33333333-3333-4333-8333-333333333303', 'FREESHIP',  'flat', 800, 0, 0, 300, now() + interval '30 days', true, now() - interval '30 days', now()),
+  ('33333333-3333-4333-8333-333333333304', 'VIP15',     'percentage', 15, 5000, 50, 12, now() + interval '20 days', true, now() - interval '15 days', now()),
+  ('33333333-3333-4333-8333-333333333305', 'EXPIRED5',  'flat', 500, 0, 100, 100, now() - interval '5 days', false, now() - interval '120 days', now() - interval '5 days')
 ON CONFLICT (id) DO NOTHING;
 
 -- Orders (amounts/prices in cents, matching seed_demo_data.sh product prices)
