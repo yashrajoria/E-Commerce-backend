@@ -8,5 +8,5 @@ node_modules
 *.md
 backend/localstack
 backend/backups
-backend/tools
+backend/tools/loadtest
 backend/.env
