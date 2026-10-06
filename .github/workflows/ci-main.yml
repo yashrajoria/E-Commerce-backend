@@ -81,6 +81,69 @@ jobs:
         working-directory: ${{ matrix.path }}
         continue-on-error: true
 
+  migrations:
+    name: Migrations and schema drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: pw
+          POSTGRES_DB: ecommerce
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ecommerce"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DB_URL: postgres://postgres:pw@localhost:5432/ecommerce?sslmode=disable
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.25"
+          cache-dependency-path: |
+            backend/pkg/common/go.sum
+            backend/services/identity-service/go.sum
+            backend/services/order-service/go.sum
+            backend/services/notification-service/go.sum
+
+      - name: Install golang-migrate
+        run: |
+          curl -sSL https://github.com/golang-migrate/migrate/releases/download/v4.17.1/migrate.linux-amd64.tar.gz | tar xz
+          sudo mv migrate /usr/local/bin/migrate
+
+      - name: Apply all migrations
+        run: migrate -path backend/migrations -database "$DB_URL" up
+
+      - name: Roll back everything and re-apply
+        run: |
+          migrate -path backend/migrations -database "$DB_URL" down -all
+          migrate -path backend/migrations -database "$DB_URL" up
+
+      - name: Every constraint is validated
+        run: |
+          n=$(psql "$DB_URL" -Atc "SELECT count(*) FROM pg_constraint WHERE NOT convalidated")
+          test "$n" = "0"
+
+      # AutoMigrate must have nothing left to do on a migrations-only database;
+      # otherwise the SQL migrations and the Go models have drifted apart.
+      # Last step: it mutates the database.
+      - name: Schema drift and purge tests
+        env:
+          SCHEMA_DRIFT_DB_URL: ${{ env.DB_URL }}
+          TEST_DATABASE_URL: ${{ env.DB_URL }}
+        run: |
+          for m in pkg/common services/identity-service services/order-service services/notification-service; do
+            (cd backend/$m && go test -count=1 -run 'AutoMigrate|Purge' ./...)
+          done
+
   agent-pytest:
     name: Python agent-service
     runs-on: ubuntu-latest
