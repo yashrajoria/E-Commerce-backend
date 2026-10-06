@@ -21,7 +21,6 @@ type ProductRepo interface {
 	// DeleteMany deletes multiple products by their UUIDs using batch operations
 	DeleteMany(ctx context.Context, ids []uuid.UUID) error
 	FindBySKUs(ctx context.Context, skus []string) ([]models.Product, error)
-	EnsureIndexes(ctx context.Context) error
 	GetProductsByIDs(ctx context.Context, ids []string) ([]*models.Product, error)
 }
 

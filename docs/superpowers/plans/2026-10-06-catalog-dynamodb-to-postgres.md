@@ -951,6 +951,8 @@ func TestPGProduct_DeleteMany(t *testing.T) {
 }
 ```
 
+Added during execution (Task 4 done): `TestPGProduct_CreateManyAcrossChunks` — 450 products × 2 categories crosses both batch boundaries (200 products/insert, 500 links/insert) and asserts a duplicate-SKU row rolls back the entire batch including links.
+
 - [ ] **Step 3: Run to verify failure**
 
 Run: `cd backend/services/catalog-service && go test ./repository -run 'ProductWhere|PGProduct' -v`
