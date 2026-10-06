@@ -6,7 +6,6 @@ echo " Starting ShopSwift Multi-Service Backend "
 echo "=========================================="
 
 # Render automatically provides $PORT (e.g. 10000 or custom)
-# API Gateway listens on this port to receive incoming web traffic.
 PUBLIC_PORT="${PORT:-8080}"
 
 # Direct all service-to-service internal traffic to localhost ports
@@ -22,13 +21,15 @@ export NOTIFICATION_SERVICE_URL="http://localhost:8092"
 export ALLOW_AUTO_MIGRATE="${ALLOW_AUTO_MIGRATE:-true}"
 export GIN_MODE="${GIN_MODE:-release}"
 
-# Disable AWS IMDS metadata lookups and AWS Secrets Manager on non-AWS hosts
+# Route AWS SDK to embedded local DynamoDB
+export USE_LOCALSTACK=true
+export LOCALSTACK_ENDPOINT="http://localhost:8000"
 export AWS_REGION="${AWS_REGION:-us-east-1}"
 export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-test}"
 export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-test}"
-export AWS_EC2_METADATA_DISABLED="${AWS_EC2_METADATA_DISABLED:-true}"
-export AWS_USE_SECRETS="${AWS_USE_SECRETS:-false}"
-export CLOUDWATCH_ENABLED="${CLOUDWATCH_ENABLED:-false}"
+export AWS_EC2_METADATA_DISABLED="true"
+export AWS_USE_SECRETS="false"
+export CLOUDWATCH_ENABLED="false"
 
 # Graceful shutdown handler
 cleanup() {
@@ -37,6 +38,15 @@ cleanup() {
     exit 0
 }
 trap cleanup SIGINT SIGTERM
+
+echo "-> Starting embedded DynamoDB on :8000..."
+java -Xmx64m -Djava.library.path=/opt/dynamodb/DynamoDBLocal_Data -jar /opt/dynamodb/DynamoDBLocal.jar -inMemory -sharedDb -port 8000 &
+
+# Wait for DynamoDB to accept connections
+sleep 2
+
+echo "-> Initializing DynamoDB tables & seed catalog..."
+/app/init-dynamo || echo "init-dynamo completed with warnings"
 
 echo "-> Launching Identity Service on :8081..."
 PORT=8081 /app/identity-service &
