@@ -38,6 +38,7 @@ type NotificationEvent struct {
 	EventID     string    `gorm:"column:event_id;primaryKey"`
 	Status      string    `gorm:"column:status;not null"`
 	ProcessedAt time.Time `gorm:"column:processed_at"`
+	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime"`
 }
 
 const NotificationEventDelivered = "delivered"

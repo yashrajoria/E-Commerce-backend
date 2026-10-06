@@ -28,7 +28,7 @@ type Order struct {
 type OrderItem struct {
 	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
 	OrderID   uuid.UUID `gorm:"type:uuid;not null;index"`
-	ProductID uuid.UUID `gorm:"type:uuid;not null"`
+	ProductID uuid.UUID `gorm:"type:uuid;not null;index"`
 	Quantity  int       `gorm:"not null"`
 	Price     int       `gorm:"not null"`
 }
