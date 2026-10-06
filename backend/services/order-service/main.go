@@ -262,6 +262,14 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	defer shutdownCancel()
 
+	// Retention: published outbox rows and Stripe dedupe ids. 30 days of Stripe ids
+	// is far beyond its retry window.
+	commondb.StartPurger(shutdownCtx, database.DB, time.Hour,
+		commondb.PurgeJob{Table: "outbox_events", Where: "status = 'published' AND published_at < now() - interval '7 days'"},
+		commondb.PurgeJob{Table: "payment_outbox_events", Where: "status = 'published' AND published_at < now() - interval '7 days'"},
+		commondb.PurgeJob{Table: "stripe_processed_events", Where: "processed_at < now() - interval '30 days'"},
+	)
+
 	// --- SQS Consumers (replaces Kafka) ---
 	if paymentRequestQueueURL != "" || cfg.NotificationSNSTopicARN != "" {
 		outboxPublisher := services.NewOutboxPublisher(

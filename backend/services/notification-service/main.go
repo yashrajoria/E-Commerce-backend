@@ -18,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	commondb "github.com/yashrajoria/common/db"
 	"github.com/yashrajoria/common/telemetry"
 	"go.uber.org/zap"
 )
@@ -42,6 +43,12 @@ func main() {
 	if err := database.Connect(logger); err != nil {
 		logger.Fatal("DB connection failed", zap.Error(err))
 	}
+
+	purgeCtx, stopPurge := context.WithCancel(context.Background())
+	defer stopPurge()
+	commondb.StartPurger(purgeCtx, database.DB, time.Hour,
+		commondb.PurgeJob{Table: "notification_events", Where: "created_at < now() - interval '30 days'"},
+	)
 
 	// CloudWatch (non-fatal)
 	metricsClient, err := aws_pkg.NewMetricsClient(context.Background())

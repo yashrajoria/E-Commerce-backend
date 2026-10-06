@@ -23,6 +23,7 @@ import (
 	"github.com/yashrajoria/common/internalauth"
 	commonlog "github.com/yashrajoria/common/logger"
 	commonmw "github.com/yashrajoria/common/middleware"
+	commondb "github.com/yashrajoria/common/db"
 	"github.com/yashrajoria/common/telemetry"
 	"go.uber.org/zap"
 )
@@ -60,6 +61,12 @@ func main() {
 	if err := database.Connect(); err != nil {
 		zap.L().Fatal("Database connection failed", zap.Error(err))
 	}
+
+	purgeCtx, stopPurge := context.WithCancel(context.Background())
+	defer stopPurge()
+	commondb.StartPurger(purgeCtx, database.DB, time.Hour,
+		commondb.PurgeJob{Table: "refresh_tokens", Where: "expires_at < now() - interval '1 day'"},
+	)
 
 	snsPublisher, err := authservices.NewSNSPublisher(context.Background())
 	if err != nil {
