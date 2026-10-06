@@ -1,11 +1,11 @@
-package middlewares_test
+package middleware_test
 
 import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"api-gateway/middlewares"
+	"api-gateway/middleware"
 	"github.com/gin-gonic/gin"
 )
 
@@ -18,7 +18,7 @@ func TestRequestIDMiddlewareNormalizesBothHeaders(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := gin.New()
-			r.Use(middlewares.RequestIDMiddleware())
+			r.Use(middleware.RequestIDMiddleware())
 			r.GET("/", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			for key, values := range headers {
