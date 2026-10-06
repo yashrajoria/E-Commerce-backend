@@ -47,7 +47,7 @@ func (m *mockCouponService) DeactivateCoupon(ctx context.Context, code string) *
 func (m *mockCouponService) ListCoupons(ctx context.Context, page, limit int) ([]models.Coupon, int64, *services.ServiceError) {
 	return m.listFn(ctx, page, limit)
 }
-func (m *mockCouponService) IncrementCouponUsage(ctx context.Context, code string) error {
+func (m *mockCouponService) IncrementCouponUsage(ctx context.Context, code string, orderID, userID uuid.UUID) error {
 	return m.incFn(ctx, code)
 }
 

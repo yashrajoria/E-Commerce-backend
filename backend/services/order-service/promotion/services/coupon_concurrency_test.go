@@ -5,6 +5,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/uuid"
 	"order-service/promotion/models"
 )
 
@@ -23,7 +24,7 @@ func TestIncrementCouponUsageHonorsAtomicUsageLimitUnderConcurrency(t *testing.T
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := svc.IncrementCouponUsage(context.Background(), "RACE"); err == nil {
+			if err := svc.IncrementCouponUsage(context.Background(), "RACE", uuid.New(), uuid.New()); err == nil {
 				mu.Lock()
 				successes++
 				mu.Unlock()

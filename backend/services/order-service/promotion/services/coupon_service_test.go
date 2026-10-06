@@ -40,7 +40,7 @@ func (m *mockRepo) FindByCode(_ context.Context, code string) (*models.Coupon, e
 	return c, nil
 }
 
-func (m *mockRepo) IncrementUsedCount(_ context.Context, code string) error {
+func (m *mockRepo) IncrementUsedCount(_ context.Context, code string, _, _ uuid.UUID) error {
 	if c, ok := m.coupons[code]; ok {
 		c.UsedCount++
 	}
@@ -79,7 +79,7 @@ func (r *concurrentCouponRepo) FindByCode(ctx context.Context, code string) (*mo
 	return r.mockRepo.FindByCode(ctx, code)
 }
 
-func (r *concurrentCouponRepo) IncrementUsedCount(ctx context.Context, code string) error {
+func (r *concurrentCouponRepo) IncrementUsedCount(ctx context.Context, code string, orderID, userID uuid.UUID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	coupon, err := r.mockRepo.FindByCode(ctx, code)
@@ -89,7 +89,7 @@ func (r *concurrentCouponRepo) IncrementUsedCount(ctx context.Context, code stri
 	if coupon.UsageLimit > 0 && coupon.UsedCount >= coupon.UsageLimit {
 		return repository.ErrUsageLimitReached
 	}
-	return r.mockRepo.IncrementUsedCount(ctx, code)
+	return r.mockRepo.IncrementUsedCount(ctx, code, orderID, userID)
 }
 
 // --- Mock SNS Publisher ---

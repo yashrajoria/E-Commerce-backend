@@ -36,7 +36,7 @@ func (m *mockCouponRepository) FindByCode(_ context.Context, code string) (*mode
 	return c, nil
 }
 
-func (m *mockCouponRepository) IncrementUsedCount(_ context.Context, code string) error {
+func (m *mockCouponRepository) IncrementUsedCount(_ context.Context, code string, _, _ uuid.UUID) error {
 	if c, ok := m.coupons[code]; ok {
 		c.UsedCount++
 	}
@@ -127,7 +127,7 @@ func TestRepository_IncrementUsedCount(t *testing.T) {
 	}
 	_ = repo.Create(context.Background(), coupon)
 
-	err := repo.IncrementUsedCount(context.Background(), "TEST20")
+	err := repo.IncrementUsedCount(context.Background(), "TEST20", uuid.New(), uuid.New())
 	assert.NoError(t, err)
 
 	got, _ := repo.FindByCode(context.Background(), "TEST20")

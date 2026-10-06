@@ -8,6 +8,7 @@ import (
 	"order-service/promotion/repository"
 	"order-service/promotion/services"
 
+	"github.com/google/uuid"
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"github.com/yashrajoria/common/events"
 )
@@ -64,9 +65,17 @@ func (c *OrderCreatedConsumer) handleMessage(ctx context.Context, body string) e
 		return nil
 	}
 
+	orderIDStr, _ := evt.Data["order_id"].(string)
+	orderID, oerr := uuid.Parse(orderIDStr)
+	userID, uerr := uuid.Parse(evt.UserID)
+	if oerr != nil || uerr != nil {
+		log.Printf("❌ [order-service] coupon usage event has invalid order_id=%q or user_id=%q, dropping", orderIDStr, evt.UserID)
+		return nil // data issue, retrying won't help
+	}
+
 	log.Printf("📥 [order-service] Processing coupon usage for code=%s order_id=%v", couponCode, evt.Data["order_id"])
 
-	if err := c.couponService.IncrementCouponUsage(ctx, couponCode); err != nil {
+	if err := c.couponService.IncrementCouponUsage(ctx, couponCode, orderID, userID); err != nil {
 		if errors.Is(err, repository.ErrUsageLimitReached) {
 			log.Printf("⚠️ [order-service] OVER-REDEMPTION: Coupon usage limit reached for code=%s. Order %v already paid, acknowledging message.", couponCode, evt.Data["order_id"])
 			return nil // Swallowing the error to prevent infinite retries

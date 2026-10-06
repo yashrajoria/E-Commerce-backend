@@ -160,6 +160,7 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 
 	// Process Coupon if present
 	discountAmount := 0
+	var couponID *uuid.UUID
 	if evt.CouponCode != "" && c.promotionService != nil {
 		resp, err := c.promotionService.ValidateCoupon(ctx, &promotionmodels.ValidateCouponRequest{
 			Code:      evt.CouponCode,
@@ -169,6 +170,9 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 			log.Printf("⚠️  [CHECKOUT] Coupon validation failed for code=%s: %v", evt.CouponCode, err)
 		} else if resp != nil && resp.Valid {
 			discountAmount = int(resp.DiscountAmount)
+			if coupon, cerr := c.promotionService.GetCoupon(ctx, evt.CouponCode); cerr == nil {
+				couponID = &coupon.ID
+			}
 			log.Printf("✅ [CHECKOUT] Coupon applied: code=%s discount=%d", evt.CouponCode, discountAmount)
 		} else {
 			log.Printf("⚠️  [CHECKOUT] Coupon invalid: code=%s", evt.CouponCode)
@@ -200,6 +204,7 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		ID:             orderIDUUID,
 		Amount:         finalTotal,
 		CouponCode:     evt.CouponCode,
+		CouponID:       couponID,
 		DiscountAmount: discountAmount,
 		Status:         "pending_payment",
 		OrderNumber:    "ORD-" + time.Now().UTC().Format("20060102-150405") + "-" + uuid.New().String()[:8],

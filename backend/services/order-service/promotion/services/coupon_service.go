@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"github.com/yashrajoria/common/events"
 	"go.uber.org/zap"
@@ -31,7 +32,7 @@ type CouponService interface {
 	GetCoupon(ctx context.Context, code string) (*models.Coupon, *ServiceError)
 	DeactivateCoupon(ctx context.Context, code string) *ServiceError
 	ListCoupons(ctx context.Context, page, limit int) ([]models.Coupon, int64, *ServiceError)
-	IncrementCouponUsage(ctx context.Context, code string) error
+	IncrementCouponUsage(ctx context.Context, code string, orderID, userID uuid.UUID) error
 }
 
 // couponServiceImpl implements CouponService.
@@ -155,13 +156,13 @@ func (s *couponServiceImpl) ValidateCoupon(ctx context.Context, req *models.Vali
 	}, nil
 }
 
-func (s *couponServiceImpl) IncrementCouponUsage(ctx context.Context, code string) error {
+func (s *couponServiceImpl) IncrementCouponUsage(ctx context.Context, code string, orderID, userID uuid.UUID) error {
 	coupon, err := s.repo.FindByCode(ctx, code)
 	if err != nil {
 		return err
 	}
 
-	if err := s.repo.IncrementUsedCount(ctx, code); err != nil {
+	if err := s.repo.IncrementUsedCount(ctx, code, orderID, userID); err != nil {
 		return err
 	}
 

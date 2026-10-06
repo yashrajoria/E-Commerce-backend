@@ -6,6 +6,7 @@ import (
 	"order-service/promotion/models"
 	"strings"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -17,7 +18,7 @@ var (
 type CouponRepository interface {
 	Create(ctx context.Context, coupon *models.Coupon) error
 	FindByCode(ctx context.Context, code string) (*models.Coupon, error)
-	IncrementUsedCount(ctx context.Context, code string) error
+	IncrementUsedCount(ctx context.Context, code string, orderID, userID uuid.UUID) error
 	Deactivate(ctx context.Context, code string) error
 	FindAll(ctx context.Context, page, limit int) ([]models.Coupon, int64, error)
 }
@@ -49,22 +50,34 @@ func (r *GormCouponRepository) FindByCode(ctx context.Context, code string) (*mo
 	return &coupon, nil
 }
 
-// IncrementUsedCount atomically increments the used_count of a coupon if the limit hasn't been reached.
-func (r *GormCouponRepository) IncrementUsedCount(ctx context.Context, code string) error {
-	result := r.db.WithContext(ctx).
-		Model(&models.Coupon{}).
-		Where("LOWER(code) = ? AND (usage_limit = 0 OR used_count < usage_limit)", strings.ToLower(code)).
-		UpdateColumn("used_count", gorm.Expr("used_count + 1"))
+// IncrementUsedCount records the redemption (one per order) and increments
+// used_count if the limit hasn't been reached, in one transaction. A redelivered
+// order_created event hits the coupon_usages unique(order_id) and is a no-op.
+func (r *GormCouponRepository) IncrementUsedCount(ctx context.Context, code string, orderID, userID uuid.UUID) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		ins := tx.Exec(
+			`INSERT INTO coupon_usages (coupon_id, order_id, user_id)
+			 SELECT id, ?, ? FROM coupons WHERE LOWER(code) = ? AND deleted_at IS NULL
+			 ON CONFLICT (order_id) DO NOTHING`,
+			orderID, userID, strings.ToLower(code))
+		if ins.Error != nil {
+			return ins.Error
+		}
+		if ins.RowsAffected == 0 {
+			return nil // already redeemed for this order
+		}
 
-	if result.Error != nil {
-		return result.Error
-	}
-
-	if result.RowsAffected == 0 {
-		return ErrUsageLimitReached
-	}
-
-	return nil
+		result := tx.Model(&models.Coupon{}).
+			Where("LOWER(code) = ? AND (usage_limit = 0 OR used_count < usage_limit)", strings.ToLower(code)).
+			UpdateColumn("used_count", gorm.Expr("used_count + 1"))
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrUsageLimitReached // rolls back the usage row
+		}
+		return nil
+	})
 }
 
 // Deactivate soft-deactivates a coupon by setting active = false.
