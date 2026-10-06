@@ -111,6 +111,7 @@ jobs:
           cache-dependency-path: |
             backend/pkg/common/go.sum
             backend/services/identity-service/go.sum
+            backend/services/catalog-service/go.sum
             backend/services/order-service/go.sum
             backend/services/notification-service/go.sum
 
@@ -143,6 +144,16 @@ jobs:
           for m in pkg/common services/identity-service services/order-service services/notification-service; do
             (cd backend/$m && go test -count=1 -run 'AutoMigrate|Purge' ./...)
           done
+
+      # Catalog repositories run against the migrated database. They only touch the
+      # catalog schema, with random IDs they clean up themselves.
+      - name: Catalog Postgres repository tests
+        env:
+          TEST_DATABASE_URL: ${{ env.DB_URL }}
+          CATALOG_ROLE_DATABASE_URL: postgres://catalog_svc:ci-pw@localhost:5432/ecommerce?sslmode=disable
+        run: |
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -v catalog_password=ci-pw -f backend/infrastructure/postgres/catalog_role.sql
+          (cd backend/services/catalog-service && go test -count=1 -run 'PG' ./...)
 
   agent-pytest:
     name: Python agent-service

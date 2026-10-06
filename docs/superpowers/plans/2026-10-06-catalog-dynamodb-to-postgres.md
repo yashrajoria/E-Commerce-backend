@@ -14,6 +14,7 @@
 - Commit messages end with `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.
 - The working tree already has ~24 modified and ~9 untracked files that belong to other in-progress work (agent-service, SQS consumers, `pkg/common/db/postgres.go` log text, CI workflows…). **Stage by explicit path only** — never `git add -A`, `git add .` or `git commit -a`. Run `git status --short` before each commit and confirm only this plan's files are staged.
 - Build and test **per module** (`cd backend/services/catalog-service && go build ./... && go test ./...`). `go build ./...` from `backend/` fails ("directory prefix . does not contain main module").
+- `scripts/migrate.sh` sources `backend/.env`, where `POSTGRES_HOST=postgres` only resolves inside Docker. On the host, export an explicit `DATABASE_URL=postgres://postgres:<pw>@localhost:5432/ecommerce?sslmode=disable` (read the password from `backend/.env`; never print it) before running it.
 - Tooling on this machine: `migrate` is at `~/go/bin/migrate` (add to `PATH`); `psql` is not installed on the host — use `docker exec -i backend-postgres-1 psql -U postgres -d ecommerce …` for ad-hoc SQL (or `brew install libpq`). Local Postgres 16.4 runs in the `backend-postgres-1` container, port 5432 published; `schema_migrations` is at version 14, not dirty.
 - Schema changes are numbered SQL migrations in `backend/migrations/` (next free numbers: `000015`, `000016`; `000008` is intentionally absent). Migrations must be idempotent per `backend/migrations/README.md` (`IF NOT EXISTS`, `DO $$ … EXCEPTION` guards). CI runs `migrate up`, then `down -all`, then `up` again, then asserts every constraint is validated — down migrations must work.
 - No GORM `AutoMigrate` for catalog. SQL migrations are the only schema source (call `ConnectPostgres()` with no models).
@@ -2539,6 +2540,8 @@ git commit -m "chore(catalog): remove DynamoDB code, infra, scripts and docs"
 ### Task 9: Production rollout and rollback
 
 No code. Run these in order against production (Render + Supabase). Everything in the plan is deployed **once**, after Task 8, because Tasks 5 and 7 together remove the last Dynamo reads.
+
+> **Merging to `main` auto-deploys.** `.github/workflows/ci-main.yml` job `deploy-render` fires on every push to `main` and does not wait for the `migrations` job. Complete Steps 1–4 (backup, migrations, role, data) and set the Render env vars from Step 5 **before** merging, or the new catalog-service will boot against a database with no `catalog` schema and fail readiness. (Optional hardening: add `migrations` to that job's `needs`.)
 
 - [ ] **Step 1: Back up Postgres**
 
