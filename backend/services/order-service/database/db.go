@@ -60,7 +60,7 @@ func ConnectPostgres(autoMigrateModels ...interface{}) (*gorm.DB, error) {
 	var db *gorm.DB
 	var err error
 	for i := 0; i < 10; i++ {
-		db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+		db, err = gorm.Open(postgres.Open(dsn), commondb.DefaultGormConfig())
 		if err == nil {
 			log.Println("✅ Connected to PostgreSQL successfully!")
 			sqlDB, poolErr := db.DB()

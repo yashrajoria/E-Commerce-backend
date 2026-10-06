@@ -45,6 +45,10 @@ func NewSQSConsumer(svc services.NotificationService, logger *zap.Logger) (*SQSC
 }
 
 func (c *SQSConsumer) Start(ctx context.Context) {
+	if c.queueURL == "" || os.Getenv("ENABLE_SQS_CONSUMER") == "false" {
+		c.logger.Info("SQS consumer disabled (no SQS queue configured or ENABLE_SQS_CONSUMER=false)")
+		return
+	}
 	c.logger.Info("SQS consumer started", zap.String("queue", c.queueURL))
 	for {
 		select {

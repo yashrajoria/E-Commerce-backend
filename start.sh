@@ -31,6 +31,19 @@ export AWS_EC2_METADATA_DISABLED="true"
 export AWS_USE_SECRETS="false"
 export CLOUDWATCH_ENABLED="false"
 
+# Disable SQS background polling on single container (no AWS SQS in free tier)
+export ENABLE_SQS_CONSUMER="false"
+export SQS_QUEUE_URL=""
+export NOTIFICATION_SQS_QUEUE_URL=""
+
+# If OTEL_EXPORTER_OTLP_ENDPOINT points to local docker compose jaeger, disable it
+case "${OTEL_EXPORTER_OTLP_ENDPOINT:-}" in
+    *jaeger*)
+        echo "-> Disabling unreachable jaeger tracing endpoint in cloud container"
+        unset OTEL_EXPORTER_OTLP_ENDPOINT
+        ;;
+esac
+
 # Graceful shutdown handler
 cleanup() {
     echo "Shutting down services..."

@@ -9,7 +9,24 @@ import (
 	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
+
+// DefaultGormConfig returns a *gorm.Config configured with a 2-second slow query
+// threshold suitable for cloud PostgreSQL connections across network regions.
+func DefaultGormConfig() *gorm.Config {
+	return &gorm.Config{
+		Logger: logger.New(
+			log.New(os.Stdout, "\r\n", log.LstdFlags),
+			logger.Config{
+				SlowThreshold:             2 * time.Second,
+				LogLevel:                  logger.Warn,
+				IgnoreRecordNotFoundError: true,
+				Colorful:                  false,
+			},
+		),
+	}
+}
 
 // ConnectPostgres connects to PostgreSQL using environment variables and returns a *gorm.DB instance.
 // AutoMigrate runs only when AllowAutoMigrate() is true and models are provided.
@@ -45,7 +62,7 @@ func ConnectPostgres(autoMigrateModels ...interface{}) (*gorm.DB, error) {
 	var db *gorm.DB
 	var err error
 	for i := 0; i < 10; i++ {
-		db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+		db, err = gorm.Open(postgres.Open(dsn), DefaultGormConfig())
 		if err == nil {
 			log.Println("✅ Connected to PostgreSQL successfully!")
 			if len(autoMigrateModels) > 0 && AllowAutoMigrate() {

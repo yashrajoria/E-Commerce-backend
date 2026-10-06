@@ -58,7 +58,7 @@ func ConnectPostgres(autoMigrateModels ...interface{}) (*gorm.DB, error) {
 	var err error
 	// Retry up to 10 times, with 2 seconds interval, in case DB hasn't started yet (e.g. Docker Compose/Cloud).
 	for i := 0; i < 10; i++ {
-		db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+		db, err = gorm.Open(postgres.Open(dsn), commondb.DefaultGormConfig())
 		if err == nil {
 			log.Println("✅ Connected to PostgreSQL successfully!")
 

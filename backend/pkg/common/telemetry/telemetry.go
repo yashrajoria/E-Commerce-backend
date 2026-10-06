@@ -52,11 +52,10 @@ var (
 
 // Init initializes OpenTelemetry tracing. If OTEL_EXPORTER_OTLP_ENDPOINT is unset,
 // it returns a no-op configuration and logs once that telemetry is disabled.
-// The returned shutdown function is safe to call even when telemetry is disabled.
 func Init(ctx context.Context, serviceName string) (shutdown func()) {
 	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-	if endpoint == "" {
-		log.Printf("[telemetry] OTEL_EXPORTER_OTLP_ENDPOINT not set — telemetry disabled for %s", serviceName)
+	if endpoint == "" || (strings.Contains(endpoint, "jaeger") && (os.Getenv("RENDER") != "" || os.Getenv("PORT") != "")) {
+		log.Printf("[telemetry] OTEL_EXPORTER_OTLP_ENDPOINT disabled or jaeger host unresolvable — telemetry disabled for %s", serviceName)
 		tracer = noop.NewTracerProvider().Tracer(serviceName)
 		enabled = false
 		return func() {}

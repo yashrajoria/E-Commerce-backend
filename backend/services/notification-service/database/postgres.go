@@ -62,7 +62,7 @@ func ConnectPostgres(logger *zap.Logger, autoMigrateModels ...interface{}) (*gor
 	var err error
 
 	for i := 0; i < 10; i++ {
-		db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+		db, err = gorm.Open(postgres.Open(dsn), commondb.DefaultGormConfig())
 		if err == nil {
 			// Configure connection pool
 			sqlDB, poolErr := db.DB()
