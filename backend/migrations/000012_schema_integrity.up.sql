@@ -6,7 +6,7 @@
 --   2. soft-delete-aware unique indexes
 --   3. missing foreign keys   (NOT VALID, then VALIDATE; orphans only NOTICE)
 --   4. CHECK constraints      (same NOT VALID / VALIDATE pattern)
---   5. coupon redemption record (coupon_usages)
+--   5. coupon redemption record (coupon_usages, created before step 3)
 --
 -- Deliberately NOT done: notification_logs.user_id has no FK. It is an
 -- append-only log written for any recipient, and an FK would make logging
@@ -134,6 +134,27 @@ EXCEPTION WHEN unique_violation THEN
 END $$;
 
 -- ---------------------------------------------------------------------------
+-- Coupon redemption record (created before the FK pass so its FKs are added
+-- there). order-service AutoMigrate also creates this table from
+-- promotion/models.CouponUsage using the same index names, so either may run
+-- first; the FK loop below adds the FKs in both cases.
+-- ---------------------------------------------------------------------------
+
+-- UNIQUE(order_id): one redemption per order, so a redelivered order_created
+-- event cannot increment coupons.used_count twice. (coupon_id, user_id) index
+-- supports per-user limits.
+CREATE TABLE IF NOT EXISTS coupon_usages (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  coupon_id  uuid NOT NULL,
+  order_id   uuid NOT NULL,
+  user_id    uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_coupon_usages_order_id ON coupon_usages (order_id);
+CREATE INDEX IF NOT EXISTS idx_coupon_usages_coupon_user ON coupon_usages (coupon_id, user_id);
+
+-- ---------------------------------------------------------------------------
 -- 3. Foreign keys
 -- ---------------------------------------------------------------------------
 
@@ -152,7 +173,10 @@ BEGIN
     ('users',           'users_billing_address_id_fkey',     'billing_address_id',  'addresses', 'SET NULL', 'DEFERRABLE INITIALLY DEFERRED'),
     ('users',           'users_shipping_address_id_fkey',    'shipping_address_id', 'addresses', 'SET NULL', 'DEFERRABLE INITIALLY DEFERRED'),
     ('agent_audit_log', 'agent_audit_log_user_id_fkey',      'user_id',             'users',     'SET NULL', ''),
-    ('agent_audit_log', 'agent_audit_log_confirmed_by_fkey', 'confirmed_by',        'users',     'SET NULL', '')
+    ('agent_audit_log', 'agent_audit_log_confirmed_by_fkey', 'confirmed_by',        'users',     'SET NULL', ''),
+    ('coupon_usages',   'coupon_usages_coupon_id_fkey',      'coupon_id',           'coupons',   'RESTRICT', ''),
+    ('coupon_usages',   'coupon_usages_order_id_fkey',       'order_id',            'orders',    'RESTRICT', ''),
+    ('coupon_usages',   'coupon_usages_user_id_fkey',        'user_id',             'users',     'RESTRICT', '')
   ) AS t(tbl, name, col, ref, on_del, extra)
   LOOP
     CONTINUE WHEN to_regclass(r.tbl) IS NULL OR NOT _col_exists(r.tbl, r.col);
@@ -225,22 +249,5 @@ BEGIN
     END;
   END LOOP;
 END $$;
-
--- ---------------------------------------------------------------------------
--- 5. Coupon redemption record
--- ---------------------------------------------------------------------------
-
--- UNIQUE(order_id): one redemption per order, so a redelivered order_created
--- event cannot increment coupons.used_count twice. (coupon_id, user_id) index
--- supports per-user limits.
-CREATE TABLE IF NOT EXISTS coupon_usages (
-  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  coupon_id  uuid NOT NULL REFERENCES coupons (id) ON DELETE RESTRICT,
-  order_id   uuid NOT NULL UNIQUE REFERENCES orders (id) ON DELETE RESTRICT,
-  user_id    uuid NOT NULL REFERENCES users (id) ON DELETE RESTRICT,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_coupon_usages_coupon_user ON coupon_usages (coupon_id, user_id);
 
 DROP FUNCTION _col_exists(text, text);

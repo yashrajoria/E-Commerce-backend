@@ -32,6 +32,16 @@ type Coupon struct {
 	DeletedAt     gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
+// CouponUsage records one redemption per order. Index names match migration
+// 000012 so AutoMigrate and the migration agree; FKs are added by the migration.
+type CouponUsage struct {
+	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	CouponID  uuid.UUID `gorm:"type:uuid;not null;index:idx_coupon_usages_coupon_user"`
+	OrderID   uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_coupon_usages_order_id"`
+	UserID    uuid.UUID `gorm:"type:uuid;not null;index:idx_coupon_usages_coupon_user"`
+	CreatedAt time.Time `gorm:"autoCreateTime"`
+}
+
 // CreateCouponRequest is the payload for creating a new coupon.
 type CreateCouponRequest struct {
 	Code          string     `json:"code" binding:"required,min=3,max=64"`
