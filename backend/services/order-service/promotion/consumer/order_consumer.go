@@ -32,7 +32,7 @@ func (c *OrderCreatedConsumer) Start(ctx context.Context) {
 		return c.handleMessage(ctx, body)
 	})
 	if err != nil && err != context.Canceled {
-		log.Printf("❌ [order-service][OrderCreatedConsumer] polling error: %v", err)
+		log.Printf("[order-service][OrderCreatedConsumer] polling error: %v", err)
 	}
 }
 
@@ -47,7 +47,7 @@ func (c *OrderCreatedConsumer) handleMessage(ctx context.Context, body string) e
 
 	var evt events.NotificationEvent
 	if err := json.Unmarshal([]byte(body), &evt); err != nil {
-		log.Printf("❌ [order-service] invalid JSON: %v", err)
+		log.Printf("[order-service] invalid JSON: %v", err)
 		return nil
 	}
 
@@ -69,7 +69,7 @@ func (c *OrderCreatedConsumer) handleMessage(ctx context.Context, body string) e
 	orderID, oerr := uuid.Parse(orderIDStr)
 	userID, uerr := uuid.Parse(evt.UserID)
 	if oerr != nil || uerr != nil {
-		log.Printf("❌ [order-service] coupon usage event has invalid order_id=%q or user_id=%q, dropping", orderIDStr, evt.UserID)
+		log.Printf("[order-service] coupon usage event has invalid order_id=%q or user_id=%q, dropping", orderIDStr, evt.UserID)
 		return nil // data issue, retrying won't help
 	}
 
@@ -80,10 +80,10 @@ func (c *OrderCreatedConsumer) handleMessage(ctx context.Context, body string) e
 			log.Printf("⚠️ [order-service] OVER-REDEMPTION: Coupon usage limit reached for code=%s. Order %v already paid, acknowledging message.", couponCode, evt.Data["order_id"])
 			return nil // Swallowing the error to prevent infinite retries
 		}
-		log.Printf("❌ [order-service] Failed to increment usage for code=%s: %v", couponCode, err)
+		log.Printf("[order-service] Failed to increment usage for code=%s: %v", couponCode, err)
 		return err // Retry on DB failures
 	}
 
-	log.Printf("✅ [order-service] Incremented usage for code=%s", couponCode)
+	log.Printf("[order-service] Incremented usage for code=%s", couponCode)
 	return nil
 }

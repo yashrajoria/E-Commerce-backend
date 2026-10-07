@@ -160,7 +160,7 @@ jobs:
               chmod +x "${DEPLOY_SCRIPT}"
               bash "${DEPLOY_SCRIPT}"
             else
-              echo "❌ Error: Script not found at ${DEPLOY_SCRIPT}"
+              echo "Error: Script not found at ${DEPLOY_SCRIPT}"
               ls -la /home/${{ secrets.INPUT_USERNAME }} # Debugging: show what IS there
               exit 1
             fi

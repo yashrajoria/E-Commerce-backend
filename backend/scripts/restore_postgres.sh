@@ -111,4 +111,4 @@ echo "[restore] Sanity check — core table row counts:"
 psql_exec -t -c "SELECT 'users', count(*) FROM users UNION ALL SELECT 'orders', count(*) FROM orders UNION ALL SELECT 'payments', count(*) FROM payments UNION ALL SELECT 'coupons', count(*) FROM coupons UNION ALL SELECT 'agent_audit_log', count(*) FROM agent_audit_log;" \
   2>/dev/null || echo "(some core tables missing — check migration state)"
 
-echo "✅ Restore into '${RESTORE_DB}' complete."
+echo "Restore into '${RESTORE_DB}' complete."

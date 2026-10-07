@@ -10,11 +10,12 @@ import (
 	"strings"
 	"time"
 
+	promotionservices "order-service/promotion/services"
+
 	"github.com/google/uuid"
 	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"github.com/yashrajoria/common/events"
 	"github.com/yashrajoria/common/telemetry"
-	promotionservices "order-service/promotion/services"
 )
 
 type SQSCheckoutConsumer struct {
@@ -60,7 +61,7 @@ func (c *SQSCheckoutConsumer) Start(ctx context.Context) {
 		return c.handleMessage(ctx, body)
 	})
 	if err != nil && err != context.Canceled {
-		log.Printf("❌ [OrderService][SQSCheckoutConsumer] polling error: %v", err)
+		log.Printf("[OrderService][SQSCheckoutConsumer] polling error: %v", err)
 	}
 }
 
@@ -80,7 +81,7 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 
 	var evt models.CheckoutEvent
 	if err := json.Unmarshal([]byte(body), &evt); err != nil {
-		log.Printf("❌ invalid JSON: %v payload=%s", err, body)
+		log.Printf("invalid JSON: %v payload=%s", err, body)
 		return nil // Don't retry invalid JSON
 	}
 	if evt.CorrelationID == "" {
@@ -94,17 +95,17 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 
 	userUUID, err := uuid.Parse(evt.UserID)
 	if err != nil {
-		log.Printf("❌ user_id is not a valid UUID: %s", evt.UserID)
+		log.Printf("user_id is not a valid UUID: %s", evt.UserID)
 		return nil
 	}
 
 	if evt.OrderID == "" {
-		log.Printf("❌ missing OrderID in CheckoutEvent, skipping")
+		log.Printf("missing OrderID in CheckoutEvent, skipping")
 		return nil
 	}
 	orderIDUUID, err := uuid.Parse(evt.OrderID)
 	if err != nil {
-		log.Printf("❌ invalid OrderID UUID format: %s", evt.OrderID)
+		log.Printf("invalid OrderID UUID format: %s", evt.OrderID)
 		return nil
 	}
 
@@ -156,7 +157,7 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 	}
 
 	if validItems == 0 {
-		log.Printf("❌ [CHECKOUT] No valid items for user=%s order=%s, aborting order creation", evt.UserID, evt.OrderID)
+		log.Printf("[CHECKOUT] No valid items for user=%s order=%s, aborting order creation", evt.UserID, evt.OrderID)
 		return nil // Don't retry - this is a data issue, not a transient error
 	}
 
@@ -175,7 +176,7 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 			if coupon, cerr := c.promotionService.GetCoupon(ctx, evt.CouponCode); cerr == nil {
 				couponID = &coupon.ID
 			}
-			log.Printf("✅ [CHECKOUT] Coupon applied: code=%s discount=%d", evt.CouponCode, discountAmount)
+			log.Printf("[CHECKOUT] Coupon applied: code=%s discount=%d", evt.CouponCode, discountAmount)
 		} else {
 			log.Printf("⚠️  [CHECKOUT] Coupon invalid: code=%s", evt.CouponCode)
 		}
@@ -192,10 +193,10 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 			// Do not create an order or request payment unless stock is actually reserved.
 			// Returning an error lets SQS retry transient inventory failures instead of
 			// producing paid orders that cannot be fulfilled.
-			log.Printf("❌ [CHECKOUT] Inventory reservation failed for order=%s: %v", orderIDUUID.String(), err)
+			log.Printf("[CHECKOUT] Inventory reservation failed for order=%s: %v", orderIDUUID.String(), err)
 			return err
 		} else {
-			log.Printf("✅ [CHECKOUT] Inventory reserved for order=%s items=%d", orderIDUUID.String(), len(inventoryItems))
+			log.Printf("[CHECKOUT] Inventory reserved for order=%s items=%d", orderIDUUID.String(), len(inventoryItems))
 		}
 	} else {
 		log.Printf("⚠️  [CHECKOUT] Inventory client not configured, skipping reservation")
@@ -276,7 +277,7 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 	}
 
 	if err := c.orderRepo.CreateWithOutbox(ctx, &order, outboxEvents); err != nil {
-		log.Printf("❌ [CHECKOUT] Failed to create order record (will retry): %v", err)
+		log.Printf("[CHECKOUT] Failed to create order record (will retry): %v", err)
 		if evt.IdempotencyKey != "" {
 			if existing, findErr := c.orderRepo.FindByIdempotencyKey(ctx, evt.IdempotencyKey); findErr == nil && existing != nil {
 				log.Printf("⚠️  [IDEMPOTENCY] Order already exists for key=%s order_id=%s user=%s (skipping creation)", evt.IdempotencyKey, existing.ID.String(), existing.UserID.String())
@@ -288,7 +289,7 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		// on retry since ReserveStock is idempotent via ClientRequestToken.
 		if c.inventoryClient != nil {
 			if relErr := c.inventoryClient.ReleaseStock(ctx, orderIDUUID.String(), inventoryItems); relErr != nil {
-				log.Printf("❌ [CHECKOUT] Failed to release reserved stock after order create failure for order=%s: %v", orderIDUUID.String(), relErr)
+				log.Printf("[CHECKOUT] Failed to release reserved stock after order create failure for order=%s: %v", orderIDUUID.String(), relErr)
 			} else {
 				log.Printf("↩️  [CHECKOUT] Released reserved stock after order create failure for order=%s", orderIDUUID.String())
 			}
@@ -296,7 +297,7 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		return err
 	}
 
-	log.Printf("✅ order created id=%s user=%s items=%d total_amount=%d",
+	log.Printf("order created id=%s user=%s items=%d total_amount=%d",
 		order.ID.String(), order.UserID.String(), validItems, order.Amount)
 
 	// Emit metrics

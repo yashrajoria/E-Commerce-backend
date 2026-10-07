@@ -48,7 +48,7 @@ func (c *SQSPaymentConsumer) Start(ctx context.Context) {
 		return c.handleMessage(ctx, body)
 	})
 	if err != nil && err != context.Canceled {
-		log.Printf("❌ [OrderService][SQSPaymentConsumer] polling error: %v", err)
+		log.Printf("[OrderService][SQSPaymentConsumer] polling error: %v", err)
 	}
 }
 
@@ -70,12 +70,12 @@ func (c *SQSPaymentConsumer) handleMessage(ctx context.Context, body string) err
 
 	var evt models.PaymentEvent
 	if err := json.Unmarshal([]byte(body), &evt); err != nil {
-		log.Printf("❌ [OrderService][SQSPaymentConsumer] invalid JSON: %v payload=%s", err, body)
+		log.Printf("[OrderService][SQSPaymentConsumer] invalid JSON: %v payload=%s", err, body)
 		return nil // Don't retry invalid JSON
 	}
 
 	if evt.OrderID == "" || evt.Type == "" {
-		log.Printf("❌ [OrderService][SQSPaymentConsumer] missing fields: order_id=%q type=%q", evt.OrderID, evt.Type)
+		log.Printf("[OrderService][SQSPaymentConsumer] missing fields: order_id=%q type=%q", evt.OrderID, evt.Type)
 		return nil
 	}
 
@@ -136,7 +136,7 @@ func (c *SQSPaymentConsumer) handleMessage(ctx context.Context, body string) err
 func (c *SQSPaymentConsumer) updateOrderStatusWithTime(ctx context.Context, orderID string, status string, completedAt, canceledAt *time.Time) bool {
 	orderUUID, err := uuid.Parse(orderID)
 	if err != nil {
-		log.Printf("❌ [OrderService][SQSPaymentConsumer] invalid order ID: %s", orderID)
+		log.Printf("[OrderService][SQSPaymentConsumer] invalid order ID: %s", orderID)
 		return false
 	}
 
@@ -150,11 +150,11 @@ func (c *SQSPaymentConsumer) updateOrderStatusWithTime(ctx context.Context, orde
 
 	err = c.orderRepo.UpdateOrderStatus(ctx, orderUUID, "pending_payment", status, extra)
 	if err == nil {
-		log.Printf("✅ [OrderService][SQSPaymentConsumer] order=%s updated to %s", orderID, status)
+		log.Printf("[OrderService][SQSPaymentConsumer] order=%s updated to %s", orderID, status)
 		return true
 	}
 	if err != repositories.ErrStatusConflict {
-		log.Printf("❌ [OrderService][SQSPaymentConsumer] failed to update order=%s: %v", orderID, err)
+		log.Printf("[OrderService][SQSPaymentConsumer] failed to update order=%s: %v", orderID, err)
 		return false
 	}
 
@@ -163,7 +163,7 @@ func (c *SQSPaymentConsumer) updateOrderStatusWithTime(ctx context.Context, orde
 	// terminal state. Either way, don't overwrite it; just log which.
 	order, ferr := c.orderRepo.FindByID(ctx, orderUUID)
 	if ferr != nil {
-		log.Printf("❌ [OrderService][SQSPaymentConsumer] failed to find order=%s after status conflict: %v", orderID, ferr)
+		log.Printf("[OrderService][SQSPaymentConsumer] failed to find order=%s after status conflict: %v", orderID, ferr)
 		return false
 	}
 	if order.Status == status {
@@ -198,16 +198,16 @@ func (c *SQSPaymentConsumer) loadOrderItems(ctx context.Context, orderID string)
 func (c *SQSPaymentConsumer) confirmInventory(ctx context.Context, orderID string) {
 	items, err := c.loadOrderItems(ctx, orderID)
 	if err != nil {
-		log.Printf("❌ [OrderService][SQSPaymentConsumer] failed to load order items for confirm: order=%s err=%v", orderID, err)
+		log.Printf("[OrderService][SQSPaymentConsumer] failed to load order items for confirm: order=%s err=%v", orderID, err)
 		return
 	}
 	if len(items) == 0 {
 		return
 	}
 	if err := c.inventoryClient.ConfirmStock(ctx, orderID, items); err != nil {
-		log.Printf("❌ [OrderService][SQSPaymentConsumer] inventory confirm failed: order=%s err=%v", orderID, err)
+		log.Printf("[OrderService][SQSPaymentConsumer] inventory confirm failed: order=%s err=%v", orderID, err)
 	} else {
-		log.Printf("✅ [OrderService][SQSPaymentConsumer] inventory confirmed for order=%s", orderID)
+		log.Printf("[OrderService][SQSPaymentConsumer] inventory confirmed for order=%s", orderID)
 	}
 }
 
@@ -215,16 +215,16 @@ func (c *SQSPaymentConsumer) confirmInventory(ctx context.Context, orderID strin
 func (c *SQSPaymentConsumer) releaseInventory(ctx context.Context, orderID string) {
 	items, err := c.loadOrderItems(ctx, orderID)
 	if err != nil {
-		log.Printf("❌ [OrderService][SQSPaymentConsumer] failed to load order items for release: order=%s err=%v", orderID, err)
+		log.Printf("[OrderService][SQSPaymentConsumer] failed to load order items for release: order=%s err=%v", orderID, err)
 		return
 	}
 	if len(items) == 0 {
 		return
 	}
 	if err := c.inventoryClient.ReleaseStock(ctx, orderID, items); err != nil {
-		log.Printf("❌ [OrderService][SQSPaymentConsumer] inventory release failed: order=%s err=%v", orderID, err)
+		log.Printf("[OrderService][SQSPaymentConsumer] inventory release failed: order=%s err=%v", orderID, err)
 	} else {
-		log.Printf("✅ [OrderService][SQSPaymentConsumer] inventory released for order=%s", orderID)
+		log.Printf("[OrderService][SQSPaymentConsumer] inventory released for order=%s", orderID)
 	}
 }
 
@@ -284,6 +284,6 @@ func (c *SQSPaymentConsumer) publishOrderConfirmedNotification(ctx context.Conte
 	if err := c.snsClient.Publish(ctx, c.notificationTopicArn, notifBytes); err != nil {
 		log.Printf("⚠️ [OrderService][SQSPaymentConsumer] failed to publish order_confirmed notification: %v", err)
 	} else {
-		log.Printf("✅ [OrderService][SQSPaymentConsumer] order_confirmed notification published for order=%s", evt.OrderID)
+		log.Printf("[OrderService][SQSPaymentConsumer] order_confirmed notification published for order=%s", evt.OrderID)
 	}
 }

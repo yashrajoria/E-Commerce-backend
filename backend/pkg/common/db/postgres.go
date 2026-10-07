@@ -64,7 +64,7 @@ func ConnectPostgres(autoMigrateModels ...interface{}) (*gorm.DB, error) {
 	for i := 0; i < 10; i++ {
 		db, err = gorm.Open(postgres.Open(dsn), DefaultGormConfig())
 		if err == nil {
-			log.Println("✅ Connected to PostgreSQL successfully!")
+			log.Println("Connected to PostgreSQL successfully!")
 			if len(autoMigrateModels) > 0 && AllowAutoMigrate() {
 				if err := db.AutoMigrate(autoMigrateModels...); err != nil {
 					return nil, fmt.Errorf("AutoMigrate failed: %w", err)
@@ -74,7 +74,7 @@ func ConnectPostgres(autoMigrateModels ...interface{}) (*gorm.DB, error) {
 			}
 			return db, nil
 		}
-		log.Printf("❌ Connection failed (%d/10): %v", i+1, err)
+		log.Printf("Connection failed (%d/10): %v", i+1, err)
 		time.Sleep(2 * time.Second)
 	}
 	return nil, fmt.Errorf("failed to connect to PostgreSQL after retries: %w", err)

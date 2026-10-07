@@ -9,8 +9,8 @@ import (
 	"order-service/models"
 
 	"github.com/joho/godotenv"
-	"gorm.io/driver/postgres"
 	commondb "github.com/yashrajoria/common/db"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -62,7 +62,7 @@ func ConnectPostgres(autoMigrateModels ...interface{}) (*gorm.DB, error) {
 	for i := 0; i < 10; i++ {
 		db, err = gorm.Open(postgres.Open(dsn), commondb.DefaultGormConfig())
 		if err == nil {
-			log.Println("✅ Connected to PostgreSQL successfully!")
+			log.Println("Connected to PostgreSQL successfully!")
 			sqlDB, poolErr := db.DB()
 			if poolErr != nil {
 				return nil, fmt.Errorf("failed to get sql.DB for pool config: %w", poolErr)
@@ -79,7 +79,7 @@ func ConnectPostgres(autoMigrateModels ...interface{}) (*gorm.DB, error) {
 			}
 			return db, nil
 		}
-		log.Printf("❌ Connection failed (%d/10): %v", i+1, err)
+		log.Printf("Connection failed (%d/10): %v", i+1, err)
 		time.Sleep(2 * time.Second)
 	}
 	return nil, fmt.Errorf("failed to connect to PostgreSQL after retries: %w", err)
@@ -89,7 +89,7 @@ func Connect() error {
 	var err error
 	DB, err = ConnectPostgres(&models.Order{}, &models.OrderItem{}, &models.OutboxEvent{})
 	if err != nil {
-		log.Println("❌ Failed to connect to PostgreSQL:", err)
+		log.Println("Failed to connect to PostgreSQL:", err)
 		return err
 	}
 	return nil
@@ -104,4 +104,5 @@ func Close() error {
 	if err != nil {
 		return fmt.Errorf("failed to get database instance: %w", err)
 	}
-	return sqlDB.Close()}
+	return sqlDB.Close()
+}

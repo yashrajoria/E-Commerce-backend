@@ -115,7 +115,7 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 
 	req, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, targetURL, c.Request.Body)
 	if err != nil {
-		logger.Log.Error("❌ Failed to create forward request", zap.Error(err))
+		logger.Log.Error("Failed to create forward request", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create request"})
 		return
 	}
@@ -173,7 +173,7 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 
 	resp, err := forwardHTTPClient.Do(req)
 	if err != nil {
-		logger.Log.Error("❌ Failed to forward request", zap.Error(err))
+		logger.Log.Error("Failed to forward request", zap.Error(err))
 		c.JSON(http.StatusBadGateway, gin.H{"error": "service unreachable"})
 		return
 	}
@@ -216,6 +216,6 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 
 	// Copy response body
 	if _, err := io.Copy(c.Writer, resp.Body); err != nil {
-		logger.Log.Error("❌ Failed to copy response body", zap.Error(err))
+		logger.Log.Error("Failed to copy response body", zap.Error(err))
 	}
 }
