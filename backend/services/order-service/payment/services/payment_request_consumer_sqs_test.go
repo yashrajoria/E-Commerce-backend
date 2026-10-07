@@ -41,6 +41,15 @@ func (duplicatePaymentRepo) UpdateIfStatusNotInWithOutbox(context.Context, uuid.
 func (duplicatePaymentRepo) MarkStripeEventProcessed(context.Context, string, string) (bool, error) {
 	return false, nil
 }
+func (duplicatePaymentRepo) GetUserPaymentMethods(context.Context, uuid.UUID) ([]models.UserPaymentMethod, error) {
+	return nil, nil
+}
+func (duplicatePaymentRepo) SaveUserPaymentMethod(context.Context, *models.UserPaymentMethod) error {
+	return nil
+}
+func (duplicatePaymentRepo) DeleteUserPaymentMethod(context.Context, uuid.UUID, uuid.UUID) error {
+	return nil
+}
 func (r duplicatePaymentRepo) ClaimPaymentRequest(context.Context, *models.Payment) (bool, error) {
 	if r.claimErr != nil {
 		return false, r.claimErr

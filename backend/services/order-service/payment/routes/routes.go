@@ -17,6 +17,9 @@ func RegisterPaymentRoutes(r *gin.Engine, pc *controllers.PaymentController) {
 		payments.GET("/status/by-order/:order_id", pc.GetPaymentStatusByOrderID)
 		payments.POST("/create-checkout", pc.CreateCheckoutSession)
 		payments.POST("/verify-payment", pc.VerifyPayment)
+		payments.GET("/methods", pc.GetSavedPaymentMethods)
+		payments.POST("/methods", pc.SavePaymentMethod)
+		payments.DELETE("/methods/:id", pc.DeletePaymentMethod)
 	}
 
 	// Stripe webhook (no auth)

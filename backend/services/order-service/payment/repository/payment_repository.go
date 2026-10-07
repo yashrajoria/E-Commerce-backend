@@ -26,6 +26,9 @@ type PaymentRepository interface {
 	UpdateIfStatusNotInWithOutbox(ctx context.Context, orderID uuid.UUID, excludeStatuses []string, updates map[string]interface{}, events []models.OutboxEvent) (updated bool, err error)
 	// MarkStripeEventProcessed inserts event_id; returns false if already processed.
 	MarkStripeEventProcessed(ctx context.Context, eventID, eventType string) (inserted bool, err error)
+	GetUserPaymentMethods(ctx context.Context, userID uuid.UUID) ([]models.UserPaymentMethod, error)
+	SaveUserPaymentMethod(ctx context.Context, pm *models.UserPaymentMethod) error
+	DeleteUserPaymentMethod(ctx context.Context, userID uuid.UUID, pmID uuid.UUID) error
 }
 
 type PaymentRequestClaimer interface {
@@ -136,3 +139,18 @@ func (r *gormPaymentRepo) MarkStripeEventProcessed(ctx context.Context, eventID,
 	}
 	return tx.RowsAffected > 0, nil
 }
+
+func (r *gormPaymentRepo) GetUserPaymentMethods(ctx context.Context, userID uuid.UUID) ([]models.UserPaymentMethod, error) {
+	var methods []models.UserPaymentMethod
+	err := r.db.WithContext(ctx).Where("user_id = ?", userID).Order("is_default DESC, created_at DESC").Find(&methods).Error
+	return methods, err
+}
+
+func (r *gormPaymentRepo) SaveUserPaymentMethod(ctx context.Context, pm *models.UserPaymentMethod) error {
+	return r.db.WithContext(ctx).Save(pm).Error
+}
+
+func (r *gormPaymentRepo) DeleteUserPaymentMethod(ctx context.Context, userID uuid.UUID, pmID uuid.UUID) error {
+	return r.db.WithContext(ctx).Where("id = ? AND user_id = ?", pmID, userID).Delete(&models.UserPaymentMethod{}).Error
+}
+

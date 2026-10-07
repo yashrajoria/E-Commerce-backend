@@ -264,6 +264,108 @@ func (pc *PaymentController) VerifyPayment(c *gin.Context) {
 	})
 }
 
+// GetSavedPaymentMethods returns all vaulted payment methods for the authenticated user.
+func (pc *PaymentController) GetSavedPaymentMethods(c *gin.Context) {
+	userIDStr, err := middleware.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	userUUID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
+		return
+	}
+
+	methods, err := pc.Repo.GetUserPaymentMethods(c.Request.Context(), userUUID)
+	if err != nil {
+		pc.Logger.Error("failed to retrieve payment methods", zap.Error(err), zap.String("user_id", userIDStr))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retrieve payment methods"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"payment_methods": methods})
+}
+
+// SavePaymentMethod attaches a vaulted Stripe PaymentMethod token.
+func (pc *PaymentController) SavePaymentMethod(c *gin.Context) {
+	userIDStr, err := middleware.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	userUUID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
+		return
+	}
+
+	var req struct {
+		StripeCustomerID      string `json:"stripe_customer_id" binding:"required"`
+		StripePaymentMethodID string `json:"stripe_payment_method_id" binding:"required"`
+		Brand                 string `json:"brand" binding:"required"`
+		Last4                 string `json:"last4" binding:"required"`
+		ExpMonth              int    `json:"exp_month" binding:"required"`
+		ExpYear               int    `json:"exp_year" binding:"required"`
+		IsDefault             bool   `json:"is_default"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	pm := models.UserPaymentMethod{
+		ID:                    uuid.New(),
+		UserID:                userUUID,
+		StripeCustomerID:      req.StripeCustomerID,
+		StripePaymentMethodID: req.StripePaymentMethodID,
+		Brand:                 strings.ToLower(req.Brand),
+		Last4:                 req.Last4,
+		ExpMonth:              req.ExpMonth,
+		ExpYear:               req.ExpYear,
+		IsDefault:             req.IsDefault,
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+	}
+
+	if err := pc.Repo.SaveUserPaymentMethod(c.Request.Context(), &pm); err != nil {
+		pc.Logger.Error("failed to save payment method", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save payment method"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"success": true, "payment_method": pm})
+}
+
+// DeletePaymentMethod removes a vaulted payment method.
+func (pc *PaymentController) DeletePaymentMethod(c *gin.Context) {
+	userIDStr, err := middleware.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	userUUID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
+		return
+	}
+
+	pmIDStr := c.Param("id")
+	pmUUID, err := uuid.Parse(pmIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payment method id"})
+		return
+	}
+
+	if err := pc.Repo.DeleteUserPaymentMethod(c.Request.Context(), userUUID, pmUUID); err != nil {
+		pc.Logger.Error("failed to delete payment method", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete payment method"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
 // NewPaymentController creates a new PaymentController with the given dependencies.
 func NewPaymentController(
 	stripe *services.StripeService,

@@ -80,6 +80,18 @@ func (m *mockPaymentRepo) MarkStripeEventProcessed(context.Context, string, stri
 	return true, nil
 }
 
+func (m *mockPaymentRepo) GetUserPaymentMethods(context.Context, uuid.UUID) ([]models.UserPaymentMethod, error) {
+	return nil, nil
+}
+
+func (m *mockPaymentRepo) SaveUserPaymentMethod(context.Context, *models.UserPaymentMethod) error {
+	return nil
+}
+
+func (m *mockPaymentRepo) DeleteUserPaymentMethod(context.Context, uuid.UUID, uuid.UUID) error {
+	return nil
+}
+
 type countingSNSPublisher struct {
 	calls int32
 	last  []byte
