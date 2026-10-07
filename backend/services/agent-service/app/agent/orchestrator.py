@@ -60,6 +60,31 @@ async def run_agent(
     errors = [r.error for r in formatted_results if r.error]
     success = all(r.success for r in formatted_results) if formatted_results else True
 
+    action_card = None
+    steps: List[str] = []
+    for r in formatted_results:
+        if r.tool == "build_bundle" and r.success and isinstance(r.data, dict):
+            bundle_data = r.data
+            action_card = {
+                "type": "bundle",
+                "title": bundle_data.get("title") or "Curated Essentials Bundle",
+                "theme": bundle_data.get("theme"),
+                "budget_cents": bundle_data.get("budget_cents"),
+                "bundle_price_cents": bundle_data.get("final_price_cents"),
+                "original_price_cents": bundle_data.get("subtotal_cents"),
+                "discount_cents": bundle_data.get("discount_cents"),
+                "coupon_code": bundle_data.get("coupon_code"),
+                "savings_cents": bundle_data.get("savings_cents"),
+                "items": bundle_data.get("items", []),
+            }
+            steps = list(bundle_data.get("steps_taken", []))
+            break
+        elif r.tool == "get_best_coupon" and r.success and isinstance(r.data, dict) and not steps:
+            coupon_data = r.data
+            code = coupon_data.get("best_coupon")
+            disc = coupon_data.get("discount_cents", 0)
+            steps.append(f"🏷️ Verified active promo `{code}` for ${(disc / 100):.2f} discount")
+
     response = {
         "success": success,
         "answer": answer,
@@ -68,6 +93,8 @@ async def run_agent(
         "session_id": session_id,
         "correlation_id": cid,
         "error": "; ".join(errors) if errors else None,
+        "action_card": action_card,
+        "steps": steps,
     }
 
     logger.info(

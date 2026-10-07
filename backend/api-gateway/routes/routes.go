@@ -155,6 +155,9 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	// Dynamic Basket Optimizer — public / guest cart incentives
 	public.POST("/promotions/optimize-basket", promotions)
 
+	// AI Personal Shopper Copilot — public / guest recommendations
+	public.POST("/shopper/query", forwardTo(agentBase+"/agent/query"))
+
 	// ── Storefront aggregation (ex-BFF) ─────────────────────────────────────
 	// bff-service is deleted. Its storefront fan-outs (home, profile,
 	// checkout orchestration) are gone: callers use the domain routes below
@@ -252,6 +255,7 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	protected.POST("/payment", payment)
 	protected.POST("/payment/*any", payment)
 	protected.GET("/payment/*any", payment)
+	protected.DELETE("/payment/*any", payment)
 
 	// Inventory — read
 	protected.GET("/inventory/:productId", inventory)

@@ -110,6 +110,28 @@ def format_tool_result(result: ToolResult) -> str:
                 lines.append(f"- {_humanize_status(status)}: {_safe_int(count)}")
         return "\n".join(lines)
 
+    if result.tool == "build_bundle":
+        items = data.get("items", [])
+        title = data.get("title", "Curated Essentials Bundle")
+        final_cents = data.get("final_price_cents", 0)
+        coupon = data.get("coupon_code")
+        savings = data.get("savings_cents", 0)
+        lines = [f"I curated the **{title}** for you at **{_fmt_money(final_cents / 100.0)}**!"]
+        if savings > 0 and coupon:
+            lines.append(f"✨ Auto-applied `{coupon}` saving you {_fmt_money(savings / 100.0)}.")
+        if items:
+            lines.append("\n**Bundle includes:**")
+            for it in items:
+                lines.append(f"- {it.get('name')} (${(it.get('price', 0) / 100.0):.2f})")
+        return "\n".join(lines)
+
+    if result.tool == "get_best_coupon":
+        code = data.get("best_coupon")
+        disc = data.get("discount_cents", 0)
+        if code:
+            return f"🏷️ Best available discount: Code **{code}** saves {_fmt_money(disc / 100.0)}!"
+        return "No promo discounts currently active for this subtotal."
+
     if isinstance(data, dict):
         keys = ", ".join(sorted(data.keys()))
         return f"{result.tool.replace('_', ' ').title()} completed successfully. Available fields: {keys or 'none'}."

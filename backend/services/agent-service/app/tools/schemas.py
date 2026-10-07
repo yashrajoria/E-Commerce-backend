@@ -68,3 +68,20 @@ class AcknowledgeIncidentParams(BaseModel):
     action_taken: str = Field(default="acknowledged", max_length=200)
     notes: Optional[str] = Field(default=None, max_length=500)
 
+
+class BuildBundleParams(BaseModel):
+    budget_cents: int = Field(default=30000, ge=500, le=5000000, description="Maximum budget in cents, e.g. 30000 for $300.00")
+    theme: Optional[str] = Field(default=None, max_length=100, description="Theme or purpose e.g. 'home office', 'gaming', 'fall running'")
+    category: Optional[str] = Field(default=None, max_length=50, description="Target department or category")
+    max_items: int = Field(default=4, ge=1, le=10, description="Maximum number of items in bundle")
+
+
+class GetBestCouponParams(BaseModel):
+    cart_value_cents: int = Field(default=5000, ge=0, description="Total cart value in cents")
+    category: Optional[str] = Field(default=None, max_length=50)
+
+
+class CheckCompatibilityParams(BaseModel):
+    product_ids: list[str] = Field(..., min_length=1, max_length=10, description="List of product IDs to check compatibility for")
+
+

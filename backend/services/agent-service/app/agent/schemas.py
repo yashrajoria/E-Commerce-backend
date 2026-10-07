@@ -30,3 +30,5 @@ class AgentResponseV2(BaseModel):
     session_id: str
     correlation_id: str
     error: Optional[str] = None
+    action_card: Optional[Dict[str, Any]] = None
+    steps: Optional[List[str]] = Field(default_factory=list)

@@ -101,6 +101,24 @@ TOOL_REGISTRY: Dict[str, ToolSpec] = {
         mutating=True,
         min_role="admin",
     ),
+    "build_bundle": ToolSpec(
+        description="Build an intelligent, personalized product bundle within a target budget.",
+        params_model=schemas.BuildBundleParams,
+        handler=executor.build_bundle,
+        min_role=None,
+    ),
+    "get_best_coupon": ToolSpec(
+        description="Find the highest-value active coupon for a cart subtotal.",
+        params_model=schemas.GetBestCouponParams,
+        handler=executor.get_best_coupon,
+        min_role=None,
+    ),
+    "check_compatibility": ToolSpec(
+        description="Check style, size, and category compatibility across products.",
+        params_model=schemas.CheckCompatibilityParams,
+        handler=executor.check_compatibility,
+        min_role=None,
+    ),
 }
 
 

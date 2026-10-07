@@ -46,12 +46,33 @@ def _heuristic_map(prompt_lower: str) -> List[ToolCall]:
         calls.append(ToolCall(tool="get_low_stock", params={"threshold": 10}))
     if re.search(r"sales|revenue", prompt_lower):
         calls.append(ToolCall(tool="get_sales", params={"range": "30d"}))
-    if re.search(r"\border\b|\borders\b", prompt_lower):
+    if re.search(r"\border\b|\borders\b", prompt_lower) and not re.search(r"bundle|shopper|under\s+\$?\d+", prompt_lower):
         order_params: Dict[str, int | str] = {"page": 1, "limit": 100}
         if days is not None:
             order_params["days"] = days
             order_params["range"] = f"{days}d"
         calls.append(ToolCall(tool="get_orders", params=order_params))
+
+    # Autonomous AI Personal Shopper & Bundle Builder
+    if re.search(r"bundle|setup|outfit|pack|curate|build me|recommend.*under|shopper|desk|workstation|gift idea|kit\b|routine", prompt_lower):
+        budget_match = re.search(r"(?:\$|under\s+\$?)(\d+)", prompt_lower)
+        budget_cents = int(budget_match.group(1)) * 100 if budget_match else 30000
+
+        # Extract semantic theme by cleaning boilerplate command phrasing
+        cleaned = re.sub(
+            r"\b(build me|curate|recommend|find me|give me|i want|i need|a|an|the|bundle|setup|outfit|pack|kit|routine|gift idea|gift|under|for|with|less than|\$\d+|\d+ dollars?)\b",
+            " ",
+            prompt_lower,
+        )
+        extracted_theme = " ".join(cleaned.split()).strip()
+        theme = extracted_theme if extracted_theme else "curated"
+
+        calls.append(ToolCall(tool="build_bundle", params={"budget_cents": budget_cents, "theme": theme, "raw_prompt": prompt_lower}))
+        return calls
+
+    if re.search(r"coupon|discount|promo code|promo", prompt_lower):
+        calls.append(ToolCall(tool="get_best_coupon", params={"cart_value_cents": 10000}))
+        return calls
 
     return calls
 
