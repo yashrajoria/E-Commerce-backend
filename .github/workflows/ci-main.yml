@@ -1,7 +1,6 @@
-# CI for pull requests and feature branches — vet + test every Go module,
-# pytest for agent-service, Spectral OpenAPI lint. No image pushes, no deploys.
-#
-# Secrets: none required. Deploy/publish lives in ci-aws.yml (main branch only).
+# CI for ShopSwift Backend — vet + test every Go module, migrations and
+# schema drift, pytest for agent-service, Spectral OpenAPI lint, and Docker build checks.
+# On push to main, triggers automatic deployment to Render via deploy hook.
 
 name: CI - main
 
