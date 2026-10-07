@@ -21,9 +21,7 @@ export NOTIFICATION_SERVICE_URL="http://localhost:8092"
 export ALLOW_AUTO_MIGRATE="${ALLOW_AUTO_MIGRATE:-true}"
 export GIN_MODE="${GIN_MODE:-release}"
 
-# Route AWS SDK to embedded local DynamoDB
-export USE_LOCALSTACK=true
-export LOCALSTACK_ENDPOINT="http://localhost:8000"
+# No AWS emulator in this container: S3/SNS/SQS stay unconfigured here (SQS polling is off below).
 export AWS_REGION="${AWS_REGION:-us-east-1}"
 export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-test}"
 export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-test}"
@@ -51,22 +49,6 @@ cleanup() {
     exit 0
 }
 trap cleanup SIGINT SIGTERM
-
-echo "-> Starting embedded DynamoDB on :8000..."
-if [ -d "/home/dynamodblocal" ] && [ -f "/home/dynamodblocal/DynamoDBLocal.jar" ]; then
-    (cd /home/dynamodblocal && java -Xmx64m -jar DynamoDBLocal.jar -inMemory -sharedDb -port 8000) &
-elif [ -f "/opt/dynamodb/DynamoDBLocal.jar" ]; then
-    (cd /opt/dynamodb && java -Xmx64m -jar DynamoDBLocal.jar -inMemory -sharedDb -port 8000) &
-else
-    echo "Warning: DynamoDBLocal.jar not found, attempting generic java start..."
-    java -Xmx64m -jar DynamoDBLocal.jar -inMemory -sharedDb -port 8000 &
-fi
-
-# Wait for DynamoDB to accept connections
-sleep 2
-
-echo "-> Initializing DynamoDB tables & seed catalog..."
-/app/init-dynamo || echo "init-dynamo completed with warnings"
 
 echo "-> Launching Identity Service on :8081..."
 PORT=8081 /app/identity-service &

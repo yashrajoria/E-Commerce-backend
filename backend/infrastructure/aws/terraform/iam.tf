@@ -52,23 +52,6 @@ data "aws_iam_policy_document" "ci_policy" {
   }
 
   statement {
-    sid    = "DynamoDBAccess"
-    effect = "Allow"
-    actions = [
-      "dynamodb:DescribeTable",
-      "dynamodb:CreateTable",
-      "dynamodb:PutItem",
-      "dynamodb:GetItem",
-      "dynamodb:Query",
-      "dynamodb:Scan",
-      "dynamodb:UpdateItem"
-    ]
-    resources = [
-      for tbl in values(var.ddb_tables) : "arn:aws:dynamodb:${local.region}:${local.account_id}:table/${tbl}"
-    ]
-  }
-
-  statement {
     sid    = "SQSAccess"
     effect = "Allow"
     actions = [

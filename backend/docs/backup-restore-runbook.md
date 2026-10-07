@@ -12,10 +12,10 @@ The compose `postgres` container (service name `postgres`, db `ecommerce`, user 
 | order-service | `orders`, `order_items`, `payments`, `stripe_processed_events`, `coupons`, `shipments`, `outbox_events`, `notification_events`, `payment_outbox_events` |
 | notification-service | `notification_logs` |
 | agent-service | `agent_audit_log` (same database — agent uses its own pool against `ecommerce`) |
+| catalog-service | `catalog.*` tables — products, categories, product_categories, inventory, stock_reservations (same database, schema `catalog`) |
 
 Non-Postgres state is **not** covered by these scripts:
 
-- **DynamoDB** (catalog, categories, inventory) — LocalStack volume / AWS table backup via `aws dynamodb export-table-to-point-in-time` or on-demand snapshot.
 - **Redis** (cart state, checkout idempotency, rate limits, bulk-import queue) — ephemeral by design; carts/idempotency can be rebuilt.
 - **S3** (product media) — versioning enabled at bucket level; not part of pg_dump.
 

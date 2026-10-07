@@ -10,5 +10,4 @@ use (
 	./services/notification-service
 	./services/order-service
 	./services/agent-service
-	./tools/init-dynamo
 )

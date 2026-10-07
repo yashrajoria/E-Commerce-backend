@@ -38,7 +38,7 @@ type PriceDropPublisher interface {
 	PublishPriceDrop(ctx context.Context, evt events.ProductPriceDecreasedEvent) error
 }
 
-// ProductServiceDDB is a DynamoDB-backed product service
+// ProductServiceDDB is the product service (the DDB suffix is historical; storage is Postgres)
 type ProductServiceDDB struct {
 	productRepo         repository.ProductRepo
 	categoryRepo        repository.CategoryRepo
@@ -247,7 +247,7 @@ func (s *ProductServiceDDB) CreateProduct(ctx context.Context, req ProductCreate
 		UpdatedAt:   now,
 	}
 
-	// Step 4: Save to DynamoDB
+	// Step 4: Save to the database
 	err = s.productRepo.Create(ctx, product)
 	if err != nil {
 		return nil, err
@@ -278,7 +278,7 @@ func (s *ProductServiceDDB) UpdateProduct(ctx context.Context, id uuid.UUID, req
 	}
 	oldCategoryIDs := oldProduct.CategoryIDs
 
-	// Build map for DynamoDB update
+	// Build map for the repository update
 	updates := make(map[string]interface{})
 
 	if req.Name != nil {

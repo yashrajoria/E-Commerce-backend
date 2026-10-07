@@ -20,28 +20,6 @@
       "Resource": ["arn:aws:s3:::shopswift", "arn:aws:s3:::shopswift/*"]
     },
     {
-      "Sid": "DynamoDBManagement",
-      "Effect": "Allow",
-      "Action": [
-        "dynamodb:CreateTable",
-        "dynamodb:DeleteTable",
-        "dynamodb:DescribeTable",
-        "dynamodb:UpdateTable",
-        "dynamodb:ListTagsOfResource",
-        "dynamodb:TagResource",
-        "dynamodb:PutItem",
-        "dynamodb:GetItem",
-        "dynamodb:DeleteItem",
-        "dynamodb:Scan",
-        "dynamodb:Query"
-      ],
-      "Resource": [
-        "arn:aws:dynamodb:${AWS_REGION}:${ACCOUNT_ID}:table/Products",
-        "arn:aws:dynamodb:${AWS_REGION}:${ACCOUNT_ID}:table/Categories",
-        "arn:aws:dynamodb:${AWS_REGION}:${ACCOUNT_ID}:table/Inventory"
-      ]
-    },
-    {
       "Sid": "SQSManagement",
       "Effect": "Allow",
       "Action": [

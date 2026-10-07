@@ -1,10 +1,9 @@
 <div align="center">
   <h1>ShopSwift — Microservices Backend</h1>
-  <p><strong>Scalable e-commerce backend: Go microservices, Postgres, DynamoDB, Redis, SNS/SQS</strong></p>
+  <p><strong>Scalable e-commerce backend: Go microservices, Postgres, Redis, SNS/SQS</strong></p>
 
   ![Go](https://img.shields.io/badge/Go-1.25-00ADD8?style=flat&logo=go&logoColor=white)
   ![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL-336791?logo=postgresql&logoColor=white)
-  ![DynamoDB](https://img.shields.io/badge/DB-DynamoDB-4053D6?logo=amazondynamodb&logoColor=white)
   ![Redis](https://img.shields.io/badge/Cache-Redis-DC382D?logo=redis&logoColor=white)
   ![Docker](https://img.shields.io/badge/Deploy-Docker-2496ED?logo=docker&logoColor=white)
   ![LocalStack](https://img.shields.io/badge/Local-AWS-LocalStack-purple)
@@ -14,7 +13,7 @@
 
 ## Overview
 
-ShopSwift backend is a Go (plus Python agent) microservices platform with an API gateway and domain services. Local development uses Docker Compose + **LocalStack** for S3, DynamoDB, SNS, and SQS.
+ShopSwift backend is a Go (plus Python agent) microservices platform with an API gateway and domain services. Local development uses Docker Compose + **LocalStack** for S3, SNS, and SQS.
 
 ## Architecture (short)
 
@@ -22,7 +21,7 @@ ShopSwift backend is a Go (plus Python agent) microservices platform with an API
 |-------|------|
 | **API Gateway** `:8080` | Routing, cookies/auth headers, rate limits, correlation / request IDs |
 | **Domain services** | Identity, catalog, order, notification, agent |
-| **Data** | Postgres (transactions), DynamoDB (catalog/inventory), Redis (cart/cache/idempotency), S3 (images) |
+| **Data** | Postgres (transactions; catalog/inventory in schema `catalog`), Redis (cart/cache/idempotency), S3 (images) |
 | **Messaging** | SNS topics → SQS queues (checkout, payment, notifications) |
 
 See [MICROSERVICE_ARCHITECTURE.md](MICROSERVICE_ARCHITECTURE.md), [SERVICES_AND_DATABASES.md](SERVICES_AND_DATABASES.md), [SERVICE_ISSUES_AND_AUDIT.md](SERVICE_ISSUES_AND_AUDIT.md), [CLAUDE.md](CLAUDE.md), [backend/docs/architecture.md](backend/docs/architecture.md), [backend/docs/data-and-messaging.md](backend/docs/data-and-messaging.md), and [backend/docs/best-practices-and-gaps.md](backend/docs/best-practices-and-gaps.md).
@@ -41,7 +40,7 @@ Phase 1 integrity protections are covered by regression tests: coupon usage incr
 |---------|------|-------|-----------------|
 | api-gateway | 8080 | Go / Gin | Redis (rate limit) |
 | identity-service | 8081 | Go | Postgres |
-| catalog-service | 8082 | Go | DynamoDB + Redis + S3 |
+| catalog-service | 8082 | Go | Postgres + Redis + S3 |
 | order-service | 8083 | Go | Postgres + SQS/SNS + Stripe |
 | agent-service | 8089→8000 | Python FastAPI | Stateless (via gateway) |
 | notification-service | 8092 | Go | Postgres + SQS |
@@ -55,7 +54,7 @@ Phase 1 integrity protections are covered by regression tests: coupon usage incr
 - **Languages:** Go 1.25 (workspace), Python (agent-service)
 - **HTTP:** Gin; gateway proxies to domain services
 - **Postgres:** identity, order, notification
-- **DynamoDB:** products, categories, inventory (not MongoDB)
+- **Postgres (schema `catalog`):** products, categories, inventory (not MongoDB)
 - **Redis:** cart, checkout idempotency replay, gateway rate limit, product cache
 - **AWS (or LocalStack):** S3, SNS, SQS, Secrets Manager (optional), CloudWatch (optional)
 - **Payments:** Stripe + stripe-cli webhook forwarding in Compose

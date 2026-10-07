@@ -12,23 +12,21 @@ COPY backend/go.mod backend/go.sum ./
 # Copy shared packages
 COPY backend/pkg ./pkg
 
-# Copy services, tools, and gateway
+# Copy services and gateway
 COPY backend/api-gateway ./api-gateway
 COPY backend/services ./services
-COPY backend/tools ./tools
 
-# Build all 5 Go services + init-dynamo tool into /out
+# Build the Go services into /out
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /out/api-gateway ./api-gateway
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /out/identity-service ./services/identity-service
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /out/catalog-service ./services/catalog-service
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /out/order-service ./services/order-service
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /out/notification-service ./services/notification-service
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /out/init-dynamo ./tools/init-dynamo
 
-# Runtime stage uses official Amazon DynamoDB Local image (Java + DynamoDB pre-installed)
-FROM amazon/dynamodb-local:latest
+# Runtime stage: static Go binaries need only bash (start.sh), CA certs and tzdata
+FROM alpine:3.20
 
-USER root
+RUN apk add --no-cache bash ca-certificates tzdata
 
 WORKDIR /app
 

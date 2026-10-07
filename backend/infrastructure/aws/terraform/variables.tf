@@ -10,17 +10,6 @@ variable "s3_bucket" {
   default     = "shopswift"
 }
 
-variable "ddb_tables" {
-  description = "DynamoDB table names"
-  type        = map(string)
-  default = {
-    products           = "Products"
-    categories         = "Categories"
-    inventory          = "Inventory"
-    product_categories = "ProductCategories"
-  }
-}
-
 variable "sqs_queues" {
   description = "SQS queue names"
   type        = map(string)
@@ -86,13 +75,6 @@ variable "ec2_instance_type" {
   description = "EC2 instance type"
   type        = string
   default     = "t3.micro"
-}
-
-# DynamoDB table name
-variable "dynamodb_table_name" {
-  description = "DynamoDB table name"
-  type        = string
-  default     = "ECommerceDynamoDB"
 }
 
 # SNS topic name

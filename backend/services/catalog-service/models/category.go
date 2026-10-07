@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Category is the API/domain model. Persistence is DynamoDB (see repository adapters).
+// Category is the API/domain model. Persistence is Postgres (schema catalog).
 type Category struct {
 	ID                 uuid.UUID   `json:"_id"`
 	Name               string      `json:"name"`

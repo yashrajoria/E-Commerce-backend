@@ -6,17 +6,17 @@ Comprehensive architecture specification for the **ShopSwift** e-commerce backen
 
 ## 1. Executive Overview
 
-ShopSwift is an enterprise-grade e-commerce microservices platform built primarily with **Go 1.25** (multi-module workspace) and a **Python (FastAPI)** AI Agent service. The system is designed around an event-driven architecture using AWS services (S3, DynamoDB, SNS, SQS) fully emulated locally via **LocalStack**, alongside **PostgreSQL** for relational transactions and **Redis** for state caching, rate limiting, and distributed locking.
+ShopSwift is an enterprise-grade e-commerce microservices platform built primarily with **Go 1.25** (multi-module workspace) and a **Python (FastAPI)** AI Agent service. The system is designed around an event-driven architecture using AWS services (S3, SNS, SQS) fully emulated locally via **LocalStack**, alongside **PostgreSQL** for relational transactions and **Redis** for state caching, rate limiting, and distributed locking.
 
 ### Key Architectural Principles
 - **API Gateway edge**: Gateway handles edge routing, rate limiting, correlation IDs, and JWT validation. Storefront clients call domain routes directly; `/bff/admin/*` is retained as the admin/analytics path contract.
 - **Polyglot Persistence**:
   - **PostgreSQL**: Transactional entities (Users, Orders, Payments, Coupons, Notifications).
-  - **DynamoDB**: High-throughput catalog, category adjacency graphs, and inventory stock.
+  - **PostgreSQL `catalog` schema**: catalog, category links, and inventory stock with transactional reservations.
   - **Redis**: Cart state + checkout idempotency replay, product catalog caching, bulk-import queue, gateway rate limits.
   - **AWS S3**: Product media assets.
 - **Asynchronous Event-Driven Processing**: Orders, payments, and notifications are processed asynchronously via SNS topics and SQS queues with built-in Dead Letter Queues (DLQs).
-- **Strict Idempotency & Safety**: Multi-tier idempotency guarantees across API calls (user-scoped idempotency keys with cached replay), SQS message processing (`idempotency_key` columns), inventory updates (`ClientRequestToken`), and Stripe webhooks (`stripe_processed_events`).
+- **Strict Idempotency & Safety**: Multi-tier idempotency guarantees across API calls (user-scoped idempotency keys with cached replay), SQS message processing (`idempotency_key` columns), inventory reservations (`(order_id, product_id)` rows with replay-safe status transitions), and Stripe webhooks (`stripe_processed_events`).
 
 ---
 
@@ -43,7 +43,7 @@ flowchart TB
 
   subgraph Storage ["Data Persistence Stores"]
     PG[("PostgreSQL (:5432)<br/>ecommerce DB")]
-    DDB[("DynamoDB<br/>Products, Categories, Inventory")]
+    DDB[("PostgreSQL catalog schema<br/>Products, Categories, Inventory")]
     REDIS[("Redis 7 (:6379)<br/>Cart, Locks, Cache, Limits")]
     S3[("AWS S3 / LocalStack<br/>shopswift bucket")]
   end
@@ -93,7 +93,7 @@ flowchart TB
 |:---|:---:|:---|:---|:---|
 | **api-gateway** | `8080` | Go / Gin | Redis | Edge router, JWT validation, rate limiting, `X-Request-ID` correlation, client header sanitization. |
 | **identity-service** | `8081` | Go / Gin | Postgres (`users`, `refresh_tokens`, `addresses`) | Identity authentication, token refresh, password hashing, admin bootstrapping, profiles, addresses. |
-| **catalog-service** | `8082` | Go / Gin | DynamoDB + Redis + AWS S3 | Catalog items, categories, adjacency graph, S3 image uploads, cache versioning, stock levels + idempotent reservations, Redis cart + SNS checkout. |
+| **catalog-service** | `8082` | Go / Gin | Postgres (`catalog` schema) + Redis + AWS S3 | Catalog items, categories, adjacency graph, S3 image uploads, cache versioning, stock levels + idempotent reservations, Redis cart + SNS checkout. |
 | **order-service** | `8083` | Go / Gin | Postgres (`orders`, `order_items`, `coupons`, `payments`, `stripe_processed_events`) + SQS + Stripe | Order state machine, stock reservation integration, coupons, zone shipping rates, Stripe Checkout + webhooks. |
 | **agent-service** | `8089` | Python / FastAPI | Stateless | AI-powered conversational backend assistant calling domain + admin analytics paths via the gateway. |
 | **notification-service**| `8092` | Go / Gin | Postgres (`notification_logs`) + SQS | Async notification consumer (`notification-queue`), transactional emails. |
@@ -118,14 +118,15 @@ ecommerce/
  └── notification_logs       [Owned by notification-service]
 ```
 
-### 4.2 DynamoDB Tables
+### 4.2 PostgreSQL `catalog` Schema
 
-| Table Name | Environment Key | Partition Key (PK) | Sort Key (SK) / GSIs | Managing Service |
-|:---|:---|:---|:---|:---|
-| **Products** | `DDB_TABLE_PRODUCTS` | `id` (String) | GSIs: `sku-index` (`sku`), `featured-index` (`is_featured`, `created_at`) | `catalog-service` |
-| **Categories** | `DDB_TABLE_CATEGORIES` | `id` (String) | GSI: `name-index` (`name`) | `catalog-service` |
-| **ProductCategories** | `DDB_TABLE_PRODUCT_CATEGORIES` | `category_id` | `product_id` (GSI: `product-index` on `product_id`) | `catalog-service` |
-| **Inventory** | `DDB_TABLE_INVENTORY` | `product_id` | — | `catalog-service` |
+| Table | Primary Key | Notes | Managing Service |
+|:---|:---|:---|:---|
+| **products** | `id` | live-unique `sku`; partial indexes on `created_at`, `brand`, `is_featured`; soft delete | `catalog-service` |
+| **categories** | `id` | jsonb `parent_ids` / `ancestors` / `path`; tree assembled in memory | `catalog-service` |
+| **product_categories** | `(category_id, product_id)` | many-to-many link, indexed by `product_id` | `catalog-service` |
+| **inventory** | `product_id` | `available` / `reserved` / `threshold`, CHECK >= 0 | `catalog-service` |
+| **stock_reservations** | `(order_id, product_id)` | `status` reserved / confirmed / released; purged after 30 days | `catalog-service` |
 
 ### 4.3 Redis Data Structure Usage
 
@@ -183,7 +184,7 @@ sequenceDiagram
   Catalog-->>Client: 200 OK (order_id PENDING)
   SNS->>SQS_Order: Route message
   SQS_Order->>Order: Consume checkout.requested
-  Order->>Catalog: Reserve Stock (ClientRequestToken)
+  Order->>Catalog: Reserve Stock (idempotent per order)
   Order->>Order: Create Order (Status: pending_payment)
   Order->>SQS_Pay: Enqueue payment request
   SQS_Pay->>Order: Consume payment request (in-process)
@@ -243,7 +244,7 @@ The dedup guard is the conditional `UPDATE` (`status NOT IN (terminal)`), not th
 ### 7.2 Idempotency Architecture
 1. **API Level**: Client sends `Idempotency-Key` header to `POST /cart/checkout`. Catalog hashes it user-scoped (`idem:cart:*`) and replays the cached `order_id` on retry.
 2. **Order Creation**: Order Service verifies unique `idempotency_key` constraint on PostgreSQL `orders` table.
-3. **Inventory Management**: Catalog utilizes DynamoDB conditional updates with `ClientRequestToken` for idempotent stock reservation and release.
+3. **Inventory Management**: Catalog reserves, confirms and releases stock in single Postgres transactions over `inventory` + `stock_reservations`; replays are no-ops and products are locked in id order.
 4. **Stripe Webhooks**: Order Service guards the terminal status transition with an atomic conditional `UPDATE ... WHERE status NOT IN (terminal)`, so a redelivered event that loses the race is a no-op and never re-publishes. `stripe_processed_events` records the event ID for audit/traceability after fulfillment; it is not the dedup mechanism.
 
 ---
@@ -253,7 +254,7 @@ The dedup guard is the conditional `UPDATE` (`status NOT IN (terminal)`), not th
 ### 8.1 Prerequisites
 - Docker & Docker Compose
 - Go 1.25+
-- LocalStack (emulating AWS S3, DynamoDB, SNS, SQS)
+- LocalStack (emulating AWS S3, SNS, SQS)
 
 ### 8.2 Environment Startup
 ```bash
@@ -269,7 +270,7 @@ cd backend
 ./scripts/migrate.sh up
 
 # Seed Demo Data (Products, Categories, Inventory)
-./scripts/seed_demo_data.sh
+DATABASE_URL=... ./scripts/seed_catalog.sh   # see script header for a no-psql variant
 ```
 
 ---

@@ -46,14 +46,6 @@ cd infrastructure/aws
 
 The script runs `terraform init` and `terraform apply` then writes outputs to `infrastructure/aws/terraform-outputs.json`.
 
-Seeding data:
-
-After applying, seed initial categories and simple data with:
-
-```bash
-AWS_REGION=us-east-1 ./seed_data.sh
-```
-
 CI notes:
 
 - The repository contains `.github/workflows/terraform.yml` which performs `terraform plan` on PRs and `terraform apply` on `main`. That workflow uses OIDC to assume an IAM role—set `secrets.AWS_ROLE_TO_ASSUME` in the repository settings.

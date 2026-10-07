@@ -29,7 +29,7 @@ flowchart LR
     REDIS[(Redis)]
     S3[(S3)]
     SNS_SQS[SNS_SQS]
-    DDB[(DynamoDB)]
+    DDB[(Postgres catalog schema)]
     CW[CloudWatch]
     STRIPE[(Stripe)]
   end
@@ -63,14 +63,14 @@ Source also maintained in [architecture.mmd](./architecture.mmd).
 
 - Clients talk to the **API Gateway** (`:8080`), which proxies all services directly. There is no BFF: storefront pages call domain routes (`GET /products` + `/categories`, `GET /cart`, `POST /cart/checkout` then poll `GET /payment/status/by-order/:order_id`).
 - **Identity** (`:8081`) owns credentials, JWT refresh, profiles, addresses (Postgres `users`, `refresh_tokens`, `addresses`).
-- **Catalog** (`:8082`) owns the product catalogue, categories, S3 images, bulk import (DynamoDB + S3 + Redis cache), stock levels and reservations (DynamoDB `Inventory`), and the Redis cart (`cart:user:{id}`, `idem:cart:*`).
+- **Catalog** (`:8082`) owns the product catalogue, categories, S3 images, bulk import (Postgres + S3 + Redis cache), stock levels and reservations (Postgres `catalog.inventory` / `catalog.stock_reservations`), and the Redis cart (`cart:user:{id}`, `idem:cart:*`).
 - **Order** (`:8083`) owns orders, coupons, zone shipping rates, and Stripe payments (Postgres `orders`, `order_items`, `coupons`, `payments`, `stripe_processed_events`, outbox tables). Checkout → Stripe → webhook fulfillment runs in-process; cross-binary hops remain only where binaries differ (catalog inventory/product reads, SNS to SQS queues).
 - **Postgres:** identity, order, notification logs.
-- **DynamoDB:** product catalog, categories, inventory (primary — not optional).
+- **Postgres `catalog` schema:** product catalog, categories, inventory and stock reservations (owned by catalog-service, accessed as role `catalog_svc` in production).
 - **Redis:** cart state, cart idempotency keys, gateway rate limiting, product cache, bulk-import queue.
 - **Notification** consumes `notification-queue` (SNS `notification-events`) and sends email / logs.
 - **Agent** (Python) calls domain and `/bff/admin/*` analytics paths through the gateway; needs an LLM endpoint.
-- **LocalStack** emulates S3/SNS/SQS/DynamoDB locally — required for local AWS-dependent services.
+- **LocalStack** emulates S3/SNS/SQS locally — required for local AWS-dependent services.
 
 ## Sequence diagrams
 

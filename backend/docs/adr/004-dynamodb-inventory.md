@@ -1,7 +1,7 @@
 # ADR 004: DynamoDB for Atomic Inventory Reservation
 
 ## Status
-Accepted
+Superseded by [ADR 006](./006-postgres-catalog-inventory.md)
 
 ## Context
 High-concurrency e-commerce systems experience flash-sale spikes where multiple shoppers attempt to checkout the same constrained inventory simultaneously. Relational database row locks (`SELECT ... FOR UPDATE`) under high concurrency lead to lock contention, database connection pool exhaustion, and deadlocks.

@@ -3,8 +3,8 @@ set -euo pipefail
 
 # Seeds Postgres tables (users, addresses, orders, order_items, payments,
 # stripe_processed_events, coupons, notification_logs, shipments) with
-# realistic demo data. Run after seed_demo_data.sh so order_items can
-# reference real product IDs from DynamoDB.
+# realistic demo data. Run after seed_catalog.sh so order_items can
+# reference real product IDs from the catalog seed (seed_catalog.sh).
 #
 # Demo login password for every seeded user: Demo123!
 # (bcrypt hash below was generated with: htpasswd -nbBC 10 x 'Demo123!')
@@ -23,7 +23,7 @@ DEMO_EMAILS=(
   "merchant.owner@shopswift-demo.test"
 )
 
-# Product IDs from scripts/seed_demo_data.sh (next_product_uuid 1..37).
+# Product IDs from scripts/seed_catalog.sh (next_product_uuid 1..37).
 P1="00000000-0000-4000-8000-000000000001"   # Nova Wireless Mouse - 3999
 P3="00000000-0000-4000-8000-000000000003"   # Pulse Noise-Cancel Headphones - 14999
 P5="00000000-0000-4000-8000-000000000005"   # Orbit 14 Ultrabook - 99900
@@ -250,7 +250,7 @@ INSERT INTO coupons (id, code, type, value, min_order_value, usage_limit, used_c
   ('33333333-3333-4333-8333-333333333305', 'EXPIRED5',  'flat', 500, 0, 100, 100, now() - interval '5 days', false, now() - interval '120 days', now() - interval '5 days')
 ON CONFLICT (id) DO NOTHING;
 
--- Orders (amounts/prices in cents, matching seed_demo_data.sh product prices)
+-- Orders (amounts/prices in cents, matching seed_catalog.sh product prices)
 INSERT INTO orders (id, order_number, idempotency_key, user_id, amount, coupon_code, discount_amount, status, created_at, updated_at) VALUES
   ('44444444-4444-4444-8444-444444444401', 'DEMO-ORD-1001', 'demo-idem-1001', '11111111-1111-4111-8111-111111111101', 18998, 'WELCOME10', 2110, 'delivered',        now() - interval '40 days', now() - interval '35 days'),
   ('44444444-4444-4444-8444-444444444402', 'DEMO-ORD-1002', 'demo-idem-1002', '11111111-1111-4111-8111-111111111102', 99900, NULL,       0,    'delivered',        now() - interval '25 days', now() - interval '20 days'),
@@ -315,7 +315,7 @@ SQL
 
 seed_redis_carts() {
   # Cart state lives in Redis only (catalog-service owns `cart:user:{id}`), so it
-  # can't be seeded by SQL. Written here (not seed_demo_data.sh) because it
+  # can't be seeded by SQL. Written here (not seed_catalog.sh) because it
   # needs both real product IDs (from that script) and real user IDs (from
   # seed_sql above) — this is the point where both exist. TTL matches
   # catalog-service's default (7 days).

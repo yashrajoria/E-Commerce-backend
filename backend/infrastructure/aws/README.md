@@ -43,6 +43,6 @@ Gateway exposes `/health` for load balancer / Compose checks.
 
 | Concern | Local | AWS |
 |---------|-------|-----|
-| S3/DDB/SNS/SQS | LocalStack `:4566` | Real AWS |
+| S3/SNS/SQS | LocalStack `:4566` | Real AWS |
 | Postgres | Compose `postgres` | RDS |
 | Stripe webhooks | `stripe-cli` container | Stripe → public URL / ALB |

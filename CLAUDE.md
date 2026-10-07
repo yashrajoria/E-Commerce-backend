@@ -7,7 +7,7 @@ This document contains key commands, architectural rules, code style guidelines,
 ## 1. Project Summary
 
 - **Repository**: ShopSwift E-Commerce Microservices Backend
-- **Core Stack**: Go 1.25 (multi-module workspace in `backend/go.work`), Python 3.11+ FastAPI (`agent-service`), PostgreSQL (`ecommerce` DB), DynamoDB (LocalStack / AWS), Redis 7, AWS S3, SNS/SQS.
+- **Core Stack**: Go 1.25 (multi-module workspace in `backend/go.work`), Python 3.11+ FastAPI (`agent-service`), PostgreSQL (`ecommerce` DB; catalog data in schema `catalog`), Redis 7, S3, SNS/SQS (LocalStack locally).
 - **Architecture**: Edge API Gateway (`:8080`) + 3 Domain Microservices (identity, catalog, order) + notification consumer + 1 AI Agent Service.
 - **Documentation**:
   - [MICROSERVICE_ARCHITECTURE.md](MICROSERVICE_ARCHITECTURE.md) — Mermaid sequence diagrams and storage ownership rules.
@@ -23,7 +23,7 @@ This document contains key commands, architectural rules, code style guidelines,
 |:---|:---:|:---|:---|:---|
 | **api-gateway** | `8080` | Go / Gin | Redis | `/` (Edge router, JWT auth check, rate limiting, request correlation) |
 | **identity-service** | `8081` | Go / Gin | Postgres (`users`, `refresh_tokens`, `addresses`) | `/auth`, `/users` (Identity, login, token refresh, admin bootstrap, profiles, addresses) |
-| **catalog-service** | `8082` | Go / Gin | DynamoDB + Redis + S3 | `/products`, `/categories`, `/inventory`, `/cart` (Catalog, stock, cart, caching) |
+| **catalog-service** | `8082` | Go / Gin | Postgres (`catalog` schema) + Redis + S3 | `/products`, `/categories`, `/inventory`, `/cart` (Catalog, stock, cart, caching) |
 | **order-service** | `8083` | Go / Gin | Postgres (`orders`, `order_items`, `coupons`, `payments`, `stripe_processed_events`) + SQS + Stripe | `/orders`, `/coupons`, `/shipping`, `/payment` (Orders, coupons, shipping rates, Stripe) |
 | **agent-service** | `8089` | Python / FastAPI | Stateless | `/agent` (AI Assistant via gateway) |
 | **notification-service**| `8092` | Go / Gin | Postgres (`notification_logs`) + SQS | `/notifications` (Async notification consumer & email logger) |
@@ -63,15 +63,15 @@ cd backend
 ### 3.3 Seeding Demo Data
 ```bash
 cd backend
-# Seed catalog products, categories, product-category links, and inventory stock (DynamoDB + S3)
-./scripts/seed_demo_data.sh
-
-# Sync specific parts only
-./scripts/seed_demo_data.sh --sync-inventory-only
-./scripts/seed_demo_data.sh --sync-category-links-only
+# Seed catalog products, categories, product-category links, and inventory stock
+# (Postgres, schema catalog; needs migrations applied; idempotent). The script header
+# shows a no-psql variant using `docker exec`.
+DATABASE_URL='postgres://postgres:<pw>@localhost:5432/ecommerce?sslmode=disable' ./scripts/seed_catalog.sh
+# Demo product images (LocalStack S3 only)
+python3 scripts/seed_catalog_images.py
 
 # Seed users, addresses, orders, order_items, payments, stripe_processed_events,
-# coupons, notification_logs, shipments (Postgres). Run after seed_demo_data.sh
+# coupons, notification_logs, shipments (Postgres). Run after seed_catalog.sh
 # so order_items can reference real product IDs. Idempotent (wipes prior demo
 # rows first). All demo users share password Demo123!; merchant.owner@shopswift-demo.test is role=admin.
 ./scripts/seed_postgres_data.sh
@@ -118,7 +118,7 @@ Each Go domain microservice follows standard clean architecture boundaries:
 - `main.go`: Entry point, env config loading, logger init, DB setup, route setup, server listen.
 - `handlers/` or `controllers/`: Gin HTTP handler functions binding requests and returning JSON responses.
 - `services/`: Business logic implementations.
-- `repository/` or `models/`: Data access layer (GORM DB calls or AWS SDK v2 DynamoDB queries).
+- `repository/` or `models/`: Data access layer (GORM; catalog-service uses hand-written SQL through GORM, no AutoMigrate).
 - `routes/`: Gin route group registrations.
 
 ### 4.3 Standard Error Handling
@@ -137,8 +137,8 @@ Each Go domain microservice follows standard clean architecture boundaries:
   - `identity-service`: `users`, `refresh_tokens`, `addresses`
   - `order-service`: `orders`, `order_items`, `coupons`, `payments`, `stripe_processed_events`, `payment_outbox_events`
   - `notification-service`: `notification_logs`
-- **DynamoDB**:
-  - `catalog-service` owns `Products`, `Categories`, `ProductCategories`, and `Inventory` tables. Use `ClientRequestToken` on conditional updates for stock reservations.
+- **Postgres schema `catalog`** (catalog-service only; production role `catalog_svc`, see `backend/infrastructure/postgres/catalog_role.sql`):
+  - `catalog-service` owns `categories`, `products`, `product_categories`, `inventory`, `stock_reservations`. Reservations are idempotent per `(order_id, product_id)`; reserve/release/confirm each run in one transaction and lock products in id order. No cross-schema joins or FKs.
 - **Redis**:
   - `catalog-service` uses `cart:user:{user_id}` + `idem:cart:*` keys (cart + checkout replay), `product:detail:*` + `products:version` (cache), `bulk_import:*` (import jobs).
   - `api-gateway` uses Redis for request rate limiting.
@@ -181,11 +181,9 @@ AWS_ACCESS_KEY_ID=test
 AWS_SECRET_ACCESS_KEY=test
 AWS_S3_BUCKET=shopswift
 
-# DynamoDB Tables
-DDB_TABLE_PRODUCTS=Products
-DDB_TABLE_CATEGORIES=Categories
-DDB_TABLE_PRODUCT_CATEGORIES=ProductCategories
-DDB_TABLE_INVENTORY=Inventory
+# catalog-service Postgres role (production). Blank locally = shared postgres user.
+CATALOG_DB_USER=
+CATALOG_DB_PASSWORD=
 
 # Auth & Admin
 JWT_SECRET=your_jwt_secret_key

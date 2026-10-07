@@ -3,7 +3,7 @@
 Merged from `product-service` + `inventory-service` + `cart-service`. Owns
 everything you can browse, stock, or put in a basket: catalog, categories,
 S3 images, bulk import, stock levels and reservations, and the Redis cart.
-Single binary on `:8082`, one shared Redis client, one DynamoDB client.
+Single binary on `:8082`, one shared Redis client, one Postgres pool (schema `catalog`).
 
 ## Routes (unchanged from the pre-merge services)
 
@@ -31,6 +31,6 @@ Single binary on `:8082`, one shared Redis client, one DynamoDB client.
 ## Env
 
 `PORT` (default `8082`), `JWT_SECRET` (required), `REDIS_URL`,
-`DDB_TABLE_PRODUCTS|CATEGORIES|PRODUCT_CATEGORIES|INVENTORY`,
+`POSTGRES_HOST|PORT|USER|PASSWORD|DB|SSLMODE` (production user: `catalog_svc`),
 `AWS_S3_BUCKET`, `AWS_S3_PREFIX`, `ASSET_PUBLIC_BASE_URL`,
 `ORDER_SNS_TOPIC_ARN`, `INTERNAL_SERVICE_TOKEN`, `BULK_STORAGE_DIR`.

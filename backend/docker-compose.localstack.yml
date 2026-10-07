@@ -22,7 +22,7 @@ services:
     ports:
       - "4566:4566" # unified gateway for all AWS service emulations
     environment:
-      - SERVICES=s3,sns,sqs,secretsmanager,cloudwatch,logs,dynamodb,ec2
+      - SERVICES=s3,sns,sqs,secretsmanager,cloudwatch,logs,ec2
       - AWS_DEFAULT_REGION=${AWS_REGION:-us-east-1}
       - SQS_ENDPOINT_STRATEGY=path
       - PERSISTENCE=1 # survive container restarts
@@ -73,10 +73,6 @@ services:
       - AWS_SESSION_TOKEN=
       - LOCALSTACK_ENDPOINT=http://localstack:4566
       - AWS_S3_BUCKET=${AWS_S3_BUCKET:-shopswift}
-      - DDB_TABLE_PRODUCTS=${DDB_TABLE_PRODUCTS:-Products}
-      - DDB_TABLE_CATEGORIES=${DDB_TABLE_CATEGORIES:-Categories}
-      - DDB_TABLE_INVENTORY=${DDB_TABLE_INVENTORY:-Inventory}
-      - DDB_TABLE_PRODUCT_CATEGORIES=${DDB_TABLE_PRODUCT_CATEGORIES:-ProductCategories}
       - ORDER_SNS_TOPIC_NAME=${ORDER_SNS_TOPIC_NAME:-order-events}
       - PAYMENT_SNS_TOPIC_NAME=${PAYMENT_SNS_TOPIC_NAME:-payment-events}
       - ORDER_PROCESSING_QUEUE_NAME=${ORDER_PROCESSING_QUEUE_NAME:-order-processing-queue}
@@ -118,7 +114,6 @@ services:
       - LOCALSTACK_ENDPOINT=http://localstack:4566
       # Disable hardcoded CLOUDWATCH_ENABLED=true from the base file in local dev
       - CLOUDWATCH_ENABLED=false
-      - DDB_TABLE_INVENTORY=${DDB_TABLE_INVENTORY:-Inventory}
       - ORDER_SNS_TOPIC_ARN=arn:aws:sns:${AWS_REGION:-us-east-1}:000000000000:${ORDER_SNS_TOPIC_NAME:-order-events}
     depends_on:
       localstack-init:

@@ -903,7 +903,7 @@ paths:
       summary: List all inventory items (admin)
       operationId: adminListInventory
       description: |
-        Returns a paginated list of all product inventory records from DynamoDB.
+        Returns a paginated list of all product inventory records.
         Each record shows available stock, reserved count, and low-stock threshold.
         Requires admin role.
       parameters:

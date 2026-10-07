@@ -40,7 +40,7 @@ func (p pgInventory) model() *models.Inventory {
 	}
 }
 
-// parseProductID maps a non-UUID id to ErrNotFound (Dynamo treated any unknown string as missing).
+// parseProductID maps a non-UUID id to ErrNotFound (any unknown string counts as missing).
 func parseProductID(s string) (uuid.UUID, error) {
 	id, err := uuid.Parse(s)
 	if err != nil {

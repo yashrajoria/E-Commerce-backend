@@ -15,7 +15,7 @@ Order creation writes downstream events to the Postgres `outbox_events` table tr
 | Concern | Owner service | Store |
 |---------|---------------|-------|
 | Credentials, refresh tokens, verification, profile, phone, addresses | **identity-service** | Postgres `users`, `refresh_tokens`, `addresses` |
-| Catalog + categories, stock, cart | **catalog-service** | DynamoDB `Products`, `Categories`, `ProductCategories`, `Inventory`; S3 images (Mongo retired); Redis cart + cache |
+| Catalog + categories, stock, cart | **catalog-service** | Postgres schema `catalog` (`products`, `categories`, `product_categories`, `inventory`, `stock_reservations`); S3 images; Redis cart + cache |
 | Orders, coupons, shipping rates, payments | **order-service** | Postgres `orders`, `order_items`, `coupons`, `payments`, `stripe_processed_events`, `payment_outbox_events` |
 | Notification logs | **notification-service** | Postgres `notification_logs` |
 
@@ -42,34 +42,29 @@ Order creation writes downstream events to the Postgres `outbox_events` table tr
 
 Run: `./scripts/migrate.sh up` from `backend/`.
 
-## DynamoDB
+## Postgres `catalog` schema
 
-| Table | Env var | Service |
-|-------|---------|---------|
-| Products | `DDB_TABLE_PRODUCTS` | catalog-service |
-| Categories | `DDB_TABLE_CATEGORIES` | catalog-service |
-| ProductCategories | `DDB_TABLE_PRODUCT_CATEGORIES` | catalog-service (category→product adjacency) |
-| Inventory | `DDB_TABLE_INVENTORY` | catalog-service |
+| Table | Service |
+|-------|---------|
+| `products` | catalog-service |
+| `categories` | catalog-service |
+| `product_categories` | catalog-service (many-to-many link, indexed both ways) |
+| `inventory` | catalog-service |
+| `stock_reservations` | catalog-service (one row per order and product; reserve/confirm/release are idempotent) |
 
-### GSIs and Query vs Scan
+### Access paths
 
-| Access path | Access method | Index / notes |
-|-------------|---------------|---------------|
-| Product by `id` | `GetItem` | Table PK |
-| Product by SKU (`FindBySKUs`) | `Query` | `sku-index` (HASH `sku`) |
-| Featured-only list (`is_featured` only) | `Query` | `featured-index` (HASH `is_featured` as `"true"`/`"false"`, RANGE `created_at`) |
-| Products by category | `Query` + `BatchGetItem` | `ProductCategories` (HASH `category_id`, RANGE `product_id`); GSI `product-index` for product→categories |
-| Product multi-filter list / count (no category) | `Scan` + `FilterExpression` | brand, price, stock, etc. |
-| Category by `id` | `GetItem` | Table PK |
-| Category by name | `Query` | `name-index` (HASH `name`) |
-| Category `FindAll` | `Scan` | Soft-delete filter |
-| Category `HasProducts` | `Query` | `ProductCategories` Limit 1 |
-| Inventory get / reserve | `GetItem` / conditional update | Table PK |
-| Inventory admin `ListAll` | `Scan` | Acceptable for admin |
+| Access path | Query | Index |
+|-------------|-------|-------|
+| Product by `id` | PK lookup | `products_pkey` |
+| Product by SKU (`FindBySKUs`) | `WHERE sku IN (…)` | unique live index `idx_products_sku_live` |
+| Product list / count (any filters) | one `WHERE` built from brand, price range, stock, featured, category (`EXISTS` on `product_categories`) | `idx_products_created_live`, `idx_products_brand_created_live`, `idx_products_featured_live` |
+| Products by category | `IN` on `product_categories` | PK `(category_id, product_id)`; `idx_product_categories_product` for the reverse |
+| Category by id / name / `FindAll` | indexed read / full read of a small table | `categories_pkey`, `idx_categories_name` |
+| Inventory get / reserve | PK lookup / conditional `UPDATE … WHERE available >= qty` inside a transaction | `inventory_pkey` |
+| Inventory admin `ListAll` | `ORDER BY product_id LIMIT/OFFSET` | PK |
 
-`is_featured` is stored as a DynamoDB string (`"true"` / `"false"`) so it can be a GSI HASH key; the HTTP/API layer still exposes a bool.
-
-**LocalStack note:** Existing volumes with old table schemas will not gain GSIs/tables automatically. After pulling schema changes, recreate the LocalStack volume or create missing tables (e.g. `ProductCategories`) once.
+Schema isolation: in production the service connects as `catalog_svc` (`backend/infrastructure/postgres/catalog_role.sql`), which can only use the `catalog` schema. No cross-schema joins or foreign keys.
 
 ## Redis
 
@@ -111,12 +106,9 @@ Each source queue has a matching `<source>-dlq` and a default `maxReceiveCount` 
 Prefer:
 
 ```bash
-DDB_TABLE_PRODUCTS=Products
-DDB_TABLE_CATEGORIES=Categories
-DDB_TABLE_INVENTORY=Inventory
 USE_LOCALSTACK=true
 LOCALSTACK_ENDPOINT=http://localstack:4566
 ALLOW_AUTO_MIGRATE=true   # local DX; false in prod
+CATALOG_DB_USER=          # production: catalog_svc (blank locally = the shared postgres user)
+CATALOG_DB_PASSWORD=
 ```
-
-Legacy `DYNAMODB_*` names in older env files are deprecated — use `DDB_TABLE_*`.

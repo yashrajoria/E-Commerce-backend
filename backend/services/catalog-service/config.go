@@ -14,10 +14,6 @@ type Config struct {
 	Port               string // Service port (default: 8082, kept from product-service)
 	JWTSecret          string // JWT secret (required by product + inventory auth)
 	RedisURL           string // Redis (product cache + cart + bulk queue)
-	DDBTableProducts   string
-	DDBTableCategories string
-	DDBTableLinks      string // ProductCategories adjacency table
-	DDBTableInventory  string
 	S3Bucket           string
 	S3Prefix           string
 	AssetPublicBaseURL string
@@ -28,32 +24,16 @@ type Config struct {
 // LoadConfig loads environment variables into Config struct and validates them.
 func LoadConfig() (*Config, error) {
 	cfg := &Config{
-		Port:               os.Getenv("PORT"),
-		JWTSecret:          os.Getenv("JWT_SECRET"),
-		RedisURL:           os.Getenv("REDIS_URL"),
-		DDBTableProducts:   os.Getenv("DDB_TABLE_PRODUCTS"),
-		DDBTableCategories: os.Getenv("DDB_TABLE_CATEGORIES"),
-		DDBTableLinks:      os.Getenv("DDB_TABLE_PRODUCT_CATEGORIES"),
-		DDBTableInventory:  os.Getenv("DDB_TABLE_INVENTORY"),
-		CartTTL:            7 * 24 * time.Hour,
+		Port:      os.Getenv("PORT"),
+		JWTSecret: os.Getenv("JWT_SECRET"),
+		RedisURL:  os.Getenv("REDIS_URL"),
+		CartTTL:   7 * 24 * time.Hour,
 	}
 	if cfg.Port == "" {
 		cfg.Port = "8082"
 	}
 	if cfg.RedisURL == "" {
 		cfg.RedisURL = "redis://redis:6379"
-	}
-	if cfg.DDBTableProducts == "" {
-		cfg.DDBTableProducts = "Products"
-	}
-	if cfg.DDBTableCategories == "" {
-		cfg.DDBTableCategories = "Categories"
-	}
-	if cfg.DDBTableLinks == "" {
-		cfg.DDBTableLinks = "ProductCategories"
-	}
-	if cfg.DDBTableInventory == "" {
-		cfg.DDBTableInventory = "Inventory"
 	}
 
 	cfg.S3Bucket = firstNonEmpty(os.Getenv("AWS_S3_BUCKET"), os.Getenv("S3_BUCKET_IMAGES"), "shopswift")

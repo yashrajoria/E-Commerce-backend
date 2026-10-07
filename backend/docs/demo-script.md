@@ -29,7 +29,7 @@ Fetch top products from the catalog:
 ```bash
 curl -s http://localhost:8080/products | jq '.products[0:3]'
 ```
-Notice each product features real-time inventory quantity backed by DynamoDB.
+Notice each product features real-time inventory quantity backed by Postgres.
 
 ---
 
@@ -65,7 +65,7 @@ ORDER_ID=$(echo "$CHECKOUT_RESP" | jq -r '.order_id')
 echo "New Order ID: $ORDER_ID"
 ```
 
-Verify that inventory was reserved in DynamoDB and the order is in `pending_payment` status:
+Verify that inventory was reserved in Postgres (`catalog.stock_reservations`) and the order is in `pending_payment` status:
 ```bash
 curl -s -b /tmp/cookies.txt http://localhost:8080/orders/$ORDER_ID | jq '.order.Status'
 ```

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Start the full local stack including LocalStack (required for SNS/SQS/DDB/S3).
+# Start the full local stack including LocalStack (required for SNS/SQS/S3).
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 

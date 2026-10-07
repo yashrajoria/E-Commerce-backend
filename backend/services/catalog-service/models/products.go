@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Product is the API/domain model. Persistence is DynamoDB (see repository adapters).
+// Product is the API/domain model. Persistence is Postgres (schema catalog).
 type Product struct {
 	ID           uuid.UUID   `json:"_id"`
 	Name         string      `json:"name"`

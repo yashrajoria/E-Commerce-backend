@@ -81,6 +81,13 @@ Phase 1 coverage target.
 - [x] Unit & concurrency tests passing with race detector (`order-service/services/price_drop_service_test.go`)
 
 
+## Phase 8 — Catalog moved from DynamoDB to Postgres
+
+- [x] `catalog` schema (migrations `000015`, `000016`): products, categories, product_categories, inventory, stock_reservations
+- [x] Least-privilege `catalog_svc` role (`backend/infrastructure/postgres/catalog_role.sql`) with a CI isolation test
+- [x] Transactional inventory reservations: idempotent replay, id-ordered locking, concurrency and deadlock tests
+- [x] DynamoDB code, LocalStack tables, Terraform resources and seed scripts removed; the hosted container no longer runs a JVM
+
 Kubernetes, Kafka, more microservices, RAG, storefront chatbot, DB-per-service
-split, removing DynamoDB. No payoff for this project's scale — see
+split. No payoff for this project's scale — see
 best-practices-and-gaps.md "Intentional deviations".

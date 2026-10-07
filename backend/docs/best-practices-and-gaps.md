@@ -7,7 +7,7 @@ Related: [architecture.md](./architecture.md) · [data-and-messaging.md](./data-
 ## Already in good shape
 
 - API Gateway + BFF split; Redis checkout SetNX + `Idempotency-Key`
-- LocalStack bootstrap for S3 / DynamoDB / SNS / SQS (`docker-compose.localstack.yml`, `./scripts/dev-up.sh`)
+- LocalStack bootstrap for S3 / SNS / SQS (`docker-compose.localstack.yml`, `./scripts/dev-up.sh`)
 - Stripe CLI webhook forwarding in Compose
 - OpenAPI + Spectral lint in CI
 - Terraform / OIDC deploy scaffolding under `infrastructure/aws`
@@ -35,8 +35,8 @@ Related: [architecture.md](./architecture.md) · [data-and-messaging.md](./data-
 | Item | Status |
 |------|--------|
 | Single AutoMigrate gate (`ALLOW_AUTO_MIGRATE`); no double migrate in auth/user `main` | Done |
-| DynamoDB GSIs: `sku-index`, `featured-index`, `name-index` (LocalStack + Terraform) | Done |
-| Hot paths use `Query`; multi-filter product list stays `Scan` | Done |
+| Catalog on Postgres: `catalog` schema with partial/composite indexes and a least-privilege `catalog_svc` role (migrations `000015`/`000016`, ADR 006) | Done |
+| Product list/count use one indexed SQL filter (no Scan fallbacks) | Done |
 | Category mutations invalidate Redis product cache version | Done |
 | Mongo helpers + `migrate-mongo-to-ddb` removed | Done |
 | Shipping Postgres/shipment + unused StaticRateProvider purged; rates path kept | Done |
@@ -57,6 +57,8 @@ Related: [architecture.md](./architecture.md) · [data-and-messaging.md](./data-
 | PR/unit CI workflow [`.github/workflows/unit-tests.yml`](../.github/workflows/unit-tests.yml) | Done |
 
 ## Context7-aligned practice check (2026-07-18 refresh)
+
+> Historical: written while the catalog ran on DynamoDB. The catalog and inventory moved to Postgres afterwards (see [ADR 006](./adr/006-postgres-catalog-inventory.md)); DynamoDB-specific rows below no longer describe the code.
 
 Re-checked via Context7 MCP against:
 
@@ -91,8 +93,8 @@ This is a **personal** project. Prefer simplicity over enterprise isolation unle
 
 - **Shared Postgres `ecommerce` DB** — keep. DB-per-service adds ops cost with no payoff for a single operator. Table ownership in [data-and-messaging.md](./data-and-messaging.md) is enough.
 - **No cross-aggregate FKs** for `orders.user_id` / `payments.order_id` — app-enforced integrity + indexes; fine with a shared DB.
-- **Product multi-attribute browse still Scans** — keep until list latency or DynamoDB RU cost is noticeable; then add GSIs only for proven filters.
-- **Multi-table DynamoDB** (Products / Categories / Inventory) — keep; access patterns are independent.
+- **Product browse uses OFFSET paging** — keep until deep pages are slow; then switch to keyset paging on `(created_at, id)`.
+- **Catalog tables live in the same Postgres database, in their own `catalog` schema** — keep; isolation is by schema + the `catalog_svc` role, not by a separate database.
 - **No OpenTelemetry yet** — structured logs (+ optional CloudWatch) are enough for personal/local; add OTel only if you want distributed-trace practice.
 
 ## Ops notes
@@ -100,4 +102,4 @@ This is a **personal** project. Prefer simplicity over enterprise isolation unle
 - Prefer `./scripts/dev-up.sh` so LocalStack is always present.
 - Production: `ALLOW_AUTO_MIGRATE=false` and run `./scripts/migrate.sh up` (or `infrastructure/aws/run_migrations.sh` with `DB_HOST=...`).
 - Propagate `X-Request-ID` from clients; gateway generates one when missing and forwards it upstream.
-- After LocalStack volume wipe: reseed with `./scripts/seed_demo_data.sh` (products + inventory + ProductCategories). Sync helpers: `--sync-inventory-only`, `--sync-category-links-only`.
+- After a LocalStack volume wipe: re-run `python3 scripts/seed_catalog_images.py` for demo images (catalog rows live in Postgres and are loaded by `DATABASE_URL=... ./scripts/seed_catalog.sh`).

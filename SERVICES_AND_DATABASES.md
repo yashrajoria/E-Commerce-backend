@@ -16,7 +16,7 @@ An exhaustive technical reference manual covering every microservice, database s
    - [2.6 Notification Service (`:8092`)](#26-notification-service-8092)
 3. [Database Architecture & Complete Schemas](#3-database-architecture--complete-schemas)
    - [3.1 PostgreSQL Database (`ecommerce`)](#31-postgresql-database-ecommerce)
-   - [3.2 AWS DynamoDB Tables](#32-aws-dynamodb-tables)
+   - [3.2 PostgreSQL `catalog` Schema](#32-postgresql-catalog-schema)
    - [3.3 Redis Caching & State Key-Space](#33-redis-caching--state-key-space)
    - [3.4 AWS S3 Asset Storage](#34-aws-s3-asset-storage)
 4. [Event-Driven Messaging (SNS & SQS)](#4-event-driven-messaging-sns--sqs)
@@ -39,7 +39,7 @@ An exhaustive technical reference manual covering every microservice, database s
 ┌───────▼───────┐                   ┌───────▼───────┐                   ┌───────▼───────┐
 │Identity Svc   │ (:8081)           │Catalog Service│ (:8082)           │ Order Service │ (:8083)
 └───────┬───────┘                   └───────┬───────┘                   └───────┬───────┘
-        │ Postgres                          │ DynamoDB / S3 / Redis             │ Postgres / SQS / Stripe
+        │ Postgres                          │ Postgres / S3 / Redis             │ Postgres / SQS / Stripe
 ┌───────▼───────┐                   ┌───────▼───────┐                   ┌───────▼───────┐
 │Agent Service  │ (:8089)           │Notif Service  │ (:8092)           │ Redis 7 Cache │
 └───────┬───────┘                   └───────┬───────┘                   └───────────────┘
@@ -117,8 +117,8 @@ An exhaustive technical reference manual covering every microservice, database s
 ### 2.3 Catalog Service (`:8082`)
 
 - **Port**: `8082`
-- **Stack**: Go 1.25, Gin, AWS SDK v2 (DynamoDB & S3), Redis
-- **Primary Data Store**: DynamoDB (`Products`, `Categories`, `ProductCategories`, `Inventory`), AWS S3 (`shopswift` bucket), Redis (product cache, cart state, bulk-import queue)
+- **Stack**: Go 1.25, Gin, GORM (hand-written SQL), AWS SDK v2 (S3), Redis
+- **Primary Data Store**: PostgreSQL schema `catalog` (`products`, `categories`, `product_categories`, `inventory`, `stock_reservations`), AWS S3 (`shopswift` bucket), Redis (product cache, cart state, bulk-import queue)
 - **Main Responsibility**: Product catalog management, category hierarchies, category-product adjacency indexing, product image file upload to S3, Redis versioned caching for high-speed read queries, real-time stock levels with idempotent reservations, and the Redis shopping cart with SNS checkout publishing. Absorbed product-service, inventory-service, and cart-service — product↔inventory sync and cart product validation run in-process.
 
 #### Endpoints Specification
@@ -410,37 +410,26 @@ CREATE INDEX idx_notification_logs_user_id ON notification_logs (user_id);
 
 ---
 
-### 3.2 AWS DynamoDB Tables
+### 3.2 PostgreSQL `catalog` Schema
 
-Managed by AWS SDK v2 in `catalog-service`.
+Owned by `catalog-service` (migrations `000015_catalog_schema`, `000016_catalog_inventory`). In production it connects as the least-privilege role `catalog_svc` (`backend/infrastructure/postgres/catalog_role.sql`), which cannot read other services' tables.
 
-#### 1. `Products` Table (`DDB_TABLE_PRODUCTS`)
-- **Partition Key (PK)**: `id` (String / UUID)
-- **Secondary Indexes (GSIs)**:
-  - `sku-index`: HASH `sku` (String) — Used for fast barcode/SKU lookup via `Query`.
-  - `featured-index`: HASH `is_featured` ("true"/"false"), RANGE `created_at` (String) — Used for homepage catalog queries via `Query`.
-- **Attributes**: `id`, `name`, `description`, `price`, `sku`, `brand`, `is_featured`, `image_url`, `stock`, `created_at`, `updated_at`, `deleted_at`.
+#### 1. `catalog.products`
+- **PK**: `id` (uuid). `sku` (text) is unique among live rows (`WHERE deleted_at IS NULL`).
+- **Columns**: `name`, `price` (`numeric(12,2)`, >= 0), `quantity` (>= 0), `description`, `brand`, `images` (jsonb), `category_path` (jsonb), `is_featured`, `created_at`, `updated_at`, `deleted_at` (soft delete).
+- **Indexes** (partial, live rows only): `(created_at DESC, id)` for the default listing, `(brand, created_at DESC)`, and `(created_at DESC) WHERE is_featured`.
 
-#### 2. `Categories` Table (`DDB_TABLE_CATEGORIES`)
-- **Partition Key (PK)**: `id` (String / UUID)
-- **Secondary Index (GSI)**:
-  - `name-index`: HASH `name` (String)
-- **Attributes**: `id`, `name`, `slug`, `description`, `parent_id`, `created_at`, `updated_at`.
+#### 2. `catalog.categories`
+- **PK**: `id`. `name`, `slug` (not unique: the seed reuses names under different parents), `image`, `level`, `is_active`, `parent_ids` / `ancestors` / `path` (jsonb arrays; the tree is built in memory), soft delete. Index on `name` for live rows.
 
-#### 3. `ProductCategories` Table (`DDB_TABLE_PRODUCT_CATEGORIES`)
-Category-to-product adjacency table to support many-to-many relationships cleanly without large DynamoDB scans.
-- **Partition Key (PK)**: `category_id` (String)
-- **Sort Key (SK)**: `product_id` (String)
-- **Secondary Index (GSI)**:
-  - `product-index`: HASH `product_id`, RANGE `category_id`
+#### 3. `catalog.product_categories`
+Many-to-many link. **PK** `(category_id, product_id)`; foreign keys to categories and products (`ON DELETE CASCADE` from products); index on `product_id`.
 
-#### 4. `Inventory` Table (`DDB_TABLE_INVENTORY`)
-- **Partition Key (PK)**: `product_id` (String)
-- **Attributes**:
-  - `product_id` (String)
-  - `stock` (Number) — Total unreserved stock count available
-  - `reserved` (Number) — Stock currently held in active checkout flows
-  - `order_reservations` (Map) — Map of `order_id` to reservation status and quantity. Updated via atomic conditional DynamoDB expressions (`attribute_not_exists` / `ClientRequestToken`).
+#### 4. `catalog.inventory`
+**PK** `product_id` (FK to products). `available`, `reserved`, `threshold` (each CHECK >= 0), `updated_at`.
+
+#### 5. `catalog.stock_reservations`
+**PK** `(order_id, product_id)`; `quantity > 0`; `status` is `reserved`, `confirmed` or `released`. Reserve inserts a `reserved` row and decrements `available` in one transaction; confirm/release move the status once and are no-ops on replay; finished rows are purged after 30 days.
 
 ---
 
@@ -531,14 +520,14 @@ Category-to-product adjacency table to support many-to-many relationships cleanl
 ### 5.1 LocalStack Initialization Scripts (`backend/localstack/`)
 When LocalStack boots up via Docker Compose, it automatically runs initializers to create:
 - S3 Bucket: `shopswift`
-- DynamoDB Tables: `Products`, `Categories`, `ProductCategories`, `Inventory` (with GSIs `sku-index`, `featured-index`, `name-index`, `product-index`)
+- Postgres schema `catalog`: `products`, `categories`, `product_categories`, `inventory`, `stock_reservations` (migrations `000015`, `000016`; role `catalog_svc`)
 - SNS Topics: `order-events`, `payment-events`, `auth-events`, `promotion-events`, `notification-events`
 - SQS Queues & DLQs: `order-processing-queue`, `payment-request-queue`, `payment-events-queue`, `notification-queue`, `promotion-order-queue`
 
 ### 5.2 Key Shell Scripts (`backend/scripts/`)
 - `dev-up.sh`: Boots the complete Docker Compose + LocalStack container cluster.
 - `migrate.sh`: Executes golang-migrate SQL scripts against PostgreSQL. Usage: `./scripts/migrate.sh up` or `./scripts/migrate.sh down 1`.
-- `seed_demo_data.sh`: Populates DynamoDB tables with sample product catalog items, categories, adjacency links, and inventory stock.
+- `seed_catalog.sh` (+ `seed_catalog_postgres.py`): loads sample products, categories, links and inventory stock into the `catalog` schema. `seed_catalog_images.py` uploads demo images to LocalStack S3.
 
 ---
 

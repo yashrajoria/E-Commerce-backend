@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// CategoryServiceDDB is a DynamoDB-backed category service
+// CategoryServiceDDB is the category service (the DDB suffix is historical; storage is Postgres)
 type CategoryServiceDDB struct {
 	repo        repository.CategoryRepo
 	productRepo repository.ProductRepo

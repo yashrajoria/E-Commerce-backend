@@ -48,13 +48,13 @@ echo "${DOCKERHUB_TOKEN:-}" | docker login -u "${DOCKERHUB_USERNAME}" --password
 # Pull & Deploy (sha-pinned)
 # -----------------------------
 if [ ! -f "${DEPLOY_OVERRIDE}" ]; then
-  echo "❌ Error: ${DEPLOY_OVERRIDE} not found — refusing to deploy unpinned images"
+  echo "Error: ${DEPLOY_OVERRIDE} not found — refusing to deploy unpinned images"
   echo "   Copy backend/docker-compose.deploy.yml to ${DEPLOY_DIR} first."
   exit 1
 fi
 
 if [ -z "${GIT_SHA:-}" ]; then
-  echo "❌ Error: GIT_SHA is required — refusing to deploy unpinned images"
+  echo "Error: GIT_SHA is required — refusing to deploy unpinned images"
   exit 1
 fi
 
@@ -67,4 +67,4 @@ echo "[deploy] Starting containers..."
 echo "[deploy] Containers status:"
 docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
 
-echo "✅ Deployment complete (tag ${GIT_SHA})"
+echo "Deployment complete (tag ${GIT_SHA})"
