@@ -119,6 +119,12 @@ TOOL_REGISTRY: Dict[str, ToolSpec] = {
         handler=executor.check_compatibility,
         min_role=None,
     ),
+    "track_order": ToolSpec(
+        description="Track customer order status, shipment progress, and delivery estimates.",
+        params_model=schemas.TrackOrderParams,
+        handler=executor.track_order,
+        min_role=None,
+    ),
 }
 
 

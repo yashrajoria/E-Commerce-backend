@@ -53,8 +53,15 @@ def _heuristic_map(prompt_lower: str) -> List[ToolCall]:
             order_params["range"] = f"{days}d"
         calls.append(ToolCall(tool="get_orders", params=order_params))
 
+    # Order tracking & delivery status
+    if re.search(r"track.*order|where.*(?:is|are).*order|order.*status|package.*status|delivery.*status|latest.*order", prompt_lower):
+        order_match = re.search(r"#?([a-f0-9\-]{8,64})", prompt_lower)
+        order_id = order_match.group(1) if order_match else None
+        calls.append(ToolCall(tool="track_order", params={"order_id": order_id}))
+        return calls
+
     # Autonomous AI Personal Shopper & Bundle Builder
-    if re.search(r"bundle|setup|outfit|pack|curate|build me|recommend.*under|shopper|desk|workstation|gift idea|kit\b|routine", prompt_lower):
+    if re.search(r"bundle|setup|outfit|pack|curate|build me|recommend.*under|shopper|desk|workstation|gift idea|kit\b|routine|swap|cheaper|lower.*budget", prompt_lower):
         budget_match = re.search(r"(?:\$|under\s+\$?)(\d+)", prompt_lower)
         budget_cents = int(budget_match.group(1)) * 100 if budget_match else 30000
 

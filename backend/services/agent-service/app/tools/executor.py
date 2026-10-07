@@ -1000,6 +1000,53 @@ _ToolHandler = Callable[..., Coroutine[Any, Any, Dict[str, Any]]]
 
 
 
+async def track_order(
+    params: Dict[str, Any],
+    auth_header: Optional[str] = None,
+    cookie_header: Optional[str] = None,
+    correlation_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    user_role: Optional[str] = None,
+) -> Dict[str, Any]:
+    order_id = params.get("order_id")
+    if order_id:
+        res = await _request(
+            "GET",
+            f"/orders/{order_id}",
+            auth_header=auth_header,
+            cookie_header=cookie_header,
+            correlation_id=correlation_id,
+            user_id=user_id,
+            user_role=user_role,
+        )
+        data = _extract_data(res)
+        return {"order": data, "summary": f"Order {order_id} status retrieved."}
+
+    res = await _request(
+        "GET",
+        "/orders",
+        params={"page": 1, "limit": 5},
+        auth_header=auth_header,
+        cookie_header=cookie_header,
+        correlation_id=correlation_id,
+        user_id=user_id,
+        user_role=user_role,
+    )
+    data = _extract_data(res)
+    orders = data.get("orders", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+    if not orders:
+        return {"orders": [], "summary": "No recent orders found for this account."}
+
+    latest = orders[0]
+    oid = latest.get("id") or latest.get("_id") or "recent"
+    status = latest.get("status", "processing")
+    return {
+        "latest_order": latest,
+        "recent_count": len(orders),
+        "summary": f"Your latest order #{oid} is currently {status}.",
+    }
+
+
 async def execute_tool(
     tool_name: str,
     params: Dict[str, Any],

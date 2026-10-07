@@ -157,6 +157,7 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 
 	// AI Personal Shopper Copilot — public / guest recommendations
 	public.POST("/shopper/query", forwardTo(agentBase+"/agent/query"))
+	public.POST("/shopper/query/stream", forwardTo(agentBase+"/agent/query/stream"))
 
 	// ── Storefront aggregation (ex-BFF) ─────────────────────────────────────
 	// bff-service is deleted. Its storefront fan-outs (home, profile,

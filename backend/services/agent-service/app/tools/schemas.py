@@ -85,3 +85,7 @@ class CheckCompatibilityParams(BaseModel):
     product_ids: list[str] = Field(..., min_length=1, max_length=10, description="List of product IDs to check compatibility for")
 
 
+class TrackOrderParams(BaseModel):
+    order_id: Optional[str] = Field(default=None, max_length=64, description="Specific order ID or None to fetch customer's latest order")
+
+

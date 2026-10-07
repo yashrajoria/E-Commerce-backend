@@ -1,11 +1,12 @@
 import json
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from uuid import UUID, uuid4
 
 from app.agent.schemas import AgentQueryRequestV2, AgentResponseV2
-from app.agent.orchestrator import run_agent
+from app.agent.orchestrator import run_agent, run_agent_stream
 from app.audit.repository import (
     claim_pending_mutation,
     get_pending,
@@ -58,6 +59,43 @@ async def query_agent(request: AgentQueryRequestV2, req: Request) -> AgentRespon
             exc_info=True,
         )
         raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/agent/query/stream")
+async def query_agent_stream(request: AgentQueryRequestV2, req: Request):
+    correlation_id: str = getattr(req.state, "correlation_id", str(uuid4()))
+    logger = get_logger(correlation_id)
+    session_id = request.session_id or str(uuid4())
+
+    auth = req.headers.get("authorization")
+    cookie = req.headers.get("cookie")
+    user_id = req.headers.get("x-user-id")
+    user_role = req.headers.get("x-user-role", "guest")
+
+    logger.info(
+        f"Streaming query received | Session={session_id} Role={user_role}",
+        extra={"event": "request.stream_start"},
+    )
+
+    generator = run_agent_stream(
+        prompt=request.prompt,
+        session_id=session_id,
+        auth_header=auth,
+        cookie_header=cookie,
+        user_id=user_id,
+        user_role=user_role,
+        logger=logger,
+        correlation_id=correlation_id,
+    )
+
+    return StreamingResponse(
+        generator,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 @router.delete("/agent/session/{session_id}")
 async def flush_session(session_id: str, req: Request):
