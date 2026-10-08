@@ -6,40 +6,51 @@ import (
 	"fmt"
 	"os"
 
-	sdkaws "github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/sns"
-	"github.com/aws/aws-sdk-go-v2/service/sns/types"
-	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"github.com/yashrajoria/common/messaging"
+	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 type SNSPublisher struct {
-	client   *sns.Client
-	topicARN string
+	publisher messaging.Publisher
+	topic     string
 }
 
-func NewSNSPublisher(ctx context.Context) (*SNSPublisher, error) {
-	cfg, err := awspkg.LoadConfig(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load AWS config: %w", err)
+func NewSNSPublisherWithDB(db *gorm.DB) *SNSPublisher {
+	topic := os.Getenv("NOTIFICATION_SNS_TOPIC_ARN")
+	if topic == "" {
+		topic = os.Getenv("AUTH_SNS_TOPIC_ARN")
 	}
-
-	// Prefer the dedicated notification topic so notification-service receives
-	// auth events through the unified notification pipeline.
-	topicARN := os.Getenv("NOTIFICATION_SNS_TOPIC_ARN")
-	if topicARN == "" {
-		topicARN = os.Getenv("AUTH_SNS_TOPIC_ARN")
-	}
-	if topicARN == "" {
-		return nil, fmt.Errorf("NOTIFICATION_SNS_TOPIC_ARN/AUTH_SNS_TOPIC_ARN not set")
+	if topic == "" {
+		topic = "notification-queue"
 	}
 
 	return &SNSPublisher{
-		client:   sns.NewFromConfig(cfg),
-		topicARN: topicARN,
+		publisher: messaging.NewPGQueuePublisher(db, zap.L()),
+		topic:     topic,
+	}
+}
+
+func NewSNSPublisher(ctx context.Context) (*SNSPublisher, error) {
+	// Fallback constructor
+	topic := os.Getenv("NOTIFICATION_SNS_TOPIC_ARN")
+	if topic == "" {
+		topic = os.Getenv("AUTH_SNS_TOPIC_ARN")
+	}
+	if topic == "" {
+		topic = "notification-queue"
+	}
+	return &SNSPublisher{
+		topic: topic,
 	}, nil
 }
 
 func (p *SNSPublisher) Publish(ctx context.Context, eventType string, payload map[string]interface{}) error {
+	if p.publisher == nil {
+		zap.L().Warn("Publisher not configured, skipping event publish", zap.String("eventType", eventType))
+		return nil
+	}
+
 	message := map[string]interface{}{
 		"event_type": eventType,
 		"data":       payload,
@@ -50,15 +61,5 @@ func (p *SNSPublisher) Publish(ctx context.Context, eventType string, payload ma
 		return fmt.Errorf("failed to marshal event payload: %w", err)
 	}
 
-	_, err = p.client.Publish(ctx, &sns.PublishInput{
-		TopicArn: sdkaws.String(p.topicARN),
-		Message:  sdkaws.String(string(msgBytes)),
-		MessageAttributes: map[string]types.MessageAttributeValue{
-			"event_type": {
-				DataType:    sdkaws.String("String"),
-				StringValue: sdkaws.String(eventType),
-			},
-		},
-	})
-	return err
+	return p.publisher.Publish(ctx, p.topic, msgBytes)
 }

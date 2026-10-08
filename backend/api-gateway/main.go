@@ -19,7 +19,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
 	"github.com/joho/godotenv"
-	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	apperrors "github.com/yashrajoria/common/errors"
 	"github.com/yashrajoria/common/internalauth"
 	commonmw "github.com/yashrajoria/common/middleware"
@@ -65,36 +64,6 @@ func CORSMiddleware() gin.HandlerFunc {
 	}
 
 	return cors.New(config)
-}
-
-// metricsJob carries the per-request data needed to emit CloudWatch metrics.
-type metricsJob struct {
-	path   string
-	method string
-	status int
-	dur    time.Duration
-}
-
-// startMetricsWorkers spins up a small, fixed pool of goroutines that drain
-// metric jobs from a buffered channel, so metric emission under load is
-// bounded rather than spawning one goroutine per request.
-func startMetricsWorkers(metricsClient *awspkg.MetricsClient, workers int) chan<- metricsJob {
-	ch := make(chan metricsJob, 256)
-	for range workers {
-		go func() {
-			for job := range ch {
-				mctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				dims := map[string]string{"Service": "api-gateway", "Method": job.method, "Path": job.path}
-				_ = metricsClient.RecordCount(mctx, awspkg.MetricHTTPRequests, dims)
-				_ = metricsClient.RecordLatency(mctx, awspkg.MetricHTTPLatency, job.dur, dims)
-				if job.status >= 400 {
-					_ = metricsClient.RecordCount(mctx, awspkg.MetricHTTPErrors, dims)
-				}
-				cancel()
-			}
-		}()
-	}
-	return ch
 }
 
 // CustomRecovery recovers from panics and logs them
@@ -143,18 +112,6 @@ func main() {
 		logger.Log.Fatal("JWT middleware init failed", zap.Error(err))
 	}
 
-	// --- CloudWatch (Logs + Metrics) ---
-	cwLogsClient, err := awspkg.NewCloudWatchLogsClient(context.Background(), "api-gateway")
-	if err != nil {
-		logger.Log.Warn("CloudWatch logs client init failed (non-fatal)", zap.Error(err))
-	}
-	_ = cwLogsClient
-
-	metricsClient, err := awspkg.NewMetricsClient(context.Background())
-	if err != nil {
-		logger.Log.Warn("CloudWatch metrics client init failed (non-fatal)", zap.Error(err))
-	}
-
 	r := gin.New()
 
 	// OpenTelemetry server spans (no-op when telemetry disabled) — before all
@@ -186,28 +143,6 @@ func main() {
 	r.Use(commonmw.SecurityHeaders())
 	r.Use(apperrors.ErrorMiddleware())
 	r.Use(middleware.StructuredRequestLogger())
-
-	// CloudWatch HTTP metrics middleware. Metric emission is offloaded to a
-	// bounded worker pool (metricsWorkers) rather than one goroutine per
-	// request, so a traffic spike can't cause unbounded goroutine growth.
-	if metricsClient != nil && metricsClient.IsEnabled() {
-		metricsCh := startMetricsWorkers(metricsClient, 20)
-		r.Use(func(c *gin.Context) {
-			start := time.Now()
-			c.Next()
-			job := metricsJob{
-				path:   c.Request.URL.Path,
-				method: c.Request.Method,
-				status: c.Writer.Status(),
-				dur:    time.Since(start),
-			}
-			select {
-			case metricsCh <- job:
-			default:
-				logger.Log.Warn("metrics worker pool saturated, dropping metric", zap.String("path", job.path))
-			}
-		})
-	}
 
 	if gin.Mode() != gin.ReleaseMode {
 		r.GET("/test-cors", func(c *gin.Context) {

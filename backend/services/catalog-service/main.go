@@ -19,14 +19,14 @@ import (
 	"catalog-service/services"
 	cartroutes "catalog-service/cart/routes"
 
-	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
-	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	commondb "github.com/yashrajoria/common/db"
 	"github.com/yashrajoria/common/internalauth"
+	"github.com/yashrajoria/common/messaging"
 	commonmw "github.com/yashrajoria/common/middleware"
+	"github.com/yashrajoria/common/storage"
 	"github.com/yashrajoria/common/telemetry"
 	"go.uber.org/zap"
 )
@@ -79,16 +79,8 @@ func main() {
 	rdb := redis.NewClient(redisOpts)
 	defer rdb.Close()
 
-	// --- AWS ---
-	awsCfg, err := awspkg.LoadAWSConfig(context.Background())
-	if err != nil {
-		zap.L().Fatal("Failed to load AWS config", zap.Error(err))
-	}
-	s3Client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
-		o.UsePathStyle = true // Important for LocalStack compatibility
-	})
-	presignClient := s3.NewPresignClient(s3Client)
-	snsClient := awspkg.NewSNSClient(awsCfg)
+	// --- Storage & Queues (Supabase Storage + Postgres Queues) ---
+	storageClient := storage.NewStorageClient(storage.Config{})
 
 	// --- Postgres (schema catalog; SQL migrations own the schema, so no AutoMigrate) ---
 	gdb, err := commondb.ConnectPostgres()
@@ -105,34 +97,20 @@ func main() {
 	sqlDB.SetMaxIdleConns(5)
 	sqlDB.SetConnMaxLifetime(30 * time.Minute)
 
+	queuePublisher := messaging.NewPGQueuePublisher(gdb, zap.L())
+
 	// --- Repositories ---
 	productRepo := repository.NewPGProductRepo(gdb)
 	categoryRepo := repository.NewPGCategoryRepo(gdb)
 	inventoryRepo := inventoryrepository.NewPGInventoryRepository(gdb)
 
-	// --- CloudWatch (Logs + Metrics) ---
-	cwLogsClient, err := awspkg.NewCloudWatchLogsClient(context.Background(), "catalog-service")
-	if err != nil {
-		zap.L().Warn("CloudWatch logs client init failed (non-fatal)", zap.Error(err))
-	}
-	_ = cwLogsClient
-
-	metricsClient, err := awspkg.NewMetricsClient(context.Background())
-	if err != nil {
-		zap.L().Warn("CloudWatch metrics client init failed (non-fatal)", zap.Error(err))
-	}
-
 	// --- Services ---
-	inventoryService := inventoryservices.NewInventoryService(inventoryRepo, metricsClient)
+	inventoryService := inventoryservices.NewInventoryService(inventoryRepo, nil)
 	productService := services.NewProductServiceDDB(
 		productRepo,
 		categoryRepo,
-		s3Client,
-		presignClient,
-		cfg.S3Bucket,
+		storageClient,
 		cfg.S3Prefix,
-		cfg.AssetPublicBaseURL,
-		cfg.CloudFrontDomain,
 		&inventoryStockSync{svc: inventoryService},
 	)
 	categoryService := services.NewCategoryServiceDDB(categoryRepo, productRepo)
@@ -164,9 +142,7 @@ func main() {
 	// OpenTelemetry server spans (no-op when telemetry disabled) — before all
 	// other middleware so traces span the full request lifecycle.
 	r.Use(telemetry.GinMiddleware("catalog-service"))
-	if metricsClient != nil {
-		r.Use(commonmw.MetricsMiddleware(metricsClient, "catalog-service"))
-	}
+	r.Use(commonmw.MetricsMiddleware(nil, "catalog-service"))
 	r.Use(commonmw.RequestLogger(logger))
 	r.Use(func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
@@ -184,7 +160,7 @@ func main() {
 	inventoryroutes.RegisterRoutes(r, inventoryController, waitingRoomController)
 
 	// Cart routes (paths unchanged from cart-service; validation is in-process)
-	cartroutes.RegisterCartRoutes(r, rdb, snsClient, cfg.CartTTL, productService)
+	cartroutes.RegisterCartRoutes(r, rdb, queuePublisher, cfg.CartTTL, productService)
 
 	r.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	r.GET("/health/live", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })

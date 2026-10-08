@@ -6,129 +6,78 @@ import (
 	"notification-service/models"
 	"notification-service/services"
 	"os"
-	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/google/uuid"
-	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"github.com/yashrajoria/common/messaging"
 	"github.com/yashrajoria/common/telemetry"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 type SQSConsumer struct {
-	client   *sqs.Client
-	queueURL string
+	consumer messaging.Consumer
 	service  services.NotificationService
 	logger   *zap.Logger
 }
 
-func NewSQSConsumer(svc services.NotificationService, logger *zap.Logger) (*SQSConsumer, error) {
-
-	queueURL := os.Getenv("SQS_QUEUE_URL")
-	if queueURL == "" {
-		// Backward/compose-compat fallback
-		queueURL = os.Getenv("NOTIFICATION_SQS_QUEUE_URL")
+func NewSQSConsumerWithDB(db *gorm.DB, svc services.NotificationService, logger *zap.Logger) (*SQSConsumer, error) {
+	queueName := os.Getenv("SQS_QUEUE_URL")
+	if queueName == "" {
+		queueName = os.Getenv("NOTIFICATION_SQS_QUEUE_URL")
 	}
-
-	cfg, err := awspkg.LoadConfig(context.Background())
-	if err != nil {
-		return nil, err
+	if queueName == "" {
+		queueName = "notification-queue"
 	}
 
 	return &SQSConsumer{
-		client:   sqs.NewFromConfig(cfg),
-		queueURL: queueURL,
+		consumer: messaging.NewPGQueueConsumer(db, queueName, logger),
 		service:  svc,
 		logger:   logger,
 	}, nil
 }
 
 func (c *SQSConsumer) Start(ctx context.Context) {
-	if c.queueURL == "" || os.Getenv("ENABLE_SQS_CONSUMER") == "false" {
-		c.logger.Info("SQS consumer disabled (no SQS queue configured or ENABLE_SQS_CONSUMER=false)")
+	if os.Getenv("ENABLE_SQS_CONSUMER") == "false" {
+		c.logger.Info("Notification queue consumer disabled (ENABLE_SQS_CONSUMER=false)")
 		return
 	}
-	c.logger.Info("SQS consumer started", zap.String("queue", c.queueURL))
-	for {
-		select {
-		case <-ctx.Done():
-			c.logger.Info("SQS consumer shutting down")
-			return
-		default:
-			c.poll(ctx)
+	c.logger.Info("Notification queue consumer started")
+	go func() {
+		_ = c.consumer.StartPolling(ctx, c.handleMessage)
+	}()
+}
+
+func (c *SQSConsumer) handleMessage(ctx context.Context, body string) error {
+	ctx, endSpan := telemetry.StartSQSConsumerSpan(ctx, "notification-queue", "")
+	defer endSpan()
+
+	var payload models.EventPayload
+	var envelope struct {
+		Message string `json:"Message"`
+	}
+
+	if err := json.Unmarshal([]byte(body), &envelope); err == nil && envelope.Message != "" {
+		_ = json.Unmarshal([]byte(envelope.Message), &payload)
+	} else {
+		_ = json.Unmarshal([]byte(body), &payload)
+	}
+
+	if payload.EventType == "" {
+		var generic map[string]interface{}
+		if err := json.Unmarshal([]byte(body), &generic); err == nil {
+			if et, ok := generic["event_type"].(string); ok {
+				payload.EventType = et
+			}
+			if d, ok := generic["data"].(map[string]interface{}); ok {
+				payload.Data = d
+			}
 		}
 	}
-}
 
-func (c *SQSConsumer) poll(ctx context.Context) {
-	output, err := c.client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
-		QueueUrl:            aws.String(c.queueURL),
-		MaxNumberOfMessages: 10,
-		WaitTimeSeconds:     5, // long polling
-	})
-	if err != nil {
-		c.logger.Error("SQS receive error", zap.Error(err))
-		time.Sleep(5 * time.Second)
-		return
-	}
-
-	for _, msg := range output.Messages {
-		c.processMessage(ctx, msg.Body, msg.ReceiptHandle)
-	}
-}
-
-// snsEnvelope unwraps the SNS → SQS message wrapper
-type snsEnvelope struct {
-	Message string `json:"Message"`
-}
-
-func (c *SQSConsumer) processMessage(ctx context.Context, body *string, receiptHandle *string) {
-	// OpenTelemetry consumer span (no-op when telemetry disabled).
-	ctx, endSpan := telemetry.StartSQSConsumerSpan(ctx, c.queueURL, "")
-	defer endSpan()
-	if body == nil || *body == "" {
-		c.logger.Error("received empty SQS message body")
-		// Don't delete; let it retry / get sent to DLQ if configured.
-		return
-	}
-	if receiptHandle == nil || *receiptHandle == "" {
-		c.logger.Error("received empty SQS receipt handle")
-		return
-	}
-
-	// Step 1: unwrap SNS envelope
-	var envelope snsEnvelope
-	if err := json.Unmarshal([]byte(*body), &envelope); err != nil {
-		c.logger.Error("failed to unmarshal SNS envelope", zap.Error(err))
-		c.deleteMessage(ctx, receiptHandle) // unparseable — delete to avoid infinite loop
-		return
-	}
-
-	// Step 2: unmarshal actual event payload
-	var payload models.EventPayload
-	if err := json.Unmarshal([]byte(envelope.Message), &payload); err != nil {
-		c.logger.Error("failed to unmarshal event payload", zap.Error(err))
-		c.deleteMessage(ctx, receiptHandle)
-		return
-	}
 	payload.CorrelationID = ensureCorrelationID(payload.CorrelationID, payload.EventID)
-	correlationFields := zap.String("correlation_id", payload.CorrelationID)
-	c.logger.Info("notification event received", zap.String("event_type", payload.EventType), correlationFields)
+	c.logger.Info("notification event received", zap.String("event_type", payload.EventType), zap.String("correlation_id", payload.CorrelationID))
 
-	// Step 3: process — do NOT delete on failure, let SQS retry
-	if err := c.service.ProcessEvent(ctx, &payload); err != nil {
-		c.logger.Error("failed to process event",
-			zap.String("event_type", payload.EventType),
-			correlationFields,
-			zap.Error(err),
-		)
-		return // SQS will retry after visibility timeout
-	}
-
-	// Step 4: delete only on success
-	c.deleteMessage(ctx, receiptHandle)
-	c.logger.Info("notification event acknowledged", zap.String("event_type", payload.EventType), correlationFields)
+	return c.service.ProcessEvent(ctx, &payload)
 }
 
 func ensureCorrelationID(correlationID, eventID string) string {
@@ -139,14 +88,4 @@ func ensureCorrelationID(correlationID, eventID string) string {
 		return uuid.NewSHA1(uuid.NameSpaceOID, []byte("notification:"+eventID)).String()
 	}
 	return uuid.NewString()
-}
-
-func (c *SQSConsumer) deleteMessage(ctx context.Context, receiptHandle *string) {
-	_, err := c.client.DeleteMessage(ctx, &sqs.DeleteMessageInput{
-		QueueUrl:      aws.String(c.queueURL),
-		ReceiptHandle: receiptHandle,
-	})
-	if err != nil {
-		c.logger.Error("failed to delete SQS message", zap.Error(err))
-	}
 }

@@ -8,11 +8,10 @@ import (
 	"order-service/models"
 	repositories "order-service/repository"
 
-	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
-
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/yashrajoria/common/messaging"
 	"go.uber.org/zap"
 )
 
@@ -68,14 +67,14 @@ var cancellableStatuses = map[string]bool{
 
 type OrderService struct {
 	orderRepo            repositories.OrderRepository
-	snsClient            aws_pkg.SNSPublisher
+	snsClient            messaging.Publisher
 	snsTopicArn          string
 	notificationTopicArn string
 	inventoryClient      InventoryReleaser
 }
 
 // NewOrderServiceSQS creates an OrderService that uses SNS/SQS instead of Kafka
-func NewOrderServiceSQS(orderRepo repositories.OrderRepository, snsClient aws_pkg.SNSPublisher, snsTopicArn, notificationTopicArn string, inventoryClient InventoryReleaser) *OrderService {
+func NewOrderServiceSQS(orderRepo repositories.OrderRepository, snsClient messaging.Publisher, snsTopicArn, notificationTopicArn string, inventoryClient InventoryReleaser) *OrderService {
 	return &OrderService{
 		orderRepo:            orderRepo,
 		snsClient:            snsClient,

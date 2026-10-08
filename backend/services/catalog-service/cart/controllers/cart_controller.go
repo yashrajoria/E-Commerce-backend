@@ -17,7 +17,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"github.com/yashrajoria/common/messaging"
 	"go.uber.org/zap"
 )
 
@@ -34,12 +34,12 @@ var errValidatorUnavailable = errors.New("product validator not configured")
 
 type CartController struct {
 	Repo       *database.CartRepository
-	SNSClient  *aws_pkg.SNSClient
+	SNSClient  messaging.Publisher
 	CartTTL    time.Duration
 	Validator  ProductValidator
 }
 
-func NewCartController(repo *database.CartRepository, snsClient *aws_pkg.SNSClient, cartTTL time.Duration, validator ProductValidator) *CartController {
+func NewCartController(repo *database.CartRepository, snsClient messaging.Publisher, cartTTL time.Duration, validator ProductValidator) *CartController {
 	return &CartController{
 		Repo:      repo,
 		SNSClient: snsClient,

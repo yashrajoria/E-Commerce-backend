@@ -15,7 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stripe/stripe-go/v80"
 	"github.com/stripe/stripe-go/v80/checkout/session"
-	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"github.com/yashrajoria/common/messaging"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
@@ -38,7 +38,7 @@ func terminalStatusList() []string {
 // PaymentController handles all payment-related HTTP and webhook logic.
 type PaymentController struct {
 	Stripe               *services.StripeService
-	SNS                  aws_pkg.SNSPublisher
+	SNS                  messaging.Publisher
 	TopicArn             string
 	NotificationTopicArn string
 	DefaultCurrency      string
@@ -369,7 +369,7 @@ func (pc *PaymentController) DeletePaymentMethod(c *gin.Context) {
 // NewPaymentController creates a new PaymentController with the given dependencies.
 func NewPaymentController(
 	stripe *services.StripeService,
-	sns aws_pkg.SNSPublisher,
+	sns messaging.Publisher,
 	topicArn string,
 	notificationTopicArn string,
 	defaultCurrency string,

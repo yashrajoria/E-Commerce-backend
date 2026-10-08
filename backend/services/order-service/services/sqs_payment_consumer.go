@@ -10,30 +10,27 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
-	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"github.com/yashrajoria/common/events"
+	"github.com/yashrajoria/common/messaging"
 	"github.com/yashrajoria/common/telemetry"
 )
 
 // SQSPaymentConsumer consumes payment events from SQS and updates order status
 type SQSPaymentConsumer struct {
-	sqsConsumer          *aws_pkg.SQSConsumer
+	sqsConsumer          messaging.Consumer
 	orderRepo            repositories.OrderRepository
 	inventoryClient      *InventoryClient
-	metricsClient        *aws_pkg.MetricsClient
-	snsClient            aws_pkg.SNSPublisher
+	snsClient            messaging.Publisher
 	notificationTopicArn string
 	productServiceURL    string
 }
 
 // NewSQSPaymentConsumer creates a new SQS-based payment event consumer
-func NewSQSPaymentConsumer(sqsConsumer *aws_pkg.SQSConsumer, orderRepo repositories.OrderRepository, inventoryClient *InventoryClient, metricsClient *aws_pkg.MetricsClient, snsClient aws_pkg.SNSPublisher, notificationTopicArn string, productServiceURL string) *SQSPaymentConsumer {
+func NewSQSPaymentConsumer(sqsConsumer messaging.Consumer, orderRepo repositories.OrderRepository, inventoryClient *InventoryClient, _ any, snsClient messaging.Publisher, notificationTopicArn string, productServiceURL string) *SQSPaymentConsumer {
 	return &SQSPaymentConsumer{
 		sqsConsumer:          sqsConsumer,
 		orderRepo:            orderRepo,
 		inventoryClient:      inventoryClient,
-		metricsClient:        metricsClient,
 		snsClient:            snsClient,
 		notificationTopicArn: notificationTopicArn,
 		productServiceURL:    productServiceURL,
@@ -90,28 +87,10 @@ func (c *SQSPaymentConsumer) handleMessage(ctx context.Context, body string) err
 		if c.updateOrderStatusWithTime(ctx, evt.OrderID, "paid", &now, nil) {
 			c.confirmInventory(ctx, evt.OrderID)
 			c.publishOrderConfirmedNotification(ctx, evt)
-			if c.metricsClient != nil && c.metricsClient.IsEnabled() {
-				go func() {
-					metricCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-					defer cancel()
-					dims := map[string]string{"Service": "order-service"}
-					_ = c.metricsClient.RecordCount(metricCtx, aws_pkg.MetricPaymentSucceeded, dims)
-					_ = c.metricsClient.RecordCount(metricCtx, aws_pkg.MetricOrdersCompleted, dims)
-				}()
-			}
 		}
 	case "payment_failed":
 		if c.updateOrderStatusWithTime(ctx, evt.OrderID, "payment_failed", nil, &now) {
 			c.releaseInventory(ctx, evt.OrderID)
-			if c.metricsClient != nil && c.metricsClient.IsEnabled() {
-				go func() {
-					metricCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-					defer cancel()
-					dims := map[string]string{"Service": "order-service"}
-					_ = c.metricsClient.RecordCount(metricCtx, aws_pkg.MetricPaymentFailed, dims)
-					_ = c.metricsClient.RecordCount(metricCtx, aws_pkg.MetricOrdersFailed, dims)
-				}()
-			}
 		}
 	case "checkout_session_created":
 		log.Printf("ℹ️  [OrderService][SQSPaymentConsumer] checkout session created for order=%s", evt.OrderID)

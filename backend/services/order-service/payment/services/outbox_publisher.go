@@ -7,7 +7,7 @@ import (
 	"order-service/payment/repository"
 	"time"
 
-	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"github.com/yashrajoria/common/messaging"
 	"go.uber.org/zap"
 )
 
@@ -21,12 +21,12 @@ type OutboxPublisherConfig struct {
 
 type OutboxPublisher struct {
 	repository repository.OutboxRepository
-	sns        aws_pkg.SNSPublisher
+	sns        messaging.Publisher
 	owner      string
 	config     OutboxPublisherConfig
 }
 
-func NewOutboxPublisher(repo repository.OutboxRepository, sns aws_pkg.SNSPublisher, owner string) *OutboxPublisher {
+func NewOutboxPublisher(repo repository.OutboxRepository, sns messaging.Publisher, owner string) *OutboxPublisher {
 	return &OutboxPublisher{
 		repository: repo,
 		sns:        sns,

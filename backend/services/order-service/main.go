@@ -35,10 +35,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	commondb "github.com/yashrajoria/common/db"
 	apperrors "github.com/yashrajoria/common/errors"
 	"github.com/yashrajoria/common/internalauth"
+	"github.com/yashrajoria/common/messaging"
 	"github.com/yashrajoria/common/telemetry"
 	"go.uber.org/zap"
 )
@@ -73,14 +73,8 @@ func main() {
 		}
 	}
 
-	// --- AWS setup ---
-	awsCfg, err := aws_pkg.LoadAWSConfig(context.Background())
-	if err != nil {
-		logger.Fatal("Failed to load AWS config", zap.Error(err))
-	}
-
-	// SNS client for publishing order events
-	snsClient := aws_pkg.NewSNSClient(awsCfg)
+	// --- Message Publisher (PostgreSQL queue backed) ---
+	pgPublisher := messaging.NewPGQueuePublisher(database.DB, logger)
 
 	// --- HTTP router ---
 	r := gin.New()
@@ -91,28 +85,7 @@ func main() {
 	r.Use(apperrors.ErrorMiddleware())
 	r.Use(middleware.ConfigMiddleware(cfg.ProductServiceURL))
 
-	// CloudWatch HTTP metrics middleware (metricsClient created later, use closure)
-	var metricsClient *aws_pkg.MetricsClient
-	r.Use(func(c *gin.Context) {
-		if metricsClient == nil || !metricsClient.IsEnabled() {
-			c.Next()
-			return
-		}
-		start := time.Now()
-		c.Next()
-		go func(path, method string, status int, dur time.Duration) {
-			mctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			dims := map[string]string{"Service": "order-service", "Method": method, "Path": path}
-			_ = metricsClient.RecordCount(mctx, aws_pkg.MetricHTTPRequests, dims)
-			_ = metricsClient.RecordLatency(mctx, aws_pkg.MetricHTTPLatency, dur, dims)
-			if status >= 400 {
-				_ = metricsClient.RecordCount(mctx, aws_pkg.MetricHTTPErrors, dims)
-			}
-		}(c.Request.URL.Path, c.Request.Method, c.Writer.Status(), time.Since(start))
-	})
-
-	// Structured HTTP request logging → CloudWatch via Zap writer
+	// Structured HTTP request logging via Zap
 	r.Use(func(c *gin.Context) {
 		start := time.Now()
 		path := c.Request.URL.Path
@@ -157,59 +130,18 @@ func main() {
 	promoRepo := promotionrepository.NewGormCouponRepository(database.DB)
 	promoService := promotionservices.NewCouponService(
 		promoRepo,
-		snsClient,
-		cfg.OrderSNSTopicARN, // reuse order SNS for promotion events (or add dedicated topic)
+		pgPublisher,
+		cfg.OrderSNSTopicARN, // reuse order topic for promotion events
 		cfg.NotificationSNSTopicARN,
 		logger,
 	)
 	shippingProvider := shippingproviders.NewInternalDynamicProvider()
 	shippingService := shippingservices.NewShippingService(shippingProvider, logger, cfg.StoreCurrency)
 
-	// --- Get queue URLs early (needed for payment services) ---
+	// --- Queue names ---
 	checkoutQueueURL := cfg.CheckoutQueueURL
-	if checkoutQueueURL == "" {
-		if url, err := aws_pkg.GetQueueURL(context.Background(), awsCfg, "order-processing-queue"); err == nil {
-			checkoutQueueURL = url
-		} else {
-			logger.Warn("Could not get checkout queue URL", zap.Error(err))
-		}
-	}
-
 	paymentEventsQueueURL := cfg.PaymentEventsQueueURL
-	if paymentEventsQueueURL == "" {
-		if url, err := aws_pkg.GetQueueURL(context.Background(), awsCfg, "payment-events-queue"); err == nil {
-			paymentEventsQueueURL = url
-		} else {
-			logger.Warn("Could not get payment events queue URL", zap.Error(err))
-		}
-	}
-
 	paymentRequestQueueURL := cfg.PaymentRequestQueueURL
-	if paymentRequestQueueURL == "" {
-		if url, err := aws_pkg.GetQueueURL(context.Background(), awsCfg, "payment-request-queue"); err == nil {
-			paymentRequestQueueURL = url
-		} else {
-			logger.Warn("Could not get payment request queue URL", zap.Error(err))
-		}
-	}
-
-	// Fail fast in production when messaging is unconfigured — degraded
-	// start (Warn + serve HTTP) is intentional for dev/LocalStack only.
-	if os.Getenv("ENV") == "production" {
-		var missing []string
-		if checkoutQueueURL == "" {
-			missing = append(missing, "CHECKOUT_QUEUE_URL/order-processing-queue")
-		}
-		if paymentRequestQueueURL == "" {
-			missing = append(missing, "PAYMENT_REQUEST_QUEUE_URL/payment-request-queue")
-		}
-		if cfg.OrderSNSTopicARN == "" {
-			missing = append(missing, "ORDER_SNS_TOPIC_ARN")
-		}
-		if len(missing) > 0 {
-			logger.Fatal("missing required messaging config in production", zap.Strings("missing", missing))
-		}
-	}
 
 	// Payment services
 	stripeSvc := paymentservices.NewStripeService(cfg.StripeSecretKey, cfg.StripeWebhookSecret)
@@ -217,12 +149,12 @@ func main() {
 	paymentOutboxRepo := paymentrepository.NewGormOutboxRepository(database.DB)
 	paymentOutboxPublisher := paymentservices.NewOutboxPublisher(
 		paymentOutboxRepo,
-		snsClient,
+		pgPublisher,
 		"order-service-payment-outbox-"+uuid.NewString(),
 	)
 	paymentRequestConsumer := paymentservices.NewPaymentRequestConsumer(
-		aws_pkg.NewSQSConsumer(awsCfg, paymentRequestQueueURL),
-		snsClient,
+		messaging.NewPGQueueConsumer(database.DB, paymentRequestQueueURL, logger),
+		pgPublisher,
 		cfg.PaymentSNSTopicARN,
 		cfg.NotificationSNSTopicARN,
 		stripeSvc,
@@ -233,7 +165,7 @@ func main() {
 
 	orderService := services.NewOrderServiceSQS(
 		orderRepository,
-		snsClient,
+		pgPublisher,
 		cfg.OrderSNSTopicARN,
 		cfg.NotificationSNSTopicARN,
 		inventoryClient,
@@ -245,7 +177,7 @@ func main() {
 	basketOptService := promotionservices.NewBasketOptimizerService(logger)
 	basketOptController := promotioncontrollers.NewBasketOptimizerController(basketOptService)
 	shippingController := shippingcontrollers.NewShippingController(shippingService)
-	paymentController := paymentcontrollers.NewPaymentController(stripeSvc, snsClient, cfg.PaymentSNSTopicARN, cfg.NotificationSNSTopicARN, cfg.StoreCurrency, paymentRepo, logger)
+	paymentController := paymentcontrollers.NewPaymentController(stripeSvc, pgPublisher, cfg.PaymentSNSTopicARN, cfg.NotificationSNSTopicARN, cfg.StoreCurrency, paymentRepo, logger)
 	routes.RegisterOrderRoutes(r, orderController)
 	promotionroutes.RegisterPromotionRoutes(r, promoController, basketOptController)
 
@@ -262,119 +194,74 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	defer shutdownCancel()
 
-	// Retention: published outbox rows and Stripe dedupe ids. 30 days of Stripe ids
-	// is far beyond its retry window.
+	// Retention: published outbox rows and Stripe dedupe ids.
 	commondb.StartPurger(shutdownCtx, database.DB, time.Hour,
 		commondb.PurgeJob{Table: "outbox_events", Where: "status = 'published' AND published_at < now() - interval '7 days'"},
 		commondb.PurgeJob{Table: "payment_outbox_events", Where: "status = 'published' AND published_at < now() - interval '7 days'"},
 		commondb.PurgeJob{Table: "stripe_processed_events", Where: "processed_at < now() - interval '30 days'"},
 	)
 
-	// --- SQS Consumers (replaces Kafka) ---
-	if paymentRequestQueueURL != "" || cfg.NotificationSNSTopicARN != "" {
-		outboxPublisher := services.NewOutboxPublisher(
-			outboxRepository,
-			aws_pkg.NewSQSOutboxPublisher(awsCfg),
-			snsClient,
-			"order-service-"+uuid.NewString(),
-		)
-		go outboxPublisher.Run(shutdownCtx)
-		logger.Info("Started outbox publisher", zap.String("payment_queue", paymentRequestQueueURL))
-	} else {
-		logger.Warn("Outbox publisher not started - payment request queue URL is missing")
-	}
+	// --- Outbox Publisher ---
+	outboxPublisher := services.NewOutboxPublisher(
+		outboxRepository,
+		pgPublisher,
+		pgPublisher,
+		"order-service-"+uuid.NewString(),
+	)
+	go outboxPublisher.Run(shutdownCtx)
+	logger.Info("Started outbox publisher", zap.String("payment_queue", paymentRequestQueueURL))
 
 	// Start payment outbox publisher (for payment webhook events)
-	if cfg.PaymentSNSTopicARN != "" {
-		go paymentOutboxPublisher.Run(shutdownCtx)
-		logger.Info("Started payment outbox publisher")
-	} else {
-		logger.Warn("Payment outbox publisher not started - payment SNS topic ARN missing")
-	}
+	go paymentOutboxPublisher.Run(shutdownCtx)
+	logger.Info("Started payment outbox publisher")
 
-	// Inventory client for stock management
-	inventoryClient = services.NewInventoryClient(cfg.InventoryServiceURL)
-
-	// CloudWatch Metrics
-	cwLogsClient, cloudwatchErr := aws_pkg.NewCloudWatchLogsClient(context.Background(), "order-service")
-	if cloudwatchErr != nil {
-		logger.Warn("CloudWatch logs client init failed (non-fatal)", zap.Error(cloudwatchErr))
-	}
-	_ = cwLogsClient
-
-	metricsClient, err = aws_pkg.NewMetricsClient(context.Background())
-	if err != nil {
-		logger.Warn("CloudWatch metrics client init failed (non-fatal)", zap.Error(err))
-	}
-
-	// Promotion client for coupon validation (now in-process)
+	// Promotion client for coupon validation (in-process)
 	promotionClient := promoService
 
-	// Start SQS consumers
-	if checkoutQueueURL != "" && paymentRequestQueueURL != "" {
-		checkoutConsumer := services.NewSQSCheckoutConsumer(
-			aws_pkg.NewSQSConsumer(awsCfg, checkoutQueueURL),
-			aws_pkg.NewSQSConsumer(awsCfg, paymentRequestQueueURL), // For sending payment requests
-			orderRepository,
-			inventoryClient,
-			metricsClient,
-			cfg.ProductServiceURL,
-			snsClient,
-			cfg.NotificationSNSTopicARN,
-			promotionClient,
-			cfg.StoreCurrency,
-		)
-		go checkoutConsumer.Start(shutdownCtx)
-		logger.Info("Started SQS checkout consumer", zap.String("queue", checkoutQueueURL))
-	} else {
-		logger.Warn("Checkout consumer not started - missing queue URLs")
-	}
+	// Start Postgres queue consumers
+	checkoutConsumer := services.NewSQSCheckoutConsumer(
+		messaging.NewPGQueueConsumer(database.DB, checkoutQueueURL, logger),
+		nil,
+		orderRepository,
+		inventoryClient,
+		nil,
+		cfg.ProductServiceURL,
+		pgPublisher,
+		cfg.NotificationSNSTopicARN,
+		promotionClient,
+		cfg.StoreCurrency,
+	)
+	go checkoutConsumer.Start(shutdownCtx)
+	logger.Info("Started checkout consumer", zap.String("queue", checkoutQueueURL))
 
 	// Start payment request consumer
-	if paymentRequestQueueURL != "" {
-		go paymentRequestConsumer.Start(shutdownCtx)
-		logger.Info("Started SQS payment request consumer", zap.String("queue", paymentRequestQueueURL))
-	} else {
-		logger.Warn("Payment request consumer not started - missing queue URL")
-	}
+	go paymentRequestConsumer.Start(shutdownCtx)
+	logger.Info("Started payment request consumer", zap.String("queue", paymentRequestQueueURL))
 
-	if paymentEventsQueueURL != "" {
-		paymentConsumer := services.NewSQSPaymentConsumer(
-			aws_pkg.NewSQSConsumer(awsCfg, paymentEventsQueueURL),
-			orderRepository,
-			inventoryClient,
-			metricsClient,
-			snsClient,
-			cfg.NotificationSNSTopicARN,
-			cfg.ProductServiceURL,
-		)
-		go paymentConsumer.Start(shutdownCtx)
-		logger.Info("Started SQS payment events consumer", zap.String("queue", paymentEventsQueueURL))
-	} else {
-		logger.Warn("Payment events consumer not started - missing queue URL")
-	}
+	// Start payment events consumer
+	paymentConsumer := services.NewSQSPaymentConsumer(
+		messaging.NewPGQueueConsumer(database.DB, paymentEventsQueueURL, logger),
+		orderRepository,
+		inventoryClient,
+		nil,
+		pgPublisher,
+		cfg.NotificationSNSTopicARN,
+		cfg.ProductServiceURL,
+	)
+	go paymentConsumer.Start(shutdownCtx)
+	logger.Info("Started payment events consumer", zap.String("queue", paymentEventsQueueURL))
 
-	// Coupon usage consumer (absorbed from promotion-service): increments
-	// coupon used_count on order_created. Queue is SNS-fanned-out from the
-	// notification topic by LocalStack bootstrap / Terraform.
+	// Coupon usage consumer: increments coupon used_count on order_created.
 	orderCreatedQueueURL := os.Getenv("ORDER_CREATED_QUEUE_URL")
 	if orderCreatedQueueURL == "" {
-		if url, err := aws_pkg.GetQueueURL(context.Background(), awsCfg, "promotion-order-queue"); err == nil {
-			orderCreatedQueueURL = url
-		} else {
-			logger.Warn("Could not get order-created queue URL", zap.Error(err))
-		}
+		orderCreatedQueueURL = "promotion-order-queue"
 	}
-	if orderCreatedQueueURL != "" {
-		orderCreatedConsumer := promotionconsumer.NewOrderCreatedConsumer(
-			aws_pkg.NewSQSConsumer(awsCfg, orderCreatedQueueURL),
-			promoService,
-		)
-		go orderCreatedConsumer.Start(shutdownCtx)
-		logger.Info("Started SQS order-created (coupon usage) consumer", zap.String("queue", orderCreatedQueueURL))
-	} else {
-		logger.Warn("Order-created consumer not started - missing queue URL (coupon usage will not increment)")
-	}
+	orderCreatedConsumer := promotionconsumer.NewOrderCreatedConsumer(
+		messaging.NewPGQueueConsumer(database.DB, orderCreatedQueueURL, logger),
+		promoService,
+	)
+	go orderCreatedConsumer.Start(shutdownCtx)
+	logger.Info("Started order-created (coupon usage) consumer", zap.String("queue", orderCreatedQueueURL))
 
 	// --- HTTP server ---
 	go func() {

@@ -6,7 +6,6 @@ import (
 	"log"
 	"time"
 
-	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"catalog-service/inventory/models"
 	"catalog-service/inventory/repository"
 )
@@ -14,11 +13,11 @@ import (
 // InventoryService handles business logic for inventory operations
 type InventoryService struct {
 	repo          repository.InventoryRepository
-	metricsClient *awspkg.MetricsClient
+	metricsClient interface{}
 }
 
 // NewInventoryService creates a new InventoryService
-func NewInventoryService(repo repository.InventoryRepository, metricsClient *awspkg.MetricsClient) *InventoryService {
+func NewInventoryService(repo repository.InventoryRepository, metricsClient interface{}) *InventoryService {
 	return &InventoryService{
 		repo:          repo,
 		metricsClient: metricsClient,
@@ -86,17 +85,6 @@ func (s *InventoryService) ReserveStock(ctx context.Context, req *models.Reserve
 			Requested:    item.Quantity,
 			IsSufficient: true,
 		})
-
-		// Emit metrics (async)
-		if s.metricsClient != nil && s.metricsClient.IsEnabled() {
-			go func(pID string, qty int) {
-				mCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				dims := map[string]string{"ProductID": pID}
-				_ = s.metricsClient.RecordCount(mCtx, awspkg.MetricInventoryReserved, dims)
-				_ = s.metricsClient.RecordValue(mCtx, "InventoryReservedQuantity", float64(qty), dims)
-			}(item.ProductID, item.Quantity)
-		}
 	}
 
 	log.Printf("[InventoryService] Transactional reserve success for order=%s items=%d", req.OrderID, len(results))

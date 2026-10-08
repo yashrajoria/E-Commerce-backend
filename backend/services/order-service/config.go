@@ -1,13 +1,9 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
-
-	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 )
 
 type Config struct {
@@ -21,7 +17,7 @@ type Config struct {
 	PostgresTimeZone    string
 	ProductServiceURL   string
 	InventoryServiceURL string
-	// SQS/SNS config (replaces Kafka)
+	// Messaging config (backed by Postgres queues)
 	CheckoutQueueURL        string
 	PaymentEventsQueueURL   string
 	PaymentRequestQueueURL  string
@@ -45,42 +41,15 @@ func LoadConfig() (*Config, error) {
 		PostgresTimeZone:        getEnv("POSTGRES_TIMEZONE", "Asia/Kolkata"),
 		ProductServiceURL:       getEnv("PRODUCT_SERVICE_URL", "http://catalog-service:8082"),
 		InventoryServiceURL:     getEnv("INVENTORY_SERVICE_URL", "http://catalog-service:8082"),
-		CheckoutQueueURL:        os.Getenv("CHECKOUT_QUEUE_URL"),
-		PaymentEventsQueueURL:   os.Getenv("PAYMENT_EVENTS_QUEUE_URL"),
-		PaymentRequestQueueURL:  os.Getenv("PAYMENT_REQUEST_QUEUE_URL"),
-		OrderSNSTopicARN:        os.Getenv("ORDER_SNS_TOPIC_ARN"),
-		PaymentSNSTopicARN:      os.Getenv("PAYMENT_SNS_TOPIC_ARN"),
-		NotificationSNSTopicARN: os.Getenv("NOTIFICATION_SNS_TOPIC_ARN"),
+		CheckoutQueueURL:        getEnv("CHECKOUT_QUEUE_URL", "order-processing-queue"),
+		PaymentEventsQueueURL:   getEnv("PAYMENT_EVENTS_QUEUE_URL", "payment-events-queue"),
+		PaymentRequestQueueURL:  getEnv("PAYMENT_REQUEST_QUEUE_URL", "payment-request-queue"),
+		OrderSNSTopicARN:        getEnv("ORDER_SNS_TOPIC_ARN", "order-events"),
+		PaymentSNSTopicARN:      getEnv("PAYMENT_SNS_TOPIC_ARN", "payment-events"),
+		NotificationSNSTopicARN: getEnv("NOTIFICATION_SNS_TOPIC_ARN", "notification-queue"),
 		StoreCurrency:           normalizeCurrency(getEnv("STORE_CURRENCY", "USD")),
 		StripeSecretKey:         os.Getenv("STRIPE_API_KEY"),
 		StripeWebhookSecret:     os.Getenv("STRIPE_WEBHOOK_SECRET"),
-	}
-
-	if os.Getenv("AWS_USE_SECRETS") == "true" {
-		if awsCfg, err := aws_pkg.LoadAWSConfig(context.Background()); err == nil {
-			sm := aws_pkg.NewSecretsClient(awsCfg)
-
-			if dbjson, err := sm.GetSecret(context.Background(), "order/DB_CREDENTIALS"); err == nil && dbjson != "" {
-				var m map[string]string
-				if err := json.Unmarshal([]byte(dbjson), &m); err == nil {
-					if v, ok := m["POSTGRES_USER"]; ok && v != "" {
-						cfg.PostgresUser = v
-					}
-					if v, ok := m["POSTGRES_PASSWORD"]; ok && v != "" {
-						cfg.PostgresPassword = v
-					}
-					if v, ok := m["POSTGRES_DB"]; ok && v != "" {
-						cfg.PostgresDB = v
-					}
-					if v, ok := m["POSTGRES_HOST"]; ok && v != "" {
-						cfg.PostgresHost = v
-					}
-					if v, ok := m["POSTGRES_PORT"]; ok && v != "" {
-						cfg.PostgresPort = v
-					}
-				}
-			}
-		}
 	}
 
 	if cfg.PostgresUser == "" || cfg.PostgresPassword == "" || cfg.PostgresDB == "" || cfg.PostgresHost == "" {

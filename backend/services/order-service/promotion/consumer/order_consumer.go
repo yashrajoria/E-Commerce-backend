@@ -9,16 +9,16 @@ import (
 	"order-service/promotion/services"
 
 	"github.com/google/uuid"
-	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"github.com/yashrajoria/common/events"
+	"github.com/yashrajoria/common/messaging"
 )
 
 type OrderCreatedConsumer struct {
-	sqsConsumer   *aws_pkg.SQSConsumer
+	sqsConsumer   messaging.Consumer
 	couponService services.CouponService
 }
 
-func NewOrderCreatedConsumer(sqsConsumer *aws_pkg.SQSConsumer, couponService services.CouponService) *OrderCreatedConsumer {
+func NewOrderCreatedConsumer(sqsConsumer messaging.Consumer, couponService services.CouponService) *OrderCreatedConsumer {
 	return &OrderCreatedConsumer{
 		sqsConsumer:   sqsConsumer,
 		couponService: couponService,

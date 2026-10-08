@@ -17,7 +17,6 @@ import (
 	"notification-service/services"
 
 	"github.com/gin-gonic/gin"
-	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	commondb "github.com/yashrajoria/common/db"
 	"github.com/yashrajoria/common/telemetry"
 	"go.uber.org/zap"
@@ -50,21 +49,11 @@ func main() {
 		commondb.PurgeJob{Table: "notification_events", Where: "created_at < now() - interval '30 days'"},
 	)
 
-	// CloudWatch (non-fatal)
-	metricsClient, err := aws_pkg.NewMetricsClient(context.Background())
-	if err != nil {
-		logger.Warn("CloudWatch metrics client init failed (non-fatal)", zap.Error(err))
-	}
-
 	// Senders
 	emailSender, err := sender.NewSMTPSender()
 	if err != nil {
 		logger.Fatal("Failed to init SMTP sender", zap.Error(err))
 	}
-	// smsSender, err := sender.NewTwilioSender()
-	// if err != nil {
-	// 	logger.Fatal("Failed to init Twilio sender", zap.Error(err))
-	// }
 
 	// Dependency injection
 	notificationRepo := repository.NewNotificationRepository(database.DB)
@@ -74,10 +63,10 @@ func main() {
 	}
 	notificationController := controllers.NewNotificationController(notificationService, logger)
 
-	// SQS Consumer
-	sqsConsumer, err := consumer.NewSQSConsumer(notificationService, logger)
+	// Postgres Queue Consumer
+	sqsConsumer, err := consumer.NewSQSConsumerWithDB(database.DB, notificationService, logger)
 	if err != nil {
-		logger.Fatal("Failed to init SQS consumer", zap.Error(err))
+		logger.Fatal("Failed to init queue consumer", zap.Error(err))
 	}
 
 	// Router
@@ -86,31 +75,6 @@ func main() {
 	// OpenTelemetry server spans (no-op when telemetry disabled) — before all
 	// other middleware so traces span the full request lifecycle.
 	r.Use(telemetry.GinMiddleware("notification-service"))
-
-	// CloudWatch middleware
-	r.Use(func(c *gin.Context) {
-		if metricsClient == nil || !metricsClient.IsEnabled() {
-			c.Next()
-			return
-		}
-		start := time.Now()
-		c.Next()
-		dur := time.Since(start)
-		go func() {
-			mctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			dims := map[string]string{
-				"Service": "notification-service",
-				"Method":  c.Request.Method,
-				"Path":    c.Request.URL.Path,
-			}
-			_ = metricsClient.RecordCount(mctx, aws_pkg.MetricHTTPRequests, dims)
-			_ = metricsClient.RecordLatency(mctx, aws_pkg.MetricHTTPLatency, dur, dims)
-			if c.Writer.Status() >= 400 {
-				_ = metricsClient.RecordCount(mctx, aws_pkg.MetricHTTPErrors, dims)
-			}
-		}()
-	})
 
 	// Request logging
 	r.Use(func(c *gin.Context) {

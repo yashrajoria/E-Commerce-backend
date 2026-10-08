@@ -1,7 +1,6 @@
 package services
 
 import (
-	"bytes"
 	"context"
 	"encoding/csv"
 	"fmt"
@@ -17,10 +16,9 @@ import (
 	"catalog-service/models"
 	"catalog-service/repository"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
 	"github.com/yashrajoria/common/events"
+	"github.com/yashrajoria/common/storage"
 	"go.uber.org/zap"
 )
 
@@ -43,12 +41,8 @@ type ProductServiceDDB struct {
 	productRepo         repository.ProductRepo
 	categoryRepo        repository.CategoryRepo
 	categoryService     *CategoryServiceDDB // For updating product counts when products change
-	s3Client            *s3.Client
-	presignClient       *s3.PresignClient
-	bucket              string
+	storage             storage.Client
 	prefix              string
-	endpoint            string
-	cdnDomain           string
 	inventoryClient     StockSyncer
 	priceDropPublisher  PriceDropPublisher
 }
@@ -56,20 +50,15 @@ type ProductServiceDDB struct {
 func NewProductServiceDDB(
 	pr repository.ProductRepo,
 	cr repository.CategoryRepo,
-	s3Client *s3.Client,
-	presignClient *s3.PresignClient,
-	bucket, prefix, endpoint, cdnDomain string,
+	storageClient storage.Client,
+	prefix string,
 	inventoryClient StockSyncer,
 ) *ProductServiceDDB {
 	return &ProductServiceDDB{
 		productRepo:     pr,
 		categoryRepo:    cr,
-		s3Client:        s3Client,
-		presignClient:   presignClient,
-		bucket:          bucket,
+		storage:         storageClient,
 		prefix:          prefix,
-		endpoint:        endpoint,
-		cdnDomain:       cdnDomain,
 		inventoryClient: inventoryClient,
 	}
 }
@@ -105,21 +94,14 @@ func (s *ProductServiceDDB) GenerateProductImagePresignedUpload(ctx context.Cont
 }
 
 func (s *ProductServiceDDB) presignObjectUpload(ctx context.Context, key, contentType string, expiresSeconds int64) (string, string, string, error) {
-
-	input := &s3.PutObjectInput{
-		Bucket:      aws.String(s.bucket),
-		Key:         aws.String(key),
-		ContentType: aws.String(contentType),
+	if s.storage == nil {
+		return "", "", "", fmt.Errorf("storage client not configured")
 	}
-
-	presignedReq, err := s.presignClient.PresignPutObject(ctx, input, func(opts *s3.PresignOptions) {
-		opts.Expires = time.Duration(expiresSeconds) * time.Second
-	})
+	uploadURL, publicURL, err := s.storage.GeneratePresignedUpload(ctx, key, contentType, expiresSeconds)
 	if err != nil {
-		return "", "", "", fmt.Errorf("failed to presign put object: %w", err)
+		return "", "", "", err
 	}
-
-	return presignedReq.URL, key, s.publicObjectURL(key), nil
+	return uploadURL, key, publicURL, nil
 }
 
 func (s *ProductServiceDDB) GetProduct(ctx context.Context, id uuid.UUID) (*models.Product, error) {
@@ -218,16 +200,12 @@ func (s *ProductServiceDDB) CreateProduct(ctx context.Context, req ProductCreate
 			continue
 		}
 		key := fmt.Sprintf("%sproduct_img_%s_%d", s.prefix, req.SKU, i)
-		_, err = s.s3Client.PutObject(ctx, &s3.PutObjectInput{
-			Bucket:      aws.String(s.bucket),
-			Key:         aws.String(key),
-			Body:        bytes.NewReader(data),
-			ContentType: aws.String(fileHeader.Header.Get("Content-Type")),
-		})
-		if err != nil {
-			continue
+		if s.storage != nil {
+			pubURL, err := s.storage.Upload(ctx, key, data, fileHeader.Header.Get("Content-Type"))
+			if err == nil {
+				imageURLs = append(imageURLs, pubURL)
+			}
 		}
-		imageURLs = append(imageURLs, s.publicObjectURL(key))
 	}
 
 	// Step 3: Create the product model
@@ -955,27 +933,17 @@ func (s *ProductServiceDDB) uploadImageFromURL(ctx context.Context, imageURL, sk
 		return "", fmt.Errorf("downloaded file is not an allowed image (detected %s)", detected)
 	}
 	key := fmt.Sprintf("%sproduct_img_%s_%d", s.prefix, sku, index)
-	_, err = s.s3Client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket:      aws.String(s.bucket),
-		Key:         aws.String(key),
-		Body:        bytes.NewReader(data),
-		ContentType: aws.String(detected),
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to upload to s3: %w", err)
+	if s.storage == nil {
+		return "", fmt.Errorf("storage client not configured")
 	}
-
-	return s.publicObjectURL(key), nil
+	return s.storage.Upload(ctx, key, data, detected)
 }
 
 func (s *ProductServiceDDB) publicObjectURL(key string) string {
-	if s.cdnDomain != "" {
-		return fmt.Sprintf("%s/%s", normalizePublicBaseURL(s.cdnDomain), key)
+	if s.storage != nil {
+		return s.storage.PublicURL(key)
 	}
-	if s.endpoint != "" {
-		return fmt.Sprintf("%s/%s/%s", normalizePublicBaseURL(s.endpoint), s.bucket, key)
-	}
-	return fmt.Sprintf("https://%s.s3.amazonaws.com/%s", s.bucket, key)
+	return key
 }
 
 func normalizePublicBaseURL(raw string) string {

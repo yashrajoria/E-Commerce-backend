@@ -9,13 +9,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
-	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"github.com/yashrajoria/common/messaging"
 )
 
 func RegisterCartRoutes(
 	r *gin.Engine,
 	redisClient *redis.Client,
-	snsClient *aws_pkg.SNSClient,
+	snsClient messaging.Publisher,
 	cartTTL time.Duration,
 	validator controllers.ProductValidator,
 ) {

@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"github.com/yashrajoria/common/events"
+	"github.com/yashrajoria/common/messaging"
 	"go.uber.org/zap"
 )
 
@@ -38,7 +38,7 @@ type CouponService interface {
 // couponServiceImpl implements CouponService.
 type couponServiceImpl struct {
 	repo                 repository.CouponRepository
-	snsClient            aws_pkg.SNSPublisher
+	snsClient            messaging.Publisher
 	snsTopicArn          string
 	notificationTopicArn string
 	logger               *zap.Logger
@@ -47,7 +47,7 @@ type couponServiceImpl struct {
 // NewCouponService creates a new CouponService.
 func NewCouponService(
 	repo repository.CouponRepository,
-	snsClient aws_pkg.SNSPublisher,
+	snsClient messaging.Publisher,
 	snsTopicArn string,
 	notificationTopicArn string,
 	logger *zap.Logger,

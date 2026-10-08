@@ -13,26 +13,25 @@ import (
 	promotionservices "order-service/promotion/services"
 
 	"github.com/google/uuid"
-	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"github.com/yashrajoria/common/events"
+	"github.com/yashrajoria/common/messaging"
 	"github.com/yashrajoria/common/telemetry"
 )
 
 type SQSCheckoutConsumer struct {
-	sqsConsumer          *aws_pkg.SQSConsumer
-	sqsPublisher         *aws_pkg.SQSConsumer // For sending payment requests
+	sqsConsumer          messaging.Consumer
+	sqsPublisher         messaging.Consumer // For sending payment requests
 	orderRepo            repositories.OrderRepository
 	inventoryClient      *InventoryClient
-	metricsClient        *aws_pkg.MetricsClient
 	productServiceURL    string // Base URL for the product service (internal endpoint)
-	snsClient            aws_pkg.SNSPublisher
+	snsClient            messaging.Publisher
 	notificationTopicArn string
 	promotionService     promotionservices.CouponService
 	storeCurrency        string
 }
 
 // NewSQSCheckoutConsumer creates a new SQS-based checkout consumer
-func NewSQSCheckoutConsumer(sqsConsumer *aws_pkg.SQSConsumer, sqsPublisher *aws_pkg.SQSConsumer, orderRepo repositories.OrderRepository, inventoryClient *InventoryClient, metricsClient *aws_pkg.MetricsClient, productServiceURL string, snsClient aws_pkg.SNSPublisher, notificationTopicArn string, promotionService promotionservices.CouponService, storeCurrency string) *SQSCheckoutConsumer {
+func NewSQSCheckoutConsumer(sqsConsumer messaging.Consumer, sqsPublisher messaging.Consumer, orderRepo repositories.OrderRepository, inventoryClient *InventoryClient, _ any, productServiceURL string, snsClient messaging.Publisher, notificationTopicArn string, promotionService promotionservices.CouponService, storeCurrency string) *SQSCheckoutConsumer {
 	if productServiceURL == "" {
 		productServiceURL = "http://catalog-service:8082"
 	}
@@ -44,7 +43,6 @@ func NewSQSCheckoutConsumer(sqsConsumer *aws_pkg.SQSConsumer, sqsPublisher *aws_
 		sqsPublisher:         sqsPublisher,
 		orderRepo:            orderRepo,
 		inventoryClient:      inventoryClient,
-		metricsClient:        metricsClient,
 		productServiceURL:    productServiceURL,
 		snsClient:            snsClient,
 		notificationTopicArn: notificationTopicArn,
@@ -299,17 +297,6 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 
 	log.Printf("order created id=%s user=%s items=%d total_amount=%d",
 		order.ID.String(), order.UserID.String(), validItems, order.Amount)
-
-	// Emit metrics
-	if c.metricsClient != nil && c.metricsClient.IsEnabled() {
-		go func() {
-			metricCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			dims := map[string]string{"Service": "order-service"}
-			_ = c.metricsClient.RecordCount(metricCtx, aws_pkg.MetricOrdersCreated, dims)
-			_ = c.metricsClient.RecordValue(metricCtx, "OrderAmount", float64(order.Amount), dims)
-		}()
-	}
 
 	return nil
 }

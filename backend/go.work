@@ -3,11 +3,10 @@ go 1.25.6
 use (
 	.
 	./api-gateway
-	./pkg/aws
-	./services/identity-service
-	./services/catalog-service
 	./pkg/common
+	./services/agent-service
+	./services/catalog-service
+	./services/identity-service
 	./services/notification-service
 	./services/order-service
-	./services/agent-service
 )

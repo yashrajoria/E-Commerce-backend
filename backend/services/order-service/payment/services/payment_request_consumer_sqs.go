@@ -12,8 +12,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stripe/stripe-go/v80"
-	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"github.com/yashrajoria/common/events"
+	"github.com/yashrajoria/common/messaging"
 	"go.uber.org/zap"
 )
 
@@ -22,8 +22,8 @@ import (
 var validIdempotencyKey = regexp.MustCompile(`^[a-zA-Z0-9_:\-]{1,128}$`)
 
 type PaymentRequestConsumer struct {
-	sqsConsumer          *aws_pkg.SQSConsumer
-	snsPublisher         *aws_pkg.SNSClient
+	sqsConsumer          messaging.Consumer
+	snsPublisher         messaging.Publisher
 	paymentTopicArn      string
 	notificationTopicArn string
 	stripeSvc            StripeCheckoutCreator
@@ -38,8 +38,8 @@ type StripeCheckoutCreator interface {
 }
 
 func NewPaymentRequestConsumer(
-	sqsConsumer *aws_pkg.SQSConsumer,
-	snsPublisher *aws_pkg.SNSClient,
+	sqsConsumer messaging.Consumer,
+	snsPublisher messaging.Publisher,
 	paymentTopicArn string,
 	notificationTopicArn string,
 	stripeSvc StripeCheckoutCreator,

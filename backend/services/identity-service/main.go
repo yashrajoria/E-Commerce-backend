@@ -19,7 +19,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
-	awspkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
 	"github.com/yashrajoria/common/internalauth"
 	commonlog "github.com/yashrajoria/common/logger"
 	commonmw "github.com/yashrajoria/common/middleware"
@@ -68,11 +67,7 @@ func main() {
 		commondb.PurgeJob{Table: "refresh_tokens", Where: "expires_at < now() - interval '1 day'"},
 	)
 
-	snsPublisher, err := authservices.NewSNSPublisher(context.Background())
-	if err != nil {
-		logger.Warn("SNS publisher unavailable, email notifications disabled", zap.Error(err))
-		snsPublisher = nil
-	}
+	snsPublisher := authservices.NewSNSPublisherWithDB(database.DB)
 
 	// --- Dependency Injection ---
 
@@ -94,18 +89,6 @@ func main() {
 	authController := authcontrollers.NewAuthController(authService)
 	userController := usercontrollers.NewUserController(userService)
 
-	// --- CloudWatch (Logs + Metrics) ---
-	cwLogsClient, err := awspkg.NewCloudWatchLogsClient(context.Background(), "identity-service")
-	if err != nil {
-		zap.L().Warn("CloudWatch logs client init failed (non-fatal)", zap.Error(err))
-	}
-	_ = cwLogsClient
-
-	metricsClient, err := awspkg.NewMetricsClient(context.Background())
-	if err != nil {
-		zap.L().Warn("CloudWatch metrics client init failed (non-fatal)", zap.Error(err))
-	}
-
 	// --- HTTP Server & Middleware ---
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -113,9 +96,7 @@ func main() {
 	// other middleware so traces span the full request lifecycle.
 	r.Use(telemetry.GinMiddleware("identity-service"))
 
-	if metricsClient != nil {
-		r.Use(commonmw.MetricsMiddleware(metricsClient, "identity-service"))
-	}
+	r.Use(commonmw.MetricsMiddleware(nil, "identity-service"))
 	r.Use(commonmw.RequestLogger(logger))
 
 	r.Use(func(c *gin.Context) {

@@ -21,18 +21,15 @@ export NOTIFICATION_SERVICE_URL="http://localhost:8092"
 export ALLOW_AUTO_MIGRATE="${ALLOW_AUTO_MIGRATE:-true}"
 export GIN_MODE="${GIN_MODE:-release}"
 
-# No AWS emulator in this container: S3/SNS/SQS stay unconfigured here (SQS polling is off below).
-export AWS_REGION="${AWS_REGION:-us-east-1}"
-export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-test}"
-export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-test}"
-export AWS_EC2_METADATA_DISABLED="true"
-export AWS_USE_SECRETS="false"
-export CLOUDWATCH_ENABLED="false"
-
-# Disable SQS background polling on single container (no AWS SQS in free tier)
-export ENABLE_SQS_CONSUMER="false"
-export SQS_QUEUE_URL=""
-export NOTIFICATION_SQS_QUEUE_URL=""
+# Supabase & PostgreSQL Messaging defaults (zero external AWS required)
+export ORDER_SNS_TOPIC_ARN="${ORDER_SNS_TOPIC_ARN:-order-events}"
+export PAYMENT_SNS_TOPIC_ARN="${PAYMENT_SNS_TOPIC_ARN:-payment-events}"
+export AUTH_SNS_TOPIC_ARN="${AUTH_SNS_TOPIC_ARN:-auth-events}"
+export NOTIFICATION_SNS_TOPIC_ARN="${NOTIFICATION_SNS_TOPIC_ARN:-notification-queue}"
+export CHECKOUT_QUEUE_URL="${CHECKOUT_QUEUE_URL:-order-processing-queue}"
+export PAYMENT_EVENTS_QUEUE_URL="${PAYMENT_EVENTS_QUEUE_URL:-payment-events-queue}"
+export PAYMENT_REQUEST_QUEUE_URL="${PAYMENT_REQUEST_QUEUE_URL:-payment-request-queue}"
+export NOTIFICATION_SQS_QUEUE_URL="${NOTIFICATION_SQS_QUEUE_URL:-notification-queue}"
 
 # If OTEL_EXPORTER_OTLP_ENDPOINT points to local docker compose jaeger, disable it
 case "${OTEL_EXPORTER_OTLP_ENDPOINT:-}" in

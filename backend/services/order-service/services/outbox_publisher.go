@@ -7,7 +7,7 @@ import (
 	repositories "order-service/repository"
 	"time"
 
-	aws_pkg "github.com/yashrajoria/E-Commerce-backend/backend/pkg/aws"
+	"github.com/yashrajoria/common/messaging"
 	"github.com/yashrajoria/common/telemetry"
 	"go.uber.org/zap"
 )
@@ -27,12 +27,12 @@ type OutboxPublisherConfig struct {
 type OutboxPublisher struct {
 	repository repositories.OutboxRepository
 	sqs        OutboxSQSPublisher
-	sns        aws_pkg.SNSPublisher
+	sns        messaging.Publisher
 	owner      string
 	config     OutboxPublisherConfig
 }
 
-func NewOutboxPublisher(repository repositories.OutboxRepository, sqs OutboxSQSPublisher, sns aws_pkg.SNSPublisher, owner string) *OutboxPublisher {
+func NewOutboxPublisher(repository repositories.OutboxRepository, sqs OutboxSQSPublisher, sns messaging.Publisher, owner string) *OutboxPublisher {
 	return NewOutboxPublisherWithConfig(repository, sqs, sns, owner, OutboxPublisherConfig{
 		BatchSize:     10,
 		LeaseDuration: time.Minute,
@@ -42,7 +42,7 @@ func NewOutboxPublisher(repository repositories.OutboxRepository, sqs OutboxSQSP
 	})
 }
 
-func NewOutboxPublisherWithConfig(repository repositories.OutboxRepository, sqs OutboxSQSPublisher, sns aws_pkg.SNSPublisher, owner string, config OutboxPublisherConfig) *OutboxPublisher {
+func NewOutboxPublisherWithConfig(repository repositories.OutboxRepository, sqs OutboxSQSPublisher, sns messaging.Publisher, owner string, config OutboxPublisherConfig) *OutboxPublisher {
 	if config.BatchSize <= 0 {
 		config.BatchSize = 10
 	}
