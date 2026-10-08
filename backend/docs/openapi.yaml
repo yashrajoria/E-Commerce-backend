@@ -161,6 +161,93 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /agent/query/stream:
+    post:
+      tags:
+        - Agent Service
+      summary: Stream analytics reasoning and token deltas via SSE
+      description: |
+        Streams agent execution events over Server-Sent Events (`text/event-stream`):
+        - `status`: Step-by-step progress notifications ("Executing tool...", etc.)
+        - `token`: Partial response token deltas
+        - `action_card`: Dynamic product recommendations or action items
+        - `done`: Final structured payload
+      operationId: agentQueryStream
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentQueryRequest'
+      responses:
+        '200':
+          description: Server-Sent Events stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /shopper/query:
+    post:
+      tags:
+        - Agent Service
+      summary: Natural language personal shopper recommendations (public)
+      description: |
+        Public copilot endpoint allowing storefront shoppers to get curated recommendations,
+        bundle discounts, and dynamic action cards.
+      operationId: shopperQuery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentQueryRequest'
+      responses:
+        '200':
+          description: Agent response with synthesized recommendation and action card
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /shopper/query/stream:
+    post:
+      tags:
+        - Agent Service
+      summary: Real-time streaming personal shopper copilot via SSE (public)
+      description: |
+        Public copilot endpoint streaming tokens, live search status, and interactive action cards.
+      operationId: shopperQueryStream
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentQueryRequest'
+      responses:
+        '200':
+          description: Server-Sent Events stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /agent/session/{session_id}:
     get:
       tags:

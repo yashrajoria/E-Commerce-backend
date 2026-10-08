@@ -329,10 +329,14 @@ services:
       - PORT=8000
       # Agent calls domain APIs through api-gateway (TOOL_API_BASE_URL).
       - BFF_TIMEOUT=15
-      # FIX: Set your current active ngrok URL here.
-      # Free ngrok tunnels change on restart — use a static domain:
-      #   ngrok http --domain=your-fixed-name.ngrok-free.app 11434
-      - LLM_SERVICE_URL=${LLM_SERVICE_URL}
+      # LLM Provider configuration: 'auto', 'gemini', 'openai', or 'ollama'
+      - LLM_PROVIDER=${LLM_PROVIDER:-auto}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-1.5-flash}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
+      - LLM_SERVICE_URL=${LLM_SERVICE_URL:-http://ollama:11434/api/chat}
       - LLM_TIMEOUT=30
       - CONCURRENT_TOOL_LIMIT=10
     depends_on:
