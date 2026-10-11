@@ -151,19 +151,16 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 	if userID, exists := c.Get("user_id"); exists {
 		if uid, ok := userID.(string); ok && uid != "" {
 			req.Header.Set("X-User-ID", uid)
-			req.AddCookie(&http.Cookie{Name: "user_id", Value: uid, HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode, Path: "/"})
 		}
 	}
 	if email, exists := c.Get("email"); exists {
 		if e, ok := email.(string); ok && e != "" {
 			req.Header.Set("X-User-Email", e)
-			req.AddCookie(&http.Cookie{Name: "user_email", Value: e, HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode, Path: "/"})
 		}
 	}
 	if role, exists := c.Get("role"); exists {
 		if r, ok := role.(string); ok && r != "" {
 			req.Header.Set("X-User-Role", r)
-			req.AddCookie(&http.Cookie{Name: "user_role", Value: r, HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode, Path: "/"})
 		}
 	}
 
