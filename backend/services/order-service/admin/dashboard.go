@@ -343,28 +343,41 @@ func (d *DashboardController) GetDashboardSummary(c *gin.Context) {
 	resp.KPIs.ActiveUsers.Value = totalUsersCount
 	resp.KPIs.ActiveUsers.Trend = 0
 
-	resp.RevenueCharts.Monthly = []struct {
-		Name     string  `json:"name"`
-		Revenue  float64 `json:"revenue"`
-		Profit   float64 `json:"profit"`
-		Expenses float64 `json:"expenses"`
-	}{
-		{Name: "Jan", Revenue: totalRevenue * 0.1, Profit: totalRevenue * 0.05, Expenses: totalRevenue * 0.05},
-		{Name: "Feb", Revenue: totalRevenue * 0.15, Profit: totalRevenue * 0.08, Expenses: totalRevenue * 0.07},
-		{Name: "Mar", Revenue: totalRevenue * 0.2, Profit: totalRevenue * 0.1, Expenses: totalRevenue * 0.1},
-		{Name: "Apr", Revenue: totalRevenue * 0.25, Profit: totalRevenue * 0.12, Expenses: totalRevenue * 0.13},
-		{Name: "May", Revenue: totalRevenue * 0.3, Profit: totalRevenue * 0.15, Expenses: totalRevenue * 0.15},
+	// Real revenue series. Cost data doesn't exist, so profit/expenses are reported as 0
+	// rather than invented.
+	utcNow := time.Now().UTC()
+	monthStart := time.Date(utcNow.Year(), utcNow.Month()-5, 1, 0, 0, 0, 0, time.UTC)
+	dayStart := time.Date(utcNow.Year(), utcNow.Month(), utcNow.Day()-6, 0, 0, 0, 0, time.UTC)
+	monthly, merr := d.orderRepo.RevenueSeries(ctx, "month", monthStart)
+	daily, derr := d.orderRepo.RevenueSeries(ctx, "day", dayStart)
+	if merr != nil || derr != nil {
+		d.logger.Warn("dashboard: revenue series failed", zap.NamedError("monthly", merr), zap.NamedError("daily", derr))
 	}
-
-	resp.RevenueCharts.Weekly = []struct {
-		Name     string  `json:"name"`
-		Revenue  float64 `json:"revenue"`
-		Profit   float64 `json:"profit"`
-		Expenses float64 `json:"expenses"`
-	}{
-		{Name: "Mon", Revenue: 6200, Profit: 3200, Expenses: 3000},
-		{Name: "Tue", Revenue: 7800, Profit: 4100, Expenses: 3700},
-		{Name: "Wed", Revenue: 8100, Profit: 4400, Expenses: 3700},
+	byBucket := func(points []repositories.RevenuePoint) map[time.Time]float64 {
+		m := make(map[time.Time]float64, len(points))
+		for _, p := range points {
+			m[p.Bucket.UTC()] = float64(p.Revenue) / 100
+		}
+		return m
+	}
+	mRev, dRev := byBucket(monthly), byBucket(daily)
+	for i := 0; i < 6; i++ {
+		t := monthStart.AddDate(0, i, 0)
+		resp.RevenueCharts.Monthly = append(resp.RevenueCharts.Monthly, struct {
+			Name     string  `json:"name"`
+			Revenue  float64 `json:"revenue"`
+			Profit   float64 `json:"profit"`
+			Expenses float64 `json:"expenses"`
+		}{Name: t.Format("Jan"), Revenue: mRev[t]})
+	}
+	for i := 0; i < 7; i++ {
+		t := dayStart.AddDate(0, 0, i)
+		resp.RevenueCharts.Weekly = append(resp.RevenueCharts.Weekly, struct {
+			Name     string  `json:"name"`
+			Revenue  float64 `json:"revenue"`
+			Profit   float64 `json:"profit"`
+			Expenses float64 `json:"expenses"`
+		}{Name: t.Format("Mon"), Revenue: dRev[t]})
 	}
 
 	count := 0

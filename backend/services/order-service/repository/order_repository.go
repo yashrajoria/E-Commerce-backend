@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"fmt"
 	"errors"
 	"order-service/models"
 	"time"
@@ -31,6 +32,14 @@ type OrderRepository interface {
 	UpdateOrderStatus(ctx context.Context, orderID uuid.UUID, fromStatus, toStatus string, extra map[string]interface{}) error
 	FindByIdempotencyKey(ctx context.Context, key string) (*models.Order, error)
 	GetRevenueAnalytics(ctx context.Context) (map[string]interface{}, error)
+	// RevenueSeries sums revenue-status order amounts (cents) per "day" or "month" bucket since the given time.
+	RevenueSeries(ctx context.Context, unit string, since time.Time) ([]RevenuePoint, error)
+}
+
+// RevenuePoint is one bucket of a revenue time series; Bucket is the bucket start (UTC).
+type RevenuePoint struct {
+	Bucket  time.Time
+	Revenue int64
 }
 
 // GormOrderRepository implements OrderRepository using GORM
@@ -201,4 +210,16 @@ func (r *GormOrderRepository) GetRevenueAnalytics(ctx context.Context) (map[stri
 		"total_orders_today":     countToday,
 		"total_orders_yesterday": countYesterday,
 	}, nil
+}
+
+func (r *GormOrderRepository) RevenueSeries(ctx context.Context, unit string, since time.Time) ([]RevenuePoint, error) {
+	if unit != "day" && unit != "month" {
+		return nil, fmt.Errorf("unsupported revenue bucket %q", unit)
+	}
+	var points []RevenuePoint
+	err := r.db.WithContext(ctx).Model(&models.Order{}).
+		Select("date_trunc(?, created_at) AS bucket, COALESCE(SUM(amount), 0) AS revenue", unit).
+		Where("status IN ? AND created_at >= ?", RevenueStatuses, since).
+		Group("bucket").Order("bucket").Scan(&points).Error
+	return points, err
 }
