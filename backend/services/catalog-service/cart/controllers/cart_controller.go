@@ -233,6 +233,22 @@ func (cc *CartController) ClearCart(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "cart cleared"})
 }
 
+// ClearUserCart empties a user's cart on behalf of order-service once their payment
+// succeeded. Mesh-only (internalauth + gateway blocks /internal/ paths).
+func (cc *CartController) ClearUserCart(c *gin.Context) {
+	userID := c.Param("user_id")
+	if _, err := uuid.Parse(userID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
+		return
+	}
+	if err := cc.Repo.DeleteCart(c.Request.Context(), userID); err != nil {
+		zap.L().Error("[ClearUserCart] Failed to clear cart", zap.String("userID", userID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to clear cart"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "cart cleared"})
+}
+
 // ApplyCoupon and adds a coupon code to the user's cart
 func (cc *CartController) ApplyCoupon(c *gin.Context) {
 	userID := c.GetHeader("X-User-ID")

@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
+	"github.com/yashrajoria/common/internalauth"
 	"github.com/yashrajoria/common/messaging"
 )
 
@@ -21,6 +22,9 @@ func RegisterCartRoutes(
 ) {
 	repo := database.NewCartRepository(redisClient, cartTTL)
 	controller := controllers.NewCartController(repo, snsClient, cartTTL, validator)
+
+	// Mesh-only: order-service clears the cart after payment succeeds.
+	r.DELETE("/cart/internal/:user_id", internalauth.Require(), controller.ClearUserCart)
 
 	// Protected cart routes — gateway JWT + service-side X-User-ID gate
 	api := r.Group("/cart")

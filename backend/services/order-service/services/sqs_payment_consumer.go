@@ -23,7 +23,16 @@ type SQSPaymentConsumer struct {
 	snsClient            messaging.Publisher
 	notificationTopicArn string
 	productServiceURL    string
+	cartClearer          CartClearer
 }
+
+// CartClearer empties a user's cart once their order is paid.
+type CartClearer interface {
+	ClearCart(ctx context.Context, userID string) error
+}
+
+// SetCartClearer enables clearing the cart after a successful payment.
+func (c *SQSPaymentConsumer) SetCartClearer(cc CartClearer) { c.cartClearer = cc }
 
 // NewSQSPaymentConsumer creates a new SQS-based payment event consumer
 func NewSQSPaymentConsumer(sqsConsumer messaging.Consumer, orderRepo repositories.OrderRepository, inventoryClient *InventoryClient, _ any, snsClient messaging.Publisher, notificationTopicArn string, productServiceURL string) *SQSPaymentConsumer {
@@ -95,6 +104,13 @@ func (c *SQSPaymentConsumer) handleMessage(ctx context.Context, body string) err
 		}
 		if applied {
 			c.publishOrderConfirmedNotification(ctx, evt)
+			// Best-effort: the cart is kept until payment succeeds so a failed payment
+			// doesn't lose it. A miss only leaves a stale cart (it also expires by TTL).
+			if c.cartClearer != nil && evt.UserID != "" {
+				if err := c.cartClearer.ClearCart(ctx, evt.UserID); err != nil {
+					log.Printf("[OrderService][SQSPaymentConsumer] failed to clear cart: user=%s err=%v", evt.UserID, err)
+				}
+			}
 		}
 	case "payment_failed", "checkout_session_failed":
 		applied, already, err := c.updateOrderStatusWithTime(ctx, evt.OrderID, "payment_failed", nil, &now)

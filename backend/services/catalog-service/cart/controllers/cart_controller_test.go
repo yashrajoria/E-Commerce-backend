@@ -3,12 +3,15 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 
 	"catalog-service/cart/models"
 	productservices "catalog-service/services"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
 
@@ -68,5 +71,16 @@ func TestValidateProductsBatchUsesOneCallAndFlagsInvalid(t *testing.T) {
 	}
 	if atomic.LoadInt32(&validator.calls) != 1 {
 		t.Fatalf("expected one validator call, got %d", validator.calls)
+	}
+}
+
+func TestClearUserCart_RejectsInvalidUserID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "user_id", Value: "../../etc"}}
+	(&CartController{}).ClearUserCart(c)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d", w.Code)
 	}
 }

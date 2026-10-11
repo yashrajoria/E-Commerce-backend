@@ -146,3 +146,31 @@ func TestSQSPaymentConsumer_ConfirmFailureIsRetried(t *testing.T) {
 		t.Fatalf("retry should succeed: %v", err)
 	}
 }
+
+type fakeCartClearer struct{ users []string }
+
+func (f *fakeCartClearer) ClearCart(_ context.Context, userID string) error {
+	f.users = append(f.users, userID)
+	return nil
+}
+
+// The cart is cleared once, by the delivery that applied the paid transition.
+func TestSQSPaymentConsumer_ClearsCartOnceOnPaid(t *testing.T) {
+	orderID, userID := uuid.New(), uuid.New().String()
+	repo := &fakeOrderRepo{order: models.Order{ID: orderID, Status: "pending_payment", Amount: 1000}}
+	productServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNotFound) }))
+	defer productServer.Close()
+	clearer := &fakeCartClearer{}
+	consumer := NewSQSPaymentConsumer(nil, repo, NewInventoryClient(productServer.URL), nil, &countingSNSPublisher{}, "arn:x", productServer.URL)
+	consumer.SetCartClearer(clearer)
+	body := `{"type":"payment_succeeded","order_id":"` + orderID.String() + `","user_id":"` + userID + `"}`
+
+	for i := 0; i < 2; i++ {
+		if err := consumer.handleMessage(context.Background(), body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(clearer.users) != 1 || clearer.users[0] != userID {
+		t.Fatalf("expected one clear for %s, got %v", userID, clearer.users)
+	}
+}

@@ -249,6 +249,7 @@ func main() {
 		cfg.NotificationSNSTopicARN,
 		cfg.ProductServiceURL,
 	)
+	paymentConsumer.SetCartClearer(services.NewCartClient(cfg.ProductServiceURL))
 	go paymentConsumer.Start(shutdownCtx)
 	logger.Info("Started payment events consumer", zap.String("queue", paymentEventsQueueURL))
 
