@@ -16,6 +16,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const webhookDBTimeout = 10 * time.Second
+
 // StripeWebhook receives and dispatches Stripe webhook events.
 func (pc *PaymentController) StripeWebhook(c *gin.Context) {
 	event, err := pc.Stripe.ParseWebhook(c.Request)
@@ -72,6 +74,17 @@ func (pc *PaymentController) handleCheckoutCompleted(event stripe.Event, rawPayl
 		return fmt.Errorf("unmarshal checkout session: %w", err)
 	}
 
+	// Async methods (bank debit etc.) fire checkout.session.completed while still
+	// unpaid; fulfil only on async_payment_succeeded for those.
+	if sess.PaymentStatus == stripe.CheckoutSessionPaymentStatusUnpaid {
+		pc.Logger.Info("Checkout session completed but unpaid; awaiting async result",
+			zap.String("session_id", sess.ID))
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), webhookDBTimeout)
+	defer cancel()
+
 	orderID := sess.Metadata["order_id"]
 	userID := sess.Metadata["user_id"]
 	if orderID == "" || userID == "" {
@@ -93,7 +106,7 @@ func (pc *PaymentController) handleCheckoutCompleted(event stripe.Event, rawPayl
 		return nil
 	}
 
-	payment, err := pc.Repo.GetPaymentByOrderID(context.Background(), orderUUID)
+	payment, err := pc.Repo.GetPaymentByOrderID(ctx, orderUUID)
 	if err != nil {
 		pc.Logger.Error("Payment not found for order_id",
 			zap.String("order_id", orderID),
@@ -129,7 +142,7 @@ func (pc *PaymentController) handleCheckoutCompleted(event stripe.Event, rawPayl
 	// the UPDATE itself on status NOT IN (terminal) makes only one writer win the
 	// transition, and the outbox event is inserted in the same DB transaction so the
 	// status change and the downstream event can never diverge.
-	updated, err := pc.Repo.UpdateIfStatusNotInWithOutbox(context.Background(), payment.OrderID, terminalStatusList(), map[string]interface{}{
+	updated, err := pc.Repo.UpdateIfStatusNotInWithOutbox(ctx, payment.OrderID, terminalStatusList(), map[string]interface{}{
 		"status":               "succeeded",
 		"stripe_event_payload": string(rawPayload),
 		"succeeded_at":         &now,
@@ -159,8 +172,11 @@ func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, statu
 		return fmt.Errorf("unmarshal payment intent: %w", err)
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), webhookDBTimeout)
+	defer cancel()
+
 	// Primary lookup: direct PaymentIntent flow stores the PI ID as stripe_payment_id.
-	payment, err := pc.Repo.GetPaymentByStripeID(context.Background(), pi.ID)
+	payment, err := pc.Repo.GetPaymentByStripeID(ctx, pi.ID)
 	if err != nil {
 		// Fallback: Checkout Session flow stores the Session ID, not the PI ID.
 		// Try resolving via order_id from the PaymentIntent metadata.
@@ -178,7 +194,7 @@ func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, statu
 				zap.String("order_id", orderIDStr), zap.Error(parseErr))
 			return nil
 		}
-		payment, err = pc.Repo.GetPaymentByOrderID(context.Background(), orderUUID)
+		payment, err = pc.Repo.GetPaymentByOrderID(ctx, orderUUID)
 		if err != nil {
 			pc.Logger.Error("Payment not found for PaymentIntent",
 				zap.String("payment_intent_id", pi.ID),
@@ -255,7 +271,7 @@ func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, statu
 	// Atomic conditional update — see handleCheckoutCompleted for why the terminal-status
 	// gate must live inside the UPDATE, not just the read above. The outbox events are
 	// inserted in the same DB transaction, only when this call wins the transition.
-	updated, err := pc.Repo.UpdateIfStatusNotInWithOutbox(context.Background(), payment.OrderID, terminalStatusList(), updates, outboxEvents)
+	updated, err := pc.Repo.UpdateIfStatusNotInWithOutbox(ctx, payment.OrderID, terminalStatusList(), updates, outboxEvents)
 	if err != nil {
 		pc.Logger.Error("Failed to update payment status",
 			zap.String("payment_id", payment.Payment_ID.String()),

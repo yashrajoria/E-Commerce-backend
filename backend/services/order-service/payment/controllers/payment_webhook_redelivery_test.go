@@ -176,3 +176,21 @@ func TestStripeWebhook_ConcurrentRedelivery(t *testing.T) {
 		t.Fatalf("published correlation_id=%q", published.CorrelationID)
 	}
 }
+
+func TestHandleCheckoutCompleted_UnpaidSkipped(t *testing.T) {
+	orderID, userID := uuid.New(), uuid.New()
+	repo := &mockPaymentRepo{payment: models.Payment{Payment_ID: uuid.New(), OrderID: orderID, UserID: userID, Status: "pending"}}
+	pc := &PaymentController{Repo: repo, SNS: &countingSNSPublisher{}, Logger: zap.NewNop()}
+	raw, _ := json.Marshal(stripe.CheckoutSession{
+		ID:            "cs_unpaid",
+		PaymentStatus: stripe.CheckoutSessionPaymentStatusUnpaid,
+		Metadata:      map[string]string{"order_id": orderID.String(), "user_id": userID.String()},
+	})
+	ev := stripe.Event{ID: "evt_u", Type: "checkout.session.completed", Data: &stripe.EventData{Raw: raw}}
+	if err := pc.handleCheckoutCompleted(ev, raw); err != nil {
+		t.Fatal(err)
+	}
+	if repo.payment.Status != "pending" {
+		t.Fatalf("unpaid session marked %q", repo.payment.Status)
+	}
+}
