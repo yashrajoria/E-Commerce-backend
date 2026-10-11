@@ -166,6 +166,10 @@ func (r *GormOrderRepository) FindByIdempotencyKey(ctx context.Context, key stri
 	return &order, nil
 }
 
+// RevenueStatuses are the order statuses that count as realised revenue. Unpaid
+// (pending_payment, payment_failed) and cancelled/refunded orders must not.
+var RevenueStatuses = []string{"paid", "processing", "completed"}
+
 func (r *GormOrderRepository) GetRevenueAnalytics(ctx context.Context) (map[string]interface{}, error) {
 	var totalRevenue int64
 	var revenueToday, revenueYesterday int64
@@ -177,18 +181,18 @@ func (r *GormOrderRepository) GetRevenueAnalytics(ctx context.Context) (map[stri
 
 	// Lifetime Total
 	r.db.WithContext(ctx).Model(&models.Order{}).
-		Where("status NOT IN ('CANCELLED', 'REFUNDED', 'canceled', 'refunded')").
-		Select("SUM(amount)").Row().Scan(&totalRevenue)
+		Where("status IN ?", RevenueStatuses).
+		Select("COALESCE(SUM(amount), 0)").Row().Scan(&totalRevenue)
 
 	// Today
 	r.db.WithContext(ctx).Model(&models.Order{}).
-		Where("status NOT IN ('CANCELLED', 'REFUNDED', 'canceled', 'refunded') AND created_at >= ?", startOfToday).
-		Select("SUM(amount), COUNT(*)").Row().Scan(&revenueToday, &countToday)
+		Where("status IN ? AND created_at >= ?", RevenueStatuses, startOfToday).
+		Select("COALESCE(SUM(amount), 0), COUNT(*)").Row().Scan(&revenueToday, &countToday)
 
 	// Yesterday
 	r.db.WithContext(ctx).Model(&models.Order{}).
-		Where("status NOT IN ('CANCELLED', 'REFUNDED', 'canceled', 'refunded') AND created_at >= ? AND created_at < ?", startOfYesterday, startOfToday).
-		Select("SUM(amount), COUNT(*)").Row().Scan(&revenueYesterday, &countYesterday)
+		Where("status IN ? AND created_at >= ? AND created_at < ?", RevenueStatuses, startOfYesterday, startOfToday).
+		Select("COALESCE(SUM(amount), 0), COUNT(*)").Row().Scan(&revenueYesterday, &countYesterday)
 
 	return map[string]interface{}{
 		"total_revenue":          totalRevenue,

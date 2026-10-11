@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -280,7 +281,7 @@ func (d *DashboardController) GetDashboardSummary(c *gin.Context) {
 	}
 
 	for i, order := range allOrders {
-		if order.Status != "CANCELLED" && order.Status != "REFUNDED" && order.Status != "canceled" && order.Status != "refunded" {
+		if slices.Contains(repositories.RevenueStatuses, order.Status) {
 			totalRevenue += float64(order.Amount) / 100
 			if !order.CreatedAt.Before(startOfToday) {
 				revenueToday += float64(order.Amount) / 100
@@ -333,7 +334,7 @@ func (d *DashboardController) GetDashboardSummary(c *gin.Context) {
 		return ((today - yesterday) / yesterday) * 100.0
 	}
 
-	resp.KPIs.TotalRevenue.Value = num(analytics, "total_revenue")
+	resp.KPIs.TotalRevenue.Value = num(analytics, "total_revenue") / 100 // cents -> dollars, like the charts
 	resp.KPIs.TotalRevenue.Trend = calcTrend(num(analytics, "revenue_today"), num(analytics, "revenue_yesterday"))
 	resp.KPIs.TotalOrders.Value = int(totalOrdersCount)
 	resp.KPIs.TotalOrders.Trend = calcTrend(num(analytics, "total_orders_today"), num(analytics, "total_orders_yesterday"))
