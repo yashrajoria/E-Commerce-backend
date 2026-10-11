@@ -194,3 +194,18 @@ func TestHandleCheckoutCompleted_UnpaidSkipped(t *testing.T) {
 		t.Fatalf("unpaid session marked %q", repo.payment.Status)
 	}
 }
+
+func TestHandleCheckoutExpired_FailsPendingPaymentAndEmitsEvent(t *testing.T) {
+	orderID, userID := uuid.New(), uuid.New()
+	repo := &mockPaymentRepo{payment: models.Payment{Payment_ID: uuid.New(), OrderID: orderID, UserID: userID, Amount: 100, Currency: "usd", Status: "pending"}}
+	pc := &PaymentController{Repo: repo, SNS: &countingSNSPublisher{}, Logger: zap.NewNop()}
+	raw, _ := json.Marshal(stripe.CheckoutSession{ID: "cs_exp", Metadata: map[string]string{"order_id": orderID.String()}})
+	ev := stripe.Event{ID: "evt_e", Type: "checkout.session.expired", Data: &stripe.EventData{Raw: raw}}
+
+	if err := pc.handleCheckoutExpired(ev, raw); err != nil {
+		t.Fatal(err)
+	}
+	if repo.payment.Status != "failed" {
+		t.Fatalf("expected payment failed, got %q", repo.payment.Status)
+	}
+}

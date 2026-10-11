@@ -45,6 +45,8 @@ func (pc *PaymentController) StripeWebhook(c *gin.Context) {
 		fulfillErr = pc.handlePaymentIntentStatus(event, "succeeded", rawPayload)
 	case "payment_intent.payment_failed":
 		fulfillErr = pc.handlePaymentIntentStatus(event, "failed", rawPayload)
+	case "checkout.session.expired":
+		fulfillErr = pc.handleCheckoutExpired(event, rawPayload)
 	default:
 		pc.Logger.Info("Unhandled webhook event type", zap.String("event_type", string(event.Type)))
 	}
@@ -205,6 +207,12 @@ func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, statu
 		}
 	}
 
+	return pc.applyPaymentStatus(ctx, payment, status, rawPayload, pi.ReceiptEmail)
+}
+
+// applyPaymentStatus moves a payment to status (succeeded/failed) with its outbox
+// events in one conditional transaction; terminal payments are left untouched.
+func (pc *PaymentController) applyPaymentStatus(ctx context.Context, payment *models.Payment, status string, rawPayload []byte, receiptEmail string) error {
 	if terminalStatuses[payment.Status] {
 		pc.Logger.Info("Skipping duplicate payment webhook",
 			zap.String("payment_id", payment.Payment_ID.String()),
@@ -244,7 +252,7 @@ func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, statu
 	if status == "failed" {
 		notificationEvent := events.NewPaymentFailedEvent(
 			payment.UserID.String(),
-			pi.ReceiptEmail,
+			receiptEmail,
 			"",
 			"",
 			payment.OrderID.String(),
@@ -286,4 +294,31 @@ func (pc *PaymentController) handlePaymentIntentStatus(event stripe.Event, statu
 		return nil
 	}
 	return nil
+}
+
+// handleCheckoutExpired fails the payment of an abandoned Checkout Session so the
+// payment_failed event releases the order's stock; otherwise it stays reserved forever.
+func (pc *PaymentController) handleCheckoutExpired(event stripe.Event, rawPayload []byte) error {
+	var sess stripe.CheckoutSession
+	if err := json.Unmarshal(event.Data.Raw, &sess); err != nil {
+		return fmt.Errorf("unmarshal checkout session: %w", err)
+	}
+	orderUUID, err := uuid.Parse(sess.Metadata["order_id"])
+	if err != nil {
+		pc.Logger.Warn("Expired checkout session without valid order_id", zap.String("session_id", sess.ID))
+		return nil // won't self-heal; ack
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), webhookDBTimeout)
+	defer cancel()
+
+	payment, err := pc.Repo.GetPaymentByOrderID(ctx, orderUUID)
+	if err != nil {
+		return fmt.Errorf("payment not found for order %s: %w", orderUUID, err)
+	}
+	// A newer session for the same order may be live; only the payment's own session expiring counts.
+	if id := payment.StripePaymentID; id != nil && *id != "" && *id != sess.ID {
+		return nil
+	}
+	return pc.applyPaymentStatus(ctx, payment, "failed", rawPayload, sess.CustomerEmail)
 }
