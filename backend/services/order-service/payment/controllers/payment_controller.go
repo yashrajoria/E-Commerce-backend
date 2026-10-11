@@ -263,6 +263,13 @@ func (pc *PaymentController) VerifyPayment(c *gin.Context) {
 		return
 	}
 
+	// Only the payment's owner (or admin) may inspect its Stripe session.
+	owned, err := pc.Repo.GetPaymentByStripeID(c.Request.Context(), req.SessionID)
+	if err != nil || !pc.ownsPayment(c, owned) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "payment not found"})
+		return
+	}
+
 	sess, err := session.Get(req.SessionID, nil)
 	if err != nil {
 		var stripeErr *stripe.Error
