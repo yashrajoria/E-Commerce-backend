@@ -333,13 +333,14 @@ func (s *ProductServiceDDB) UpdateProduct(ctx context.Context, id uuid.UUID, req
 				newPrice,
 				time.Now().Unix(),
 			)
-			go func() {
-				if err := s.priceDropPublisher.PublishPriceDrop(context.Background(), evt); err != nil {
-					zap.L().Warn("Failed to publish price drop guarantee event",
-						zap.String("product_id", id.String()),
-						zap.Error(err))
-				}
-			}()
+			// Synchronous (bounded) so a shutdown or caller return can't silently drop it.
+			pubCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			if err := s.priceDropPublisher.PublishPriceDrop(pubCtx, evt); err != nil {
+				zap.L().Warn("Failed to publish price drop guarantee event",
+					zap.String("product_id", id.String()),
+					zap.Error(err))
+			}
 		}
 	}
 
@@ -389,22 +390,18 @@ func (s *ProductServiceDDB) BulkDeleteProducts(ctx context.Context, req BulkDele
 			idsSet[id.String()] = id
 		}
 
-		// If categories provided, scan products and add matches
+		// If categories provided, let the DB filter by membership instead of loading every product.
 		if len(req.CategoryIDs) > 0 {
-			// Fetch all products (Find currently does table scan)
-			products, err := s.productRepo.Find(ctx, nil, 0, 0)
+			cats := make([]string, len(req.CategoryIDs))
+			for i, c := range req.CategoryIDs {
+				cats[i] = c.String()
+			}
+			products, err := s.productRepo.Find(ctx, map[string]interface{}{"category_ids": cats}, 0, 0)
 			if err != nil {
 				return 0, fmt.Errorf("failed to fetch products for category delete: %w", err)
 			}
 			for _, p := range products {
-				for _, cat := range p.CategoryIDs {
-					for _, target := range req.CategoryIDs {
-						if cat == target {
-							idsSet[p.ID.String()] = p.ID
-							break
-						}
-					}
-				}
+				idsSet[p.ID.String()] = p.ID
 			}
 		}
 
@@ -422,14 +419,14 @@ func (s *ProductServiceDDB) BulkDeleteProducts(ctx context.Context, req BulkDele
 		return 0, fmt.Errorf("failed to delete products: %w", err)
 	}
 
-	// Sync inventory for bulk deletes (async to avoid blocking response)
-	if s.inventoryClient != nil && len(idsToDelete) > 0 {
-		go func(ids []uuid.UUID) {
-			bgCtx := context.Background()
-			for _, id := range ids {
-				_ = s.inventoryClient.SetStock(bgCtx, id.String(), 0)
+	// Zero stock for deleted products; failures are logged, not fatal (rows already deleted).
+	if s.inventoryClient != nil {
+		for _, id := range idsToDelete {
+			if err := s.inventoryClient.SetStock(ctx, id.String(), 0); err != nil {
+				zap.L().Warn("Failed to zero stock for deleted product",
+					zap.String("product_id", id.String()), zap.Error(err))
 			}
-		}(idsToDelete)
+		}
 	}
 
 	return int64(len(idsToDelete)), nil
