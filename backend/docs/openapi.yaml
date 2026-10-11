@@ -4531,13 +4531,13 @@ components:
         value:
           type: number
           format: double
-          description: Discount value — percentage (0–100), flat amount in currency units, or 0 for freeshipping.
+          description: Discount value — percentage (0–100), flat amount in minor units (cents), or 0 for freeshipping.
           example: 10
         min_order_value:
           type: number
           format: double
-          description: Minimum cart total required to apply this coupon.
-          example: 50.0
+          description: Minimum cart total, in minor units (cents), required to apply this coupon.
+          example: 5000
         usage_limit:
           type: integer
           description: Maximum number of times this coupon can be used. 0 = unlimited.
@@ -4614,8 +4614,9 @@ components:
         cart_total:
           type: number
           format: double
+          description: Cart total in minor units (cents), same unit as coupon value and min_order_value.
           minimum: 0.01
-          example: 120.0
+          example: 12000
 
     ValidateCouponResponse:
       type: object
@@ -4636,7 +4637,8 @@ components:
         discount_amount:
           type: number
           format: double
-          example: 12.0
+          description: Discount in minor units (cents).
+          example: 1200
         message:
           type: string
           example: Coupon applied successfully
