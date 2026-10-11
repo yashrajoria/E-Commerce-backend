@@ -144,7 +144,7 @@ def _row_to_dict(row) -> dict:
 @router.get("/agent/mutations/pending")
 async def list_pending(req: Request, limit: int = 50):
     _require_admin(req)
-    rows = await list_pending_mutations(limit=limit)
+    rows = await list_pending_mutations(limit=max(1, min(limit, 200)))
     return [_row_to_dict(r) for r in rows]
 
 
