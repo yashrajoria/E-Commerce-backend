@@ -46,6 +46,16 @@ type PaymentController struct {
 	Repo                 repository.PaymentRepository
 }
 
+// ownsPayment reports whether the caller (gateway-verified identity) owns the payment
+// or is an admin. Non-owners get 404 so order IDs can't be probed.
+func (pc *PaymentController) ownsPayment(c *gin.Context, payment *models.Payment) bool {
+	if strings.EqualFold(c.GetHeader("X-User-Role"), "admin") {
+		return true
+	}
+	uid, err := middleware.GetUserID(c)
+	return err == nil && uid == payment.UserID.String()
+}
+
 // GetPaymentStatusByOrderID is a polling endpoint for the frontend.
 func (pc *PaymentController) GetPaymentStatusByOrderID(c *gin.Context) {
 	orderIDStr := c.Param("order_id")
@@ -69,6 +79,11 @@ func (pc *PaymentController) GetPaymentStatusByOrderID(c *gin.Context) {
 		}
 		pc.Logger.Error("Error fetching payment by order_id", zap.String("order_id", orderIDStr), zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
+		return
+	}
+
+	if !pc.ownsPayment(c, payment) {
+		c.JSON(http.StatusOK, gin.H{"order_id": orderIDStr, "status": "PENDING", "checkout_url": nil})
 		return
 	}
 
@@ -104,6 +119,11 @@ func (pc *PaymentController) CreateCheckoutSession(c *gin.Context) {
 		}
 		pc.Logger.Error("Error fetching payment by order_id", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
+		return
+	}
+
+	if !pc.ownsPayment(c, payment) {
+		pc.respondError(c, http.StatusNotFound, "payment record not found", nil)
 		return
 	}
 
