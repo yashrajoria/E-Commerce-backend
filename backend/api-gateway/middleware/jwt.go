@@ -3,6 +3,7 @@ package middleware
 import (
 	"api-gateway/logger"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -64,11 +65,16 @@ func JWTMiddleware() gin.HandlerFunc {
 
 		if tokenString == "" {
 			// No access token — try refresh_token before failing.
-			if claims, ok := trySilentRefresh(c); ok {
+			claims, ok, rerr := trySilentRefresh(c)
+			if ok {
 				if !applyClaims(c, claims) {
 					return
 				}
 				c.Next()
+				return
+			}
+			if errors.Is(rerr, errRefreshUnavailable) {
+				abortAuthUnavailable(c)
 				return
 			}
 			logger.Log.Warn("authentication failed: missing token",
@@ -85,11 +91,16 @@ func JWTMiddleware() gin.HandlerFunc {
 		claims, err := parseToken(tokenString, "access")
 		if err != nil {
 			// Access expired/invalid — rotate via refresh_token when present.
-			if refreshed, ok := trySilentRefresh(c); ok {
+			refreshed, ok, rerr := trySilentRefresh(c)
+			if ok {
 				if !applyClaims(c, refreshed) {
 					return
 				}
 				c.Next()
+				return
+			}
+			if errors.Is(rerr, errRefreshUnavailable) {
+				abortAuthUnavailable(c)
 				return
 			}
 			logger.Log.Warn("authentication failed: invalid or expired token",
@@ -131,6 +142,15 @@ func applyClaims(c *gin.Context, claims jwt.MapClaims) bool {
 	return true
 }
 
+// errRefreshUnavailable marks an identity-service outage (network error or 5xx), as
+// opposed to a rejected refresh token, so clients get 503 and keep their session.
+var errRefreshUnavailable = errors.New("identity-service unavailable")
+
+func abortAuthUnavailable(c *gin.Context) {
+	c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Authentication service temporarily unavailable"})
+	c.Abort()
+}
+
 // refreshResult carries everything trySilentRefresh's caller needs back out
 // of the (possibly shared, via singleflight) identity-service call.
 type refreshResult struct {
@@ -144,11 +164,12 @@ type refreshResult struct {
 // token shared across many in-flight requests doesn't trigger a thundering
 // herd of refresh calls (and doesn't race an identity-service that rotates/
 // single-uses refresh tokens).
-func trySilentRefresh(c *gin.Context) (jwt.MapClaims, bool) {
+func trySilentRefresh(c *gin.Context) (jwt.MapClaims, bool, error) {
 	refreshToken, err := c.Cookie("refresh_token")
 	if err != nil || strings.TrimSpace(refreshToken) == "" {
-		return nil, false
+		return nil, false, nil
 	}
+
 
 	correlationID := c.GetString("CorrelationID")
 	path := c.Request.URL.Path
@@ -157,7 +178,7 @@ func trySilentRefresh(c *gin.Context) (jwt.MapClaims, bool) {
 		return doRefresh(refreshToken, correlationID, path)
 	})
 	if err != nil {
-		return nil, false
+		return nil, false, err
 	}
 
 	result := v.(refreshResult)
@@ -166,7 +187,7 @@ func trySilentRefresh(c *gin.Context) (jwt.MapClaims, bool) {
 			c.Writer.Header().Add("Set-Cookie", raw)
 		}
 	}
-	return result.claims, true
+	return result.claims, true, nil
 }
 
 // doRefresh performs the actual HTTP call to identity-service. It intentionally
@@ -190,7 +211,7 @@ func doRefresh(refreshToken, correlationID, path string) (refreshResult, error) 
 	resp, err := refreshHTTP.Do(req)
 	if err != nil {
 		logger.Log.Warn("silent refresh failed: identity-service unreachable", zap.Error(err))
-		return refreshResult{}, err
+		return refreshResult{}, fmt.Errorf("%w: %v", errRefreshUnavailable, err)
 	}
 	defer resp.Body.Close()
 
@@ -199,6 +220,9 @@ func doRefresh(refreshToken, correlationID, path string) (refreshResult, error) 
 			zap.Int("status", resp.StatusCode),
 			zap.String("path", path),
 		)
+		if resp.StatusCode >= 500 {
+			return refreshResult{}, fmt.Errorf("%w: status %d", errRefreshUnavailable, resp.StatusCode)
+		}
 		return refreshResult{}, fmt.Errorf("silent refresh rejected: status %d", resp.StatusCode)
 	}
 
