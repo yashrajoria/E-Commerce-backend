@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"os"
@@ -195,6 +196,8 @@ func (s *AuthService) provisionWithRepo(ctx context.Context, repo IUserRepositor
 	}
 	if verificationCode != "" {
 		newUser.VerificationCode = hashVerificationCode(verificationCode)
+		exp := time.Now().Add(verificationCodeTTL)
+		newUser.VerificationExpiresAt = &exp
 	}
 
 	if err := repo.Create(ctx, newUser); err != nil {
@@ -307,7 +310,11 @@ func (s *AuthService) VerifyEmail(ctx context.Context, email, code string) error
 		return fmt.Errorf("%w: too many attempts, try again later", ErrInvalidVerificationCode)
 	}
 
-	if user.VerificationCode != hashVerificationCode(code) {
+	if user.VerificationExpiresAt != nil && time.Now().After(*user.VerificationExpiresAt) {
+		return fmt.Errorf("%w: code expired, request a new one", ErrInvalidVerificationCode)
+	}
+
+	if subtle.ConstantTimeCompare([]byte(user.VerificationCode), []byte(hashVerificationCode(code))) != 1 {
 		if s.db != nil {
 			// Atomic for the same reason as recordFailedLogin: parallel guesses must all count.
 			err := s.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", user.ID).UpdateColumns(map[string]any{
@@ -334,6 +341,7 @@ func (s *AuthService) VerifyEmail(ctx context.Context, email, code string) error
 
 	user.EmailVerified = true
 	user.VerificationCode = ""
+	user.VerificationExpiresAt = nil
 	user.VerificationAttempts = 0
 	user.VerificationLockedUntil = nil
 
@@ -455,6 +463,8 @@ func (s *AuthService) ResendVerificationEmail(ctx context.Context, email string)
 
 	verificationCode := GenerateRandomCode(6)
 	user.VerificationCode = hashVerificationCode(verificationCode)
+	exp := time.Now().Add(verificationCodeTTL)
+	user.VerificationExpiresAt = &exp
 	user.VerificationAttempts = 0
 	user.VerificationLockedUntil = nil
 

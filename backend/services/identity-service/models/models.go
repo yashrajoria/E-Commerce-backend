@@ -26,6 +26,7 @@ type User struct {
 	// VerificationAttempts counts consecutive failed verify-email attempts since the
 	// code was last (re)issued; reset to 0 whenever a new code is generated.
 	VerificationAttempts    int        `gorm:"default:0"`
+	VerificationExpiresAt   *time.Time `gorm:""`
 	VerificationLockedUntil *time.Time `gorm:""`
 	// LoginAttempts/LoginLockedUntil mirror the verification-code lockout
 	// above, but for password login: brute-force protection independent of
