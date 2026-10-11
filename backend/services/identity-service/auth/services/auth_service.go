@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -165,54 +166,54 @@ func (s *AuthService) ProvisionUser(ctx context.Context, in ProvisionUserInput) 
 }
 
 func (s *AuthService) provisionWithRepo(ctx context.Context, repo IUserRepository, in ProvisionUserInput) error {
-		_, err := repo.FindByEmail(ctx, in.Email)
-		if err == nil {
-			return ErrEmailAlreadyExists
-		}
-		if err != gorm.ErrRecordNotFound {
-			return err
-		}
+	_, err := repo.FindByEmail(ctx, in.Email)
+	if err == nil {
+		return ErrEmailAlreadyExists
+	}
+	if err != gorm.ErrRecordNotFound {
+		return err
+	}
 
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(in.Password), bcrypt.DefaultCost)
-		if err != nil {
-			return fmt.Errorf("failed to hash password")
-		}
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(in.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("failed to hash password")
+	}
 
-		verificationCode := ""
-		if !in.EmailVerified {
-			verificationCode = GenerateRandomCode(6)
-		}
+	verificationCode := ""
+	if !in.EmailVerified {
+		verificationCode = GenerateRandomCode(6)
+	}
 
-		newUser := &models.User{
-			ID:            uuid.New(),
-			Email:         in.Email,
-			Name:          in.Name,
-			Password:      string(hashedPassword),
-			Role:          in.Role,
-			StoreName:     "",
-			EmailVerified: in.EmailVerified,
-		}
-		if verificationCode != "" {
-			newUser.VerificationCode = hashVerificationCode(verificationCode)
-		}
+	newUser := &models.User{
+		ID:            uuid.New(),
+		Email:         in.Email,
+		Name:          in.Name,
+		Password:      string(hashedPassword),
+		Role:          in.Role,
+		StoreName:     "",
+		EmailVerified: in.EmailVerified,
+	}
+	if verificationCode != "" {
+		newUser.VerificationCode = hashVerificationCode(verificationCode)
+	}
 
-		if err := repo.Create(ctx, newUser); err != nil {
-			return fmt.Errorf("failed to create account: %w", err)
-		}
+	if err := repo.Create(ctx, newUser); err != nil {
+		return fmt.Errorf("failed to create account: %w", err)
+	}
 
-		if in.Notify && !in.EmailVerified && s.eventPublisher != nil {
-			if err := s.eventPublisher.Publish(ctx, "user_registered", map[string]interface{}{
-				"email": newUser.Email,
-				"name":  newUser.Name,
-				// Plaintext code — sent once here to be emailed to the user.
-				// Only the hash (newUser.VerificationCode) is persisted.
-				"verification_code": verificationCode,
-			}); err != nil {
-				fmt.Printf("failed to publish user_registered event: %v\n", err)
-			}
+	if in.Notify && !in.EmailVerified && s.eventPublisher != nil {
+		if err := s.eventPublisher.Publish(ctx, "user_registered", map[string]interface{}{
+			"email": newUser.Email,
+			"name":  newUser.Name,
+			// Plaintext code — sent once here to be emailed to the user.
+			// Only the hash (newUser.VerificationCode) is persisted.
+			"verification_code": verificationCode,
+		}); err != nil {
+			fmt.Printf("failed to publish user_registered event: %v\n", err)
 		}
+	}
 
-		return nil
+	return nil
 }
 
 // BootstrapAdminFromEnv creates the first admin when none exist.
@@ -272,6 +273,20 @@ const (
 // duration than the strict gateway rate limit alone would allow, but bounds
 // a distributed attacker who spreads attempts across many IPs.
 func (s *AuthService) recordFailedLogin(ctx context.Context, user *models.User) {
+	// Atomic increment: a read-modify-write lets parallel guesses lose counts
+	// (bypassing lockout) and Save() would overwrite concurrent profile/password changes.
+	if s.db != nil {
+		err := s.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", user.ID).UpdateColumns(map[string]any{
+			"login_attempts": gorm.Expr("login_attempts + 1"),
+			"login_locked_until": gorm.Expr(
+				"CASE WHEN login_attempts + 1 >= ? THEN ? ELSE login_locked_until END",
+				maxLoginAttempts, time.Now().Add(loginLockDuration)),
+		}).Error
+		if err != nil {
+			zap.L().Warn("failed to persist failed login attempt count", zap.Error(err))
+		}
+		return
+	}
 	user.LoginAttempts++
 	if user.LoginAttempts >= maxLoginAttempts {
 		lockUntil := time.Now().Add(loginLockDuration)
@@ -293,6 +308,19 @@ func (s *AuthService) VerifyEmail(ctx context.Context, email, code string) error
 	}
 
 	if user.VerificationCode != hashVerificationCode(code) {
+		if s.db != nil {
+			// Atomic for the same reason as recordFailedLogin: parallel guesses must all count.
+			err := s.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", user.ID).UpdateColumns(map[string]any{
+				"verification_attempts": gorm.Expr("verification_attempts + 1"),
+				"verification_locked_until": gorm.Expr(
+					"CASE WHEN verification_attempts + 1 >= ? THEN ? ELSE verification_locked_until END",
+					maxVerificationAttempts, time.Now().Add(verificationLockDuration)),
+			}).Error
+			if err != nil {
+				zap.L().Warn("failed to persist verification attempt count", zap.Error(err))
+			}
+			return ErrInvalidVerificationCode
+		}
 		user.VerificationAttempts++
 		if user.VerificationAttempts >= maxVerificationAttempts {
 			lockUntil := time.Now().Add(verificationLockDuration)
@@ -373,6 +401,11 @@ func (s *AuthService) RefreshTokens(ctx context.Context, refreshToken string) (*
 	// reset RevokedAt and keep extending the reuse window indefinitely.
 	if !existingToken.Revoked {
 		if err := s.userRepo.RevokeRefreshTokenByTokenID(ctx, tokenIDStr); err != nil {
+			if errors.Is(err, repository.ErrTokenAlreadyRevoked) {
+				// Lost a concurrent-rotation race (e.g. two tabs): reject this call only;
+				// the winner's new token stays valid.
+				return nil, fmt.Errorf("refresh token has been revoked")
+			}
 			return nil, fmt.Errorf("failed to revoke old refresh token: %w", err)
 		}
 	}
@@ -404,7 +437,10 @@ func (s *AuthService) Logout(ctx context.Context, refreshToken string) error {
 	if !ok || jti == "" {
 		return fmt.Errorf("invalid refresh token: jti missing")
 	}
-	return s.userRepo.RevokeRefreshTokenByTokenID(ctx, jti)
+	if err := s.userRepo.RevokeRefreshTokenByTokenID(ctx, jti); err != nil && !errors.Is(err, repository.ErrTokenAlreadyRevoked) {
+		return err
+	}
+	return nil
 }
 
 func (s *AuthService) ResendVerificationEmail(ctx context.Context, email string) error {

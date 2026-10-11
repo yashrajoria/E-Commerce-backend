@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"identity-service/models"
@@ -57,10 +58,23 @@ func (r *UserRepository) GetRefreshTokenByTokenID(ctx context.Context, tokenID s
 	return &rt, err
 }
 
+// ErrTokenAlreadyRevoked means the conditional revoke matched nothing: the token was
+// revoked (or deleted) between the caller's read and this write.
+var ErrTokenAlreadyRevoked = errors.New("refresh token already revoked")
+
+// RevokeRefreshTokenByTokenID flips revoked only while still false, so concurrent
+// rotations of one token yield exactly one winner.
 func (r *UserRepository) RevokeRefreshTokenByTokenID(ctx context.Context, tokenID string) error {
 	now := time.Now()
-	return r.db.WithContext(ctx).Model(&models.RefreshToken{}).Where("token_id = ?", tokenID).
-		Updates(map[string]interface{}{"revoked": true, "revoked_at": now}).Error
+	res := r.db.WithContext(ctx).Model(&models.RefreshToken{}).Where("token_id = ? AND revoked = false", tokenID).
+		Updates(map[string]interface{}{"revoked": true, "revoked_at": now})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrTokenAlreadyRevoked
+	}
+	return nil
 }
 
 func (r *UserRepository) RevokeAllUserRefreshTokens(ctx context.Context, userID uuid.UUID) error {
