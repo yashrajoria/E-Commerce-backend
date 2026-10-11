@@ -91,13 +91,14 @@ func TestSQSPaymentConsumer_DuplicateDeliverySkipsSideEffects(t *testing.T) {
 		t.Fatalf("first delivery returned error: %v", err)
 	}
 	// Redelivery of the same event: status transition loses the race since the
-	// order is already "paid", so side effects must not repeat.
+	// order is already "paid". Inventory confirm is idempotent and re-runs (so a
+	// failed first confirm can be retried); the email must not repeat.
 	if err := consumer.handleMessage(context.Background(), body); err != nil {
 		t.Fatalf("second (duplicate) delivery returned error: %v", err)
 	}
 
-	if got := atomic.LoadInt32(&confirmCalls); got != 1 {
-		t.Fatalf("expected inventory confirm called once, got %d", got)
+	if got := atomic.LoadInt32(&confirmCalls); got != 2 {
+		t.Fatalf("expected inventory confirm re-run on redelivery (2 calls), got %d", got)
 	}
 	if got := atomic.LoadInt32(&snsPublisher.calls); got != 1 {
 		t.Fatalf("expected notification published once, got %d", got)
@@ -107,5 +108,41 @@ func TestSQSPaymentConsumer_DuplicateDeliverySkipsSideEffects(t *testing.T) {
 	repo.mu.Unlock()
 	if status != "paid" {
 		t.Fatalf("expected order status paid, got %s", status)
+	}
+}
+
+// A failed inventory confirm after the paid transition must surface as an error so
+// SQS redelivers; the retry then re-runs confirm even though the order is already paid.
+func TestSQSPaymentConsumer_ConfirmFailureIsRetried(t *testing.T) {
+	orderID := uuid.New()
+	repo := &fakeOrderRepo{order: models.Order{
+		ID: orderID, Status: "pending_payment", Amount: 1000,
+		OrderItems: []models.OrderItem{{ProductID: uuid.New(), Quantity: 1, Price: 1000}},
+	}}
+
+	var fail int32 = 1
+	inventoryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.LoadInt32(&fail) == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer inventoryServer.Close()
+	productServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer productServer.Close()
+
+	sns := &countingSNSPublisher{}
+	consumer := NewSQSPaymentConsumer(nil, repo, NewInventoryClient(inventoryServer.URL), nil, sns, "arn:aws:sns:local:123456789012:notifications", productServer.URL)
+	body := `{"type":"payment_succeeded","order_id":"` + orderID.String() + `","user_id":"` + uuid.New().String() + `"}`
+
+	if err := consumer.handleMessage(context.Background(), body); err == nil {
+		t.Fatal("expected error when inventory confirm fails")
+	}
+	atomic.StoreInt32(&fail, 0)
+	if err := consumer.handleMessage(context.Background(), body); err != nil {
+		t.Fatalf("retry should succeed: %v", err)
 	}
 }

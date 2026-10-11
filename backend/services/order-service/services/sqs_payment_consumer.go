@@ -55,7 +55,6 @@ func (c *SQSPaymentConsumer) handleMessage(ctx context.Context, body string) err
 	// after parse instead — start with empty id for span boundary.
 	ctx, endSpan := telemetry.StartSQSConsumerSpan(ctx, "payment-events", "")
 	defer endSpan()
-	log.Printf("[DEBUG] Raw payment event: %s", body)
 
 	// Try to unwrap SNS envelope if present
 	var snsEnvelope struct {
@@ -79,25 +78,36 @@ func (c *SQSPaymentConsumer) handleMessage(ctx context.Context, body string) err
 	log.Printf("ℹ️  [OrderService][SQSPaymentConsumer] received event: order_id=%s type=%s", evt.OrderID, evt.Type)
 
 	now := time.Now().UTC()
+	// Transient failures (DB, inventory) return an error so SQS redelivers. Inventory
+	// confirm/release are idempotent per (order, product), so they also re-run when the
+	// order is already at the target status (an earlier delivery applied the transition
+	// but failed afterwards); notifications fire only on the delivery that applied it.
 	switch evt.Type {
 	case "payment_succeeded":
-		// Gate side effects on the update actually applying: a duplicate/redelivered
-		// event that loses the atomic status race must not re-confirm inventory or
-		// re-send the order_confirmed email.
-		if c.updateOrderStatusWithTime(ctx, evt.OrderID, "paid", &now, nil) {
-			c.confirmInventory(ctx, evt.OrderID)
+		applied, already, err := c.updateOrderStatusWithTime(ctx, evt.OrderID, "paid", &now, nil)
+		if err != nil {
+			return err
+		}
+		if applied || already {
+			if err := c.confirmInventory(ctx, evt.OrderID); err != nil {
+				return err
+			}
+		}
+		if applied {
 			c.publishOrderConfirmedNotification(ctx, evt)
 		}
-	case "payment_failed":
-		if c.updateOrderStatusWithTime(ctx, evt.OrderID, "payment_failed", nil, &now) {
-			c.releaseInventory(ctx, evt.OrderID)
+	case "payment_failed", "checkout_session_failed":
+		applied, already, err := c.updateOrderStatusWithTime(ctx, evt.OrderID, "payment_failed", nil, &now)
+		if err != nil {
+			return err
+		}
+		if applied || already {
+			if err := c.releaseInventory(ctx, evt.OrderID); err != nil {
+				return err
+			}
 		}
 	case "checkout_session_created":
 		log.Printf("ℹ️  [OrderService][SQSPaymentConsumer] checkout session created for order=%s", evt.OrderID)
-	case "checkout_session_failed":
-		if c.updateOrderStatusWithTime(ctx, evt.OrderID, "payment_failed", nil, &now) {
-			c.releaseInventory(ctx, evt.OrderID)
-		}
 	default:
 		log.Printf("⚠️  [OrderService][SQSPaymentConsumer] unknown event type: %s", evt.Type)
 	}
@@ -112,11 +122,11 @@ func (c *SQSPaymentConsumer) handleMessage(ctx context.Context, body string) err
 // the transition — callers must gate side effects (inventory confirm/release,
 // notification emails, metrics) on this so a duplicate delivery that loses the
 // race doesn't repeat them.
-func (c *SQSPaymentConsumer) updateOrderStatusWithTime(ctx context.Context, orderID string, status string, completedAt, canceledAt *time.Time) bool {
-	orderUUID, err := uuid.Parse(orderID)
-	if err != nil {
+func (c *SQSPaymentConsumer) updateOrderStatusWithTime(ctx context.Context, orderID string, status string, completedAt, canceledAt *time.Time) (applied, already bool, err error) {
+	orderUUID, perr := uuid.Parse(orderID)
+	if perr != nil {
 		log.Printf("[OrderService][SQSPaymentConsumer] invalid order ID: %s", orderID)
-		return false
+		return false, false, nil // permanent: don't retry
 	}
 
 	extra := map[string]interface{}{}
@@ -130,27 +140,27 @@ func (c *SQSPaymentConsumer) updateOrderStatusWithTime(ctx context.Context, orde
 	err = c.orderRepo.UpdateOrderStatus(ctx, orderUUID, "pending_payment", status, extra)
 	if err == nil {
 		log.Printf("[OrderService][SQSPaymentConsumer] order=%s updated to %s", orderID, status)
-		return true
+		return true, false, nil
 	}
 	if err != repositories.ErrStatusConflict {
 		log.Printf("[OrderService][SQSPaymentConsumer] failed to update order=%s: %v", orderID, err)
-		return false
+		return false, false, err
 	}
 
 	// Status didn't match "pending_payment" — either a duplicate delivery of
 	// this same event (already applied) or the order is in some other
-	// terminal state. Either way, don't overwrite it; just log which.
+	// terminal state. Never overwrite it.
 	order, ferr := c.orderRepo.FindByID(ctx, orderUUID)
 	if ferr != nil {
 		log.Printf("[OrderService][SQSPaymentConsumer] failed to find order=%s after status conflict: %v", orderID, ferr)
-		return false
+		return false, false, ferr
 	}
 	if order.Status == status {
-		log.Printf("ℹ️  [OrderService][SQSPaymentConsumer] order=%s already %s; skipping", orderID, status)
-		return false
+		log.Printf("ℹ️  [OrderService][SQSPaymentConsumer] order=%s already %s", orderID, status)
+		return false, true, nil
 	}
 	log.Printf("⚠️  [OrderService][SQSPaymentConsumer] order=%s status conflict: current=%s target=%s; skipping", orderID, order.Status, status)
-	return false
+	return false, false, nil
 }
 
 // loadOrderItems fetches order items from the DB for inventory operations
@@ -174,37 +184,39 @@ func (c *SQSPaymentConsumer) loadOrderItems(ctx context.Context, orderID string)
 }
 
 // confirmInventory confirms reserved stock after successful payment
-func (c *SQSPaymentConsumer) confirmInventory(ctx context.Context, orderID string) {
+func (c *SQSPaymentConsumer) confirmInventory(ctx context.Context, orderID string) error {
 	items, err := c.loadOrderItems(ctx, orderID)
 	if err != nil {
 		log.Printf("[OrderService][SQSPaymentConsumer] failed to load order items for confirm: order=%s err=%v", orderID, err)
-		return
+		return err
 	}
 	if len(items) == 0 {
-		return
+		return nil
 	}
 	if err := c.inventoryClient.ConfirmStock(ctx, orderID, items); err != nil {
 		log.Printf("[OrderService][SQSPaymentConsumer] inventory confirm failed: order=%s err=%v", orderID, err)
-	} else {
-		log.Printf("[OrderService][SQSPaymentConsumer] inventory confirmed for order=%s", orderID)
+		return err
 	}
+	log.Printf("[OrderService][SQSPaymentConsumer] inventory confirmed for order=%s", orderID)
+	return nil
 }
 
 // releaseInventory releases reserved stock after payment failure
-func (c *SQSPaymentConsumer) releaseInventory(ctx context.Context, orderID string) {
+func (c *SQSPaymentConsumer) releaseInventory(ctx context.Context, orderID string) error {
 	items, err := c.loadOrderItems(ctx, orderID)
 	if err != nil {
 		log.Printf("[OrderService][SQSPaymentConsumer] failed to load order items for release: order=%s err=%v", orderID, err)
-		return
+		return err
 	}
 	if len(items) == 0 {
-		return
+		return nil
 	}
 	if err := c.inventoryClient.ReleaseStock(ctx, orderID, items); err != nil {
 		log.Printf("[OrderService][SQSPaymentConsumer] inventory release failed: order=%s err=%v", orderID, err)
-	} else {
-		log.Printf("[OrderService][SQSPaymentConsumer] inventory released for order=%s", orderID)
+		return err
 	}
+	log.Printf("[OrderService][SQSPaymentConsumer] inventory released for order=%s", orderID)
+	return nil
 }
 
 // publishOrderConfirmedNotification sends an order_confirmed notification with product details
