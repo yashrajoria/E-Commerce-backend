@@ -305,6 +305,10 @@ func (cc *CartController) Checkout(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "cart not found"})
 		return
 	}
+	if len(cart.Items) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cart is empty"})
+		return
+	}
 	// support idempotency: if Idempotency-Key header present, check Redis for existing order.
 	// Scope by user so two different users never collide on the same header value.
 	// Hash the raw key so an arbitrarily long/odd client-supplied header can't
@@ -354,6 +358,7 @@ func (cc *CartController) Checkout(c *gin.Context) {
 	eventBytes, err := json.Marshal(event)
 	if err != nil {
 		zap.L().Error("failed to marshal event", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build checkout event"})
 		return
 	}
 	topicArn := os.Getenv("ORDER_SNS_TOPIC_ARN")
