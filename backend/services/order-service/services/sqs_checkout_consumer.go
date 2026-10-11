@@ -3,6 +3,8 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 	"order-service/models"
 	promotionmodels "order-service/promotion/models"
@@ -67,7 +69,6 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 	// OpenTelemetry consumer span (no-op when telemetry disabled).
 	ctx, endSpan := telemetry.StartSQSConsumerSpan(ctx, "checkout-events", "")
 	defer endSpan()
-	log.Printf("[DEBUG] Raw SQS message: %s", body)
 
 	// Try to unwrap SNS envelope if present
 	var snsEnvelope struct {
@@ -127,9 +128,13 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		}
 
 		product, err := FetchProductByID(ctx, productServiceURL, pid)
-		if err != nil {
-			log.Printf("⚠️ failed to fetch product for product_id=%s: %v", it.ProductID, err)
+		if errors.Is(err, ErrProductNotFound) {
+			log.Printf("⚠️ skipping missing product_id=%s", it.ProductID)
 			continue
+		}
+		if err != nil {
+			// Transient: retry the whole message rather than silently dropping the item.
+			return fmt.Errorf("fetch product %s: %w", it.ProductID, err)
 		}
 
 		priceCents := priceToCents(product.Price)
@@ -279,6 +284,14 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		if evt.IdempotencyKey != "" {
 			if existing, findErr := c.orderRepo.FindByIdempotencyKey(ctx, evt.IdempotencyKey); findErr == nil && existing != nil {
 				log.Printf("⚠️  [IDEMPOTENCY] Order already exists for key=%s order_id=%s user=%s (skipping creation)", evt.IdempotencyKey, existing.ID.String(), existing.UserID.String())
+				// A duplicate checkout (different order id, same key) reserved stock of its own;
+				// release it or it leaks. A redelivery (same id) shares the real order's reservation.
+				if existing.ID != orderIDUUID && c.inventoryClient != nil {
+					if relErr := c.inventoryClient.ReleaseStock(ctx, orderIDUUID.String(), inventoryItems); relErr != nil {
+						log.Printf("[CHECKOUT] Failed to release stock for duplicate order=%s: %v", orderIDUUID.String(), relErr)
+						return relErr
+					}
+				}
 				return nil
 			}
 		}

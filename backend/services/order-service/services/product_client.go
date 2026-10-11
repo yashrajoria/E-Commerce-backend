@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -25,6 +26,9 @@ func priceToCents(price float64) int {
 	return int(math.Round(price * 100))
 }
 
+// ErrProductNotFound is permanent (product deleted); other fetch errors are transient.
+var ErrProductNotFound = errors.New("product not found")
+
 func FetchProductByID(ctx context.Context, baseURL string, productID uuid.UUID) (*Product, error) {
 	url := fmt.Sprintf("%s/products/internal/%s", baseURL, productID.String())
 
@@ -41,6 +45,9 @@ func FetchProductByID(ctx context.Context, baseURL string, productID uuid.UUID) 
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, ErrProductNotFound
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("product service returned %d", resp.StatusCode)
 	}
