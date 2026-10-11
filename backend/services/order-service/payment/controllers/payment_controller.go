@@ -24,6 +24,7 @@ import (
 var terminalStatuses = map[string]bool{
 	"succeeded": true,
 	"failed":    true,
+	"refunded":  true,
 }
 
 // terminalStatusList returns terminalStatuses' keys for use in SQL NOT IN clauses.

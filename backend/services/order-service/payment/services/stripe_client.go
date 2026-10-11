@@ -2,6 +2,7 @@ package services
 
 import (
 	"bytes"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/stripe/stripe-go/v80"
 	"github.com/stripe/stripe-go/v80/paymentintent"
+	"github.com/stripe/stripe-go/v80/refund"
 	"github.com/stripe/stripe-go/v80/webhook"
 )
 
@@ -105,4 +107,28 @@ func (s *StripeService) ParseWebhook(r *http.Request) (stripe.Event, error) {
 	return webhook.ConstructEventWithOptions(payload, sigHeader, s.WebhookKey, webhook.ConstructEventOptions{
 		IgnoreAPIVersionMismatch: true,
 	})
+}
+
+// PaymentIntentID resolves the PaymentIntent behind a stored Stripe id, which is a
+// Checkout Session id (cs_...) or already a PaymentIntent id (pi_...).
+func (s *StripeService) PaymentIntentID(stripeID string) (string, error) {
+	if strings.HasPrefix(stripeID, "pi_") {
+		return stripeID, nil
+	}
+	sess, err := session.Get(stripeID, nil)
+	if err != nil {
+		return "", err
+	}
+	if sess.PaymentIntent == nil || sess.PaymentIntent.ID == "" {
+		return "", fmt.Errorf("checkout session %s has no payment intent", stripeID)
+	}
+	return sess.PaymentIntent.ID, nil
+}
+
+// RefundPaymentIntent fully refunds a PaymentIntent. The idempotency key makes retries return the same refund.
+func (s *StripeService) RefundPaymentIntent(paymentIntentID, idempotencyKey string) error {
+	params := &stripe.RefundParams{PaymentIntent: stripe.String(paymentIntentID)}
+	params.SetIdempotencyKey(idempotencyKey)
+	_, err := refund.New(params)
+	return err
 }

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"context"
 	"encoding/json"
 	"sync"
@@ -214,3 +215,40 @@ func TestCancelOrder_StatusConflict(t *testing.T) {
 }
 
 var _ repositories.OrderRepository = (*fakeOrderRepo)(nil)
+
+type fakeRefunder struct {
+	err   error
+	calls int
+}
+
+func (f *fakeRefunder) RefundOrder(context.Context, uuid.UUID) error { f.calls++; return f.err }
+
+func TestCancelOrder_PaidRefundsBeforeCancelling(t *testing.T) {
+	orderID := uuid.New()
+	repo := &fakeOrderRepo{order: models.Order{ID: orderID, Status: "paid", OrderItems: []models.OrderItem{{ProductID: uuid.New(), Quantity: 1}}}}
+	refunder := &fakeRefunder{}
+	svc := NewOrderServiceSQS(repo, nil, "", "", &fakeInventoryReleaser{})
+	svc.SetRefunder(refunder)
+
+	if _, err := svc.CancelOrder(context.Background(), orderID, "admin-1", "r"); err != nil {
+		t.Fatalf("CancelOrder: %v", err)
+	}
+	if refunder.calls != 1 {
+		t.Fatalf("expected one refund, got %d", refunder.calls)
+	}
+}
+
+func TestCancelOrder_RefundFailureKeepsOrderPaid(t *testing.T) {
+	orderID := uuid.New()
+	repo := &fakeOrderRepo{order: models.Order{ID: orderID, Status: "paid"}}
+	svc := NewOrderServiceSQS(repo, nil, "", "", &fakeInventoryReleaser{})
+	svc.SetRefunder(&fakeRefunder{err: errors.New("stripe down")})
+
+	_, serr := svc.CancelOrder(context.Background(), orderID, "admin-1", "r")
+	if serr == nil || serr.StatusCode != 502 {
+		t.Fatalf("expected 502 ServiceError, got %v", serr)
+	}
+	if repo.order.Status != "paid" {
+		t.Fatalf("order must stay paid when refund fails, got %s", repo.order.Status)
+	}
+}

@@ -170,6 +170,7 @@ func main() {
 		cfg.NotificationSNSTopicARN,
 		inventoryClient,
 	)
+	orderService.SetRefunder(paymentservices.NewOrderRefunder(paymentRepo, stripeSvc))
 	orderController := controllers.NewOrderController(orderService)
 
 	// Promotion controller & routes

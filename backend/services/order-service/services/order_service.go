@@ -71,7 +71,16 @@ type OrderService struct {
 	snsTopicArn          string
 	notificationTopicArn string
 	inventoryClient      InventoryReleaser
+	refunder             PaymentRefunder
 }
+
+// PaymentRefunder refunds the captured payment of a paid order (idempotent).
+type PaymentRefunder interface {
+	RefundOrder(ctx context.Context, orderID uuid.UUID) error
+}
+
+// SetRefunder enables Stripe refunds when a paid order is cancelled.
+func (s *OrderService) SetRefunder(r PaymentRefunder) { s.refunder = r }
 
 // NewOrderServiceSQS creates an OrderService that uses SNS/SQS instead of Kafka
 func NewOrderServiceSQS(orderRepo repositories.OrderRepository, snsClient messaging.Publisher, snsTopicArn, notificationTopicArn string, inventoryClient InventoryReleaser) *OrderService {
@@ -268,6 +277,14 @@ func (s *OrderService) CancelOrder(ctx context.Context, orderID uuid.UUID, admin
 	}
 
 	wasPaid := order.Status == "paid"
+	// Refund before changing state: a failed refund leaves the order paid and cancellable
+	// again, and the idempotent refund makes a retry after a later failure safe.
+	if wasPaid && s.refunder != nil {
+		if err := s.refunder.RefundOrder(ctx, orderID); err != nil {
+			zap.L().Error("failed to refund cancelled paid order", zap.String("order_id", orderID.String()), zap.Error(err))
+			return nil, &ServiceError{StatusCode: 502, Message: "Failed to refund payment; order not cancelled"}
+		}
+	}
 	now := time.Now().UTC()
 	if err := s.orderRepo.UpdateOrderStatus(ctx, orderID, order.Status, "cancelled", map[string]interface{}{"canceled_at": now}); err != nil {
 		if errors.Is(err, repositories.ErrStatusConflict) {
