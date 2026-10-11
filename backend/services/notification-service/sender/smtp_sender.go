@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"mime"
 	"net/smtp"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -42,6 +44,11 @@ func NewSMTPSender() (*SMTPSender, error) {
 }
 
 func (s *SMTPSender) SendEmail(ctx context.Context, to, subject, body string) (SendResult, error) {
+	// CR/LF in a header value would let event data inject extra headers or recipients.
+	if strings.ContainsAny(to, "\r\n") || strings.ContainsAny(subject, "\r\n") {
+		return SendResult{}, fmt.Errorf("invalid header value: to/subject must not contain CR or LF")
+	}
+	subject = mime.QEncoding.Encode("utf-8", subject)
 	msg := []byte(
 		"From: " + s.username + "\r\n" +
 			"To: " + to + "\r\n" +
