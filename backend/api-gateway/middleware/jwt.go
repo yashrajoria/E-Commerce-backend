@@ -255,6 +255,10 @@ func parseToken(tokenStr, expectedType string) (jwt.MapClaims, error) {
 	if !ok {
 		return nil, fmt.Errorf("invalid token claims")
 	}
+	// jwt.Parse only checks exp when present; a signed token without it never expires.
+	if _, ok := claims["exp"]; !ok {
+		return nil, fmt.Errorf("token missing exp")
+	}
 	if expectedType != "" {
 		if typ, ok := claims["typ"].(string); !ok || typ != expectedType {
 			return nil, fmt.Errorf("invalid token type")
