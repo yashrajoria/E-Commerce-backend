@@ -14,6 +14,13 @@ import (
 	"go.uber.org/zap"
 )
 
+var rateLimitScript = redis.NewScript(`
+local c = redis.call('INCR', KEYS[1])
+if c == 1 or redis.call('PTTL', KEYS[1]) < 0 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+end
+return c`)
+
 // rateLimiter is a helper function that implements a Redis fixed-window counter
 func rateLimiter(client *redis.Client, prefix string, limit int, duration time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -29,11 +36,11 @@ func rateLimiter(client *redis.Client, prefix string, limit int, duration time.D
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
-		// Fixed window counter: increment, then set the expiry only on the
-		// first hit of a window so the TTL is not pushed forward on every
-		// request. Failure (including Redis being unreachable) fails open —
+		// Fixed window counter. INCR + expiry run atomically in one script, and the
+		// TTL is (re)set if a key ever lacks one, so a crash can't leave a
+		// permanent ban. Failure (including Redis being unreachable) fails open —
 		// availability is prioritized over strict rate limiting here.
-		count, err := client.Incr(ctx, key).Result()
+		count, err := rateLimitScript.Run(ctx, client, []string{key}, duration.Milliseconds()).Int64()
 		if err != nil {
 			logger.Log.Warn("rate limiter: redis unavailable, failing open",
 				zap.String("ip", ip),
@@ -42,11 +49,6 @@ func rateLimiter(client *redis.Client, prefix string, limit int, duration time.D
 			)
 			c.Next()
 			return
-		}
-		if count == 1 {
-			if err := client.Expire(ctx, key, duration).Err(); err != nil {
-				logger.Log.Warn("rate limiter: failed to set window expiry", zap.String("key", key), zap.Error(err))
-			}
 		}
 
 		// Allow request if under limit
