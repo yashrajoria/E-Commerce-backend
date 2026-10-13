@@ -52,6 +52,9 @@ func NewStorageClient(cfg Config) Client {
 	if cfg.Bucket == "" {
 		cfg.Bucket = os.Getenv("STORAGE_BUCKET")
 		if cfg.Bucket == "" {
+			cfg.Bucket = os.Getenv("SUPABASE_STORAGE_BUCKET")
+		}
+		if cfg.Bucket == "" {
 			cfg.Bucket = "shopswift"
 		}
 	}

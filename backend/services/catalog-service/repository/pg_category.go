@@ -25,7 +25,8 @@ type pgCategory struct {
 	Image     string
 	Level     int
 	IsActive  bool
-	ParentIDs []byte `gorm:"column:parent_ids"`
+	StoreID   *uuid.UUID `gorm:"column:store_id"`
+	ParentIDs []byte     `gorm:"column:parent_ids"`
 	Ancestors []byte
 	Path      []byte
 	CreatedAt time.Time
@@ -33,12 +34,12 @@ type pgCategory struct {
 	DeletedAt *time.Time
 }
 
-const categoryCols = `id, name, slug, image, level, is_active, parent_ids, ancestors, path, created_at, updated_at, deleted_at`
+const categoryCols = `id, name, slug, image, level, is_active, store_id, parent_ids, ancestors, path, created_at, updated_at, deleted_at`
 
 func (c pgCategory) model() (*models.Category, error) {
 	m := &models.Category{
 		ID: c.ID, Name: c.Name, Slug: c.Slug, Image: c.Image, Level: c.Level,
-		IsActive: c.IsActive, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt, DeletedAt: c.DeletedAt,
+		IsActive: c.IsActive, StoreID: c.StoreID, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt, DeletedAt: c.DeletedAt,
 	}
 	for _, f := range []struct {
 		src []byte
@@ -114,9 +115,9 @@ func (r *PGCategoryRepo) FindAll(ctx context.Context) ([]models.Category, error)
 func (r *PGCategoryRepo) Create(ctx context.Context, c *models.Category) error {
 	return r.db.WithContext(ctx).Exec(`
 		INSERT INTO catalog.categories
-		  (id, name, slug, image, level, is_active, parent_ids, ancestors, path, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?, ?)`,
-		c.ID, c.Name, c.Slug, c.Image, c.Level, c.IsActive,
+		  (id, name, slug, image, level, is_active, store_id, parent_ids, ancestors, path, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?, ?)`,
+		c.ID, c.Name, c.Slug, c.Image, c.Level, c.IsActive, c.StoreID,
 		jsonArray(c.ParentIDs), jsonArray(c.Ancestors), jsonArray(c.Path), c.CreatedAt, c.UpdatedAt,
 	).Error
 }

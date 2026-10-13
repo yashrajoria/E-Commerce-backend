@@ -19,6 +19,7 @@ type Category struct {
 	IsActive           bool        `json:"is_active"`
 	DirectProductCount int         `json:"directProductCount"` // Products directly in this category
 	TotalProductCount  int         `json:"totalProductCount"`  // Including descendants
+	StoreID            *uuid.UUID  `json:"store_id,omitempty"`
 	CreatedAt          time.Time   `json:"created_at"`
 	UpdatedAt          time.Time   `json:"updated_at"`
 	DeletedAt          *time.Time  `json:"deleted_at,omitempty"`

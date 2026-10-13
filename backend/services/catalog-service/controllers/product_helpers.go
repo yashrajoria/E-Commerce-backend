@@ -58,6 +58,9 @@ func buildServiceParams(page, perPage int, filters *ProductFilters) services.Lis
 	if filters.InStockParsed != nil {
 		params.InStock = filters.InStockParsed
 	}
+	if filters.StoreID != nil {
+		params.StoreID = filters.StoreID
+	}
 
 	return params
 }

@@ -30,6 +30,7 @@ type pgProduct struct {
 	Images       []byte
 	CategoryPath []byte
 	IsFeatured   bool
+	StoreID      *uuid.UUID `gorm:"column:store_id"`
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	DeletedAt    *time.Time
@@ -39,7 +40,7 @@ type pgProduct struct {
 // price is cast to float8 so the driver hands back a float64, not numeric text.
 const productSelect = `
 SELECT p.id, p.name, p.sku, p.price::float8 AS price, p.quantity, p.description, p.brand,
-       p.images, p.category_path, p.is_featured, p.created_at, p.updated_at, p.deleted_at,
+       p.images, p.category_path, p.is_featured, p.store_id, p.created_at, p.updated_at, p.deleted_at,
        COALESCE((SELECT jsonb_agg(pc.category_id) FROM catalog.product_categories pc
                  WHERE pc.product_id = p.id), '[]'::jsonb) AS category_ids
 FROM catalog.products p`
@@ -48,6 +49,7 @@ func (p pgProduct) model() (*models.Product, error) {
 	m := &models.Product{
 		ID: p.ID, Name: p.Name, SKU: p.SKU, Price: p.Price, Quantity: p.Quantity,
 		Description: p.Description, Brand: p.Brand, IsFeatured: p.IsFeatured,
+		StoreID: p.StoreID,
 		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt, DeletedAt: p.DeletedAt,
 	}
 	for _, f := range []struct {
@@ -96,6 +98,22 @@ func productWhere(filter map[string]interface{}) (string, []interface{}) {
 			conds = append(conds, "p.quantity > 0")
 		} else {
 			conds = append(conds, "p.quantity <= 0")
+		}
+	}
+	if v, ok := filter["store_id"]; ok && v != nil {
+		switch id := v.(type) {
+		case uuid.UUID:
+			if id != uuid.Nil {
+				conds, args = append(conds, "p.store_id = ?"), append(args, id)
+			}
+		case *uuid.UUID:
+			if id != nil && *id != uuid.Nil {
+				conds, args = append(conds, "p.store_id = ?"), append(args, *id)
+			}
+		case string:
+			if id != "" {
+				conds, args = append(conds, "p.store_id = ?"), append(args, id)
+			}
 		}
 	}
 	if len(conds) == 0 {
@@ -181,7 +199,7 @@ func (r *PGProductRepo) CreateMany(ctx context.Context, ps []models.Product) err
 	})
 }
 
-// 12 bind params per product row; chunks stay far below Postgres' 65535 limit.
+// 13 bind params per product row; chunks stay far below Postgres' 65535 limit.
 const productInsertChunk = 200
 
 func insertProducts(tx *gorm.DB, ps []models.Product) error {
@@ -189,16 +207,16 @@ func insertProducts(tx *gorm.DB, ps []models.Product) error {
 		end := min(start+productInsertChunk, len(ps))
 		var sb strings.Builder
 		sb.WriteString(`INSERT INTO catalog.products
-			(id, name, sku, price, quantity, description, brand, images, category_path, is_featured, created_at, updated_at)
+			(id, name, sku, price, quantity, description, brand, images, category_path, is_featured, store_id, created_at, updated_at)
 			VALUES `)
-		args := make([]interface{}, 0, (end-start)*12)
+		args := make([]interface{}, 0, (end-start)*13)
 		for i, p := range ps[start:end] {
 			if i > 0 {
 				sb.WriteByte(',')
 			}
-			sb.WriteString("(?,?,?,?,?,?,?,?::jsonb,?::jsonb,?,?,?)")
+			sb.WriteString("(?,?,?,?,?,?,?,?::jsonb,?::jsonb,?,?,?,?)")
 			args = append(args, p.ID, p.Name, p.SKU, p.Price, p.Quantity, p.Description, p.Brand,
-				jsonArray(p.Images), jsonArray(p.CategoryPath), p.IsFeatured, p.CreatedAt, p.UpdatedAt)
+				jsonArray(p.Images), jsonArray(p.CategoryPath), p.IsFeatured, p.StoreID, p.CreatedAt, p.UpdatedAt)
 		}
 		if err := tx.Exec(sb.String(), args...).Error; err != nil {
 			return err

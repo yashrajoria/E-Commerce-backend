@@ -48,14 +48,28 @@ func NewCartController(repo *database.CartRepository, snsClient messaging.Publis
 	}
 }
 
+func resolveUserID(c *gin.Context) string {
+	uid := c.GetString("user_id")
+	if uid != "" {
+		return uid
+	}
+	uid = c.GetHeader("X-User-ID")
+	if uid != "" {
+		return uid
+	}
+	if v, err := c.Cookie("user_id"); err == nil && v != "" {
+		return v
+	}
+	guestID := c.GetHeader("X-Guest-Session-ID")
+	if guestID != "" {
+		return "guest:" + guestID
+	}
+	return ""
+}
+
 // GetCart returns the current cart for a user
 func (cc *CartController) GetCart(c *gin.Context) {
-	userID := c.GetHeader("X-User-ID")
-	if userID == "" {
-		if v, err := c.Cookie("user_id"); err == nil && v != "" {
-			userID = v
-		}
-	}
+	userID := resolveUserID(c)
 	if userID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authorized"})
 		return
@@ -94,12 +108,7 @@ const (
 )
 
 func (cc *CartController) AddItems(c *gin.Context) {
-	userID := c.GetHeader("X-User-ID")
-	if userID == "" {
-		if v, err := c.Cookie("user_id"); err == nil && v != "" {
-			userID = v
-		}
-	}
+	userID := resolveUserID(c)
 	if userID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authorized"})
 		return
@@ -162,13 +171,8 @@ func (cc *CartController) AddItems(c *gin.Context) {
 
 // RemoveItem removes a specific item from the cart
 func (cc *CartController) RemoveItem(c *gin.Context) {
-	userID := c.GetHeader("X-User-ID")
+	userID := resolveUserID(c)
 	productID := c.Param("product_id")
-	if userID == "" {
-		if v, err := c.Cookie("user_id"); err == nil && v != "" {
-			userID = v
-		}
-	}
 	if userID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authorized"})
 		return
@@ -209,12 +213,7 @@ func (cc *CartController) RemoveItem(c *gin.Context) {
 
 // ClearCart removes all items from the cart
 func (cc *CartController) ClearCart(c *gin.Context) {
-	userID := c.GetHeader("X-User-ID")
-	if userID == "" {
-		if v, err := c.Cookie("user_id"); err == nil && v != "" {
-			userID = v
-		}
-	}
+	userID := resolveUserID(c)
 	if userID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authorized"})
 		return
@@ -231,6 +230,66 @@ func (cc *CartController) ClearCart(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "cart cleared"})
+}
+
+type MergeCartRequest struct {
+	GuestSessionID string `json:"guest_session_id" binding:"required"`
+}
+
+// MergeCart merges an anonymous guest cart into the authenticated user's cart
+func (cc *CartController) MergeCart(c *gin.Context) {
+	authUserID := c.GetHeader("X-User-ID")
+	if authUserID == "" {
+		authUserID = c.GetString("user_id")
+	}
+	if authUserID == "" || strings.HasPrefix(authUserID, "guest:") {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authenticated user required to merge cart"})
+		return
+	}
+
+	var req MergeCartRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid merge request", "details": err.Error()})
+		return
+	}
+
+	ctx := c.Request.Context()
+	guestUserID := req.GuestSessionID
+	if !strings.HasPrefix(guestUserID, "guest:") {
+		guestUserID = "guest:" + guestUserID
+	}
+
+	guestCart, err := cc.Repo.GetCart(ctx, guestUserID)
+	if err != nil || guestCart == nil || len(guestCart.Items) == 0 {
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "merged": 0})
+		return
+	}
+
+	userCart, err := cc.Repo.GetCart(ctx, authUserID)
+	if err != nil || userCart == nil {
+		userCart = &models.Cart{UserID: authUserID, Items: []models.CartItem{}}
+	}
+
+	mergedCount := 0
+	for _, gItem := range guestCart.Items {
+		found := false
+		for i, uItem := range userCart.Items {
+			if uItem.ProductID == gItem.ProductID {
+				userCart.Items[i].Quantity += gItem.Quantity
+				found = true
+				break
+			}
+		}
+		if !found {
+			userCart.Items = append(userCart.Items, gItem)
+		}
+		mergedCount++
+	}
+
+	_ = cc.Repo.SaveCart(ctx, userCart)
+	_ = cc.Repo.DeleteCart(ctx, guestUserID)
+
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "merged": mergedCount, "cart": userCart})
 }
 
 // ClearUserCart empties a user's cart on behalf of order-service once their payment

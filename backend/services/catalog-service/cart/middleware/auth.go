@@ -13,6 +13,12 @@ func RequireUser() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := strings.TrimSpace(c.GetHeader("X-User-ID"))
 		if userID == "" {
+			guestID := strings.TrimSpace(c.GetHeader("X-Guest-Session-ID"))
+			if guestID != "" {
+				userID = "guest:" + guestID
+			}
+		}
+		if userID == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "user not authorized"})
 			return
 		}

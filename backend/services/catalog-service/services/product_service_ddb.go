@@ -38,13 +38,13 @@ type PriceDropPublisher interface {
 
 // ProductServiceDDB is the product service (the DDB suffix is historical; storage is Postgres)
 type ProductServiceDDB struct {
-	productRepo         repository.ProductRepo
-	categoryRepo        repository.CategoryRepo
-	categoryService     *CategoryServiceDDB // For updating product counts when products change
-	storage             storage.Client
-	prefix              string
-	inventoryClient     StockSyncer
-	priceDropPublisher  PriceDropPublisher
+	productRepo        repository.ProductRepo
+	categoryRepo       repository.CategoryRepo
+	categoryService    *CategoryServiceDDB // For updating product counts when products change
+	storage            storage.Client
+	prefix             string
+	inventoryClient    StockSyncer
+	priceDropPublisher PriceDropPublisher
 }
 
 func NewProductServiceDDB(
@@ -135,6 +135,9 @@ func (s *ProductServiceDDB) ListProducts(ctx context.Context, params ListProduct
 	if params.InStock != nil {
 		filter["in_stock"] = *params.InStock
 	}
+	if params.StoreID != nil {
+		filter["store_id"] = *params.StoreID
+	}
 
 	limit := params.PerPage
 	skip := (params.Page - 1) * params.PerPage
@@ -160,6 +163,18 @@ func (s *ProductServiceDDB) CreateProduct(ctx context.Context, req ProductCreate
 		}
 		if len(existing) > 0 {
 			return nil, fmt.Errorf("product with sku '%s' already exists", req.SKU)
+		}
+	}
+
+	// Enforce store subscription quota limits
+	if req.StoreID != nil {
+		storeFilter := map[string]interface{}{"store_id": *req.StoreID}
+		count, err := s.productRepo.Count(ctx, storeFilter)
+		if err == nil {
+			const defaultPlanProductLimit = int64(100)
+			if count >= defaultPlanProductLimit {
+				return nil, fmt.Errorf("store product limit reached for current plan (%d products). Please upgrade your subscription", defaultPlanProductLimit)
+			}
 		}
 	}
 
@@ -221,6 +236,7 @@ func (s *ProductServiceDDB) CreateProduct(ctx context.Context, req ProductCreate
 		SKU:         req.SKU,
 		CategoryIDs: categoryIDs,
 		IsFeatured:  req.IsFeatured,
+		StoreID:     req.StoreID,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}

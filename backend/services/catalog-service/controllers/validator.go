@@ -64,6 +64,7 @@ type CreateProductJSONRequest struct {
 	Quantity    int      `json:"quantity" validate:"required,gte=0"`
 	IsFeatured  bool     `json:"is_featured"`
 	Categories  []string `json:"category" validate:"required,min=1,dive,required"`
+	StoreID     *uuid.UUID `json:"store_id,omitempty"`
 }
 
 // ProductFilters holds all filter parameters
@@ -77,6 +78,7 @@ type ProductFilters struct {
 	IsFeaturedParsed *bool
 	Brand            string
 	InStockParsed    *bool
+	StoreID          *uuid.UUID
 }
 
 // RequestValidator handles all input validation
@@ -146,6 +148,17 @@ func (rv *RequestValidator) ParseFilters(c *gin.Context) (*ProductFilters, error
 	// Parse in_stock
 	if err := rv.parseInStock(c, filters); err != nil {
 		return nil, err
+	}
+
+	// Parse store_id from header or query param
+	storeIDStr := strings.TrimSpace(c.GetHeader("X-Store-ID"))
+	if storeIDStr == "" {
+		storeIDStr = strings.TrimSpace(c.Query("store_id"))
+	}
+	if storeIDStr != "" {
+		if sid, err := uuid.Parse(storeIDStr); err == nil {
+			filters.StoreID = &sid
+		}
 	}
 
 	return filters, nil
@@ -231,6 +244,19 @@ func (rv *RequestValidator) ParseCreateProductJSONRequest(c *gin.Context) (servi
 		return services.ProductCreateRequest{}, fmt.Errorf("validation failed: %w", err)
 	}
 
+	storeID := req.StoreID
+	if storeID == nil {
+		storeIDStr := strings.TrimSpace(c.GetHeader("X-Store-ID"))
+		if storeIDStr == "" {
+			storeIDStr = strings.TrimSpace(c.Query("store_id"))
+		}
+		if storeIDStr != "" {
+			if sid, err := uuid.Parse(storeIDStr); err == nil {
+				storeID = &sid
+			}
+		}
+	}
+
 	serviceReq := services.ProductCreateRequest{
 		Name:        req.Name,
 		Description: req.Description,
@@ -240,6 +266,7 @@ func (rv *RequestValidator) ParseCreateProductJSONRequest(c *gin.Context) (servi
 		Quantity:    req.Quantity,
 		IsFeatured:  req.IsFeatured,
 		Categories:  req.Categories,
+		StoreID:     storeID,
 	}
 
 	return serviceReq, nil

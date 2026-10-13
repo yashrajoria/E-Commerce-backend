@@ -36,5 +36,6 @@ func RegisterCartRoutes(
 		api.DELETE("/clear", controller.ClearCart)
 		api.POST("/coupon", controller.ApplyCoupon)
 		api.POST("/checkout", controller.Checkout)
+		api.POST("/merge", controller.MergeCart)
 	}
 }

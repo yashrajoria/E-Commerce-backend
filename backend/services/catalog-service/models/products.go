@@ -19,6 +19,7 @@ type Product struct {
 	CategoryIDs  []uuid.UUID `json:"category_ids,omitempty"`
 	CategoryPath []string    `json:"category_path,omitempty"`
 	IsFeatured   bool        `json:"is_featured"`
+	StoreID      *uuid.UUID  `json:"store_id,omitempty"`
 	CreatedAt    time.Time   `json:"created_at"`
 	UpdatedAt    time.Time   `json:"updated_at"`
 	DeletedAt    *time.Time  `json:"deleted_at,omitempty"`

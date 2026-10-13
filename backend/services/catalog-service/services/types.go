@@ -13,6 +13,7 @@ type ListProductsParams struct {
 	MaxPrice   *float64
 	Brand      *string
 	InStock    *bool
+	StoreID    *uuid.UUID
 }
 
 // ProductCreateRequest is the request payload for creating a product
@@ -25,6 +26,7 @@ type ProductCreateRequest struct {
 	Quantity    int
 	IsFeatured  bool
 	Categories  []string
+	StoreID     *uuid.UUID
 }
 
 // ProductUpdateRequest is the strictly typed payload for updating products
@@ -38,6 +40,7 @@ type ProductUpdateRequest struct {
 	IsFeatured   *bool       `json:"is_featured"`
 	CategoryIDs  []uuid.UUID `json:"category_ids"`
 	CategoryPath []string    `json:"category_path"`
+	StoreID      *uuid.UUID  `json:"store_id"`
 	Images       []string    `json:"images"`
 }
 
