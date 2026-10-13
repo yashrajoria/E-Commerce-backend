@@ -2,7 +2,7 @@
   <h1>ShopSwift — Microservices Backend</h1>
   <p><strong>Scalable e-commerce backend: Go microservices, Postgres, Redis, SNS/SQS</strong></p>
 
-  ![Go](https://img.shields.io/badge/Go-1.25-00ADD8?style=flat&logo=go&logoColor=white)
+  ![Go](https://img.shields.io/badge/Go-1.26-00ADD8?style=flat&logo=go&logoColor=white)
   ![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL-336791?logo=postgresql&logoColor=white)
   ![Redis](https://img.shields.io/badge/Cache-Redis-DC382D?logo=redis&logoColor=white)
   ![Docker](https://img.shields.io/badge/Deploy-Docker-2496ED?logo=docker&logoColor=white)
@@ -13,7 +13,7 @@
 
 ## Overview
 
-ShopSwift backend is a Go (plus Python agent) microservices platform with an API gateway and domain services. Local development uses Docker Compose + **LocalStack** for S3, SNS, and SQS.
+ShopSwift backend is a Go (plus Python agent) microservices platform with an API gateway and domain services. Local development uses Docker Compose + **LocalStack** for S3, SNS, and SQS. Cloud deployments use the PostgreSQL-backed messaging adapter, so they do not require AWS SNS/SQS credentials.
 
 ## Architecture (short)
 
@@ -51,7 +51,7 @@ Phase 1 integrity protections are covered by regression tests: coupon usage incr
 
 ## Tech stack
 
-- **Languages:** Go 1.25 (workspace), Python (agent-service)
+- **Languages:** Go 1.26 (workspace), Python (agent-service)
 - **HTTP:** Gin; gateway proxies to domain services
 - **Postgres:** identity, order, notification
 - **Postgres (schema `catalog`):** products, categories, inventory (not MongoDB)
@@ -114,7 +114,29 @@ cd backend
 ./scripts/migrate.sh up
 ```
 
-Set `ALLOW_AUTO_MIGRATE=false` in production so schema comes only from SQL migrations. Local Compose defaults `ALLOW_AUTO_MIGRATE=true` for DX.
+The production image includes the migration files and runs pending SQL migrations before starting any service. Set `RUN_MIGRATIONS=false` only when migrations are applied by a separate deployment step. Local Compose defaults `ALLOW_AUTO_MIGRATE=true` for DX.
+
+### Production image deployment
+
+The main CI workflow runs the tests, migration checks, linting, and Docker
+validation before building the production image. On `main`, it publishes the
+image to GitHub Container Registry with both an immutable commit-SHA tag and
+the `main` tag:
+
+```text
+ghcr.io/yashrajoria/shopswift-backend:<commit-sha>
+```
+
+Render should be configured as a Docker image service using:
+
+```text
+ghcr.io/yashrajoria/shopswift-backend:main
+```
+
+The Render deploy hook runs only after the image has been published. Render
+then pulls the image produced by that CI run instead of rebuilding the
+repository Dockerfile. Keep the package accessible to Render using a public
+package or Render registry credentials.
 
 ### Docs
 
