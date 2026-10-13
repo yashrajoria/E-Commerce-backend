@@ -18,6 +18,7 @@ var ErrStatusConflict = errors.New("order status conflict: current status does n
 // OrderRepository defines the interface for order data access
 type OrderRepository interface {
 	FindByUserID(ctx context.Context, userID uuid.UUID, page, limit int) ([]models.Order, int64, error)
+	FindByStoreID(ctx context.Context, storeID uuid.UUID, page, limit int) ([]models.Order, int64, error)
 	FindAll(ctx context.Context, page, limit int) ([]models.Order, int64, error)
 	FindByID(ctx context.Context, orderID uuid.UUID) (*models.Order, error)
 	FindByIDAndUserID(ctx context.Context, order_id, userID uuid.UUID) (*models.Order, error)
@@ -60,6 +61,32 @@ func (r *GormOrderRepository) FindByUserID(ctx context.Context, userID uuid.UUID
 	query := r.db.WithContext(ctx).
 		Model(&models.Order{}).
 		Where("user_id = ?", userID)
+
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	offset := (page - 1) * limit
+	if err := query.
+		Preload("OrderItems").
+		Offset(offset).
+		Limit(limit).
+		Order("created_at DESC").
+		Find(&orders).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return orders, total, nil
+}
+
+// FindByStoreID retrieves orders for a specific store with pagination
+func (r *GormOrderRepository) FindByStoreID(ctx context.Context, storeID uuid.UUID, page, limit int) ([]models.Order, int64, error) {
+	var orders []models.Order
+	var total int64
+
+	query := r.db.WithContext(ctx).
+		Model(&models.Order{}).
+		Where("store_id = ?", storeID)
 
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err

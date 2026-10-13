@@ -219,6 +219,11 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		UpdatedAt:      time.Now().UTC(),
 		OrderItems:     orderItems,
 	}
+	if evt.StoreID != "" {
+		if sUUID, err := uuid.Parse(evt.StoreID); err == nil {
+			order.StoreID = &sUUID
+		}
+	}
 	if evt.IdempotencyKey != "" {
 		order.IdempotencyKey = &evt.IdempotencyKey
 	}
@@ -246,6 +251,7 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		Email:          evt.Email,
 		Amount:         order.Amount,
 		Currency:       c.storeCurrency,
+		StoreID:        evt.StoreID,
 		IdempotencyKey: idemKey,
 		CorrelationID:  evt.CorrelationID,
 	}

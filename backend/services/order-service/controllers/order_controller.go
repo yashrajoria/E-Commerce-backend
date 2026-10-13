@@ -38,6 +38,14 @@ func (oc *OrderController) CreateOrder(ctx *gin.Context) {
 		return
 	}
 
+	if req.StoreID == nil {
+		if storeIDStr := ctx.GetHeader("X-Store-ID"); storeIDStr != "" {
+			if sid, err := uuid.Parse(storeIDStr); err == nil {
+				req.StoreID = &sid
+			}
+		}
+	}
+
 	email := ""
 	if emailVal, exists := ctx.Get("email"); exists {
 		if emailStr, ok := emailVal.(string); ok {
@@ -123,7 +131,23 @@ func (oc *OrderController) GetAllOrders(ctx *gin.Context) {
 
 	page, limit := parsePaginationParams(ctx)
 
-	result, serviceErr := oc.orderService.GetAllOrders(ctx.Request.Context(), userID, page, limit)
+	storeIDStr := ctx.GetHeader("X-Store-ID")
+	if storeIDStr == "" {
+		storeIDStr = ctx.Query("store_id")
+	}
+
+	var result *services.OrderResponse
+	var serviceErr *services.ServiceError
+
+	if storeIDStr != "" {
+		if storeID, err := uuid.Parse(storeIDStr); err == nil {
+			result, serviceErr = oc.orderService.GetStoreOrders(ctx.Request.Context(), storeID, page, limit)
+		} else {
+			result, serviceErr = oc.orderService.GetAllOrders(ctx.Request.Context(), userID, page, limit)
+		}
+	} else {
+		result, serviceErr = oc.orderService.GetAllOrders(ctx.Request.Context(), userID, page, limit)
+	}
 	if serviceErr != nil {
 		status := serviceErr.StatusCode
 		if status == 0 {

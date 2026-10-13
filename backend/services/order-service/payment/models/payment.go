@@ -14,6 +14,7 @@ type Payment struct {
 	CorrelationID      string    `gorm:"type:varchar(128);index"`
 	OrderID            uuid.UUID `gorm:"type:uuid;index;not null"`
 	UserID             uuid.UUID `gorm:"type:uuid;index;not null"`
+	StoreID            *uuid.UUID `gorm:"type:uuid;index"`
 	Amount             int       `gorm:"not null"` // in cents/paise
 	Currency           string    `gorm:"type:varchar(10);not null"`
 	Status             string    `gorm:"type:varchar(20);not null"`

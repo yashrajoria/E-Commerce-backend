@@ -18,6 +18,7 @@ type Order struct {
 	DiscountAmount int        `gorm:"default:0"`
 	Currency       string     `gorm:"type:varchar(10);not null;default:'usd'"`
 	Status         string     `gorm:"type:varchar(20);not null;default:'pending_payment'"`
+	StoreID        *uuid.UUID `gorm:"type:uuid;index"`
 	CanceledAt     *time.Time
 	CompletedAt    *time.Time
 	CreatedAt      time.Time      `gorm:"autoCreateTime"`

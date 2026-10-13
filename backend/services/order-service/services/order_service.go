@@ -24,6 +24,7 @@ type CreateOrderRequest struct {
 		ProductID uuid.UUID `json:"product_id" binding:"required"`
 		Quantity  int       `json:"quantity" binding:"required,min=1"`
 	} `json:"items" binding:"required,dive"`
+	StoreID *uuid.UUID `json:"store_id,omitempty"`
 }
 
 type OrderResponse struct {
@@ -122,6 +123,10 @@ func (s *OrderService) CreateOrder(ctx context.Context, userID, email string, re
 		Timestamp: time.Now().UTC(),
 	}
 
+	if req.StoreID != nil {
+		checkoutEvent.StoreID = req.StoreID.String()
+	}
+
 	if idemKey, ok := ctx.Value(IdempotencyKeyContextKey).(string); ok && idemKey != "" {
 		checkoutEvent.IdempotencyKey = idemKey
 	}
@@ -195,6 +200,29 @@ func (s *OrderService) GetAllOrders(ctx context.Context, adminID string, page, l
 		return nil, &ServiceError{
 			StatusCode: 500,
 			Message:    "Failed to fetch orders",
+		}
+	}
+
+	return &OrderResponse{
+		Orders: orders,
+		Meta: MetaData{
+			Page:        page,
+			Limit:       limit,
+			TotalOrders: total,
+			TotalPages:  calculateTotalPages(total, limit),
+			HasMore:     total > int64(page*limit),
+		},
+	}, nil
+}
+
+// GetStoreOrders retrieves paginated orders for a specific store (tenant isolation)
+func (s *OrderService) GetStoreOrders(ctx context.Context, storeID uuid.UUID, page, limit int) (*OrderResponse, *ServiceError) {
+	orders, total, err := s.orderRepo.FindByStoreID(ctx, storeID, page, limit)
+	if err != nil {
+		zap.L().Error("failed to fetch store orders", zap.Error(err), zap.String("store_id", storeID.String()))
+		return nil, &ServiceError{
+			StatusCode: 500,
+			Message:    "Failed to fetch store orders",
 		}
 	}
 

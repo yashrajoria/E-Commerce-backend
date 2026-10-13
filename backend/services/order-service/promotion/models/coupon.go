@@ -27,6 +27,7 @@ type Coupon struct {
 	UsedCount     int            `gorm:"not null;default:0" json:"used_count"`
 	ExpiresAt     time.Time      `gorm:"not null" json:"expires_at"`
 	Active        bool           `gorm:"not null;default:true" json:"active"`
+	StoreID       *uuid.UUID     `gorm:"type:uuid;index" json:"store_id,omitempty"`
 	CreatedAt     time.Time      `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt     time.Time      `gorm:"autoUpdateTime" json:"updated_at"`
 	DeletedAt     gorm.DeletedAt `gorm:"index" json:"-"`

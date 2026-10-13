@@ -11,6 +11,7 @@ type CheckoutEvent struct {
 	Items          []CheckoutItem `json:"items"`
 	Timestamp      time.Time      `json:"timestamp"`
 	OrderID        string         `json:"order_id"`
+	StoreID        string         `json:"store_id,omitempty"`
 	CouponCode     string         `json:"coupon_code,omitempty"`
 	CorrelationID  string         `json:"correlation_id,omitempty"`
 }
@@ -28,6 +29,7 @@ type PaymentRequest struct {
 	Email          string `json:"email,omitempty"`
 	Amount         int    `json:"amount"` // minor units
 	Currency       string `json:"currency,omitempty"`
+	StoreID        string `json:"store_id,omitempty"`
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
 	CorrelationID  string `json:"correlation_id,omitempty"`
 }
@@ -38,6 +40,7 @@ type PaymentEvent struct {
 	OrderID       string    `json:"order_id"`
 	UserID        string    `json:"user_id"` // <-- Add this line
 	Email         string    `json:"email,omitempty"`
+	StoreID       string    `json:"store_id,omitempty"`
 	PaymentID     string    `json:"payment_id,omitempty"`
 	Amount        int       `json:"amount,omitempty"`
 	Currency      string    `json:"currency,omitempty"`
