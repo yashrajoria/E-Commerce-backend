@@ -242,7 +242,7 @@ jobs:
 
   deploy-render:
     name: Deploy to Render
-    needs: [go-vet-and-test, agent-pytest, openapi-lint, docker-build-check]
+    needs: [go-vet-and-test, migrations, agent-pytest, openapi-lint, docker-build-check]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
@@ -250,10 +250,15 @@ jobs:
         env:
           RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
         run: |
-          if [ -n "$RENDER_DEPLOY_HOOK_URL" ]; then
-            echo "Triggering Render deployment..."
-            curl -f -X POST "$RENDER_DEPLOY_HOOK_URL"
-            echo "Render deployment triggered successfully!"
-          else
-            echo "RENDER_DEPLOY_HOOK_URL secret not set, skipping automatic deploy hook."
+          set -euo pipefail
+
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "::error::RENDER_DEPLOY_HOOK_URL secret is not configured."
+            exit 1
           fi
+
+          echo "Triggering Render deployment for commit $GITHUB_SHA..."
+          curl --fail-with-body --show-error --silent \
+            --request POST \
+            "$RENDER_DEPLOY_HOOK_URL"
+          echo "Render deployment request accepted."

@@ -22,6 +22,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /out/identity-service 
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /out/catalog-service ./services/catalog-service
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /out/order-service ./services/order-service
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /out/notification-service ./services/notification-service
+RUN go install -tags postgres github.com/golang-migrate/migrate/v4/cmd/migrate@v4.17.1
 
 # Runtime stage: static Go binaries need only bash (start.sh), CA certs and tzdata
 FROM alpine:3.20
@@ -32,6 +33,8 @@ WORKDIR /app
 
 # Copy compiled Go binaries
 COPY --from=builder /out/ /app/
+COPY --from=builder /go/bin/migrate /usr/local/bin/migrate
+COPY backend/migrations /app/migrations
 
 # Copy email templates
 COPY backend/services/notification-service/templates /app/templates

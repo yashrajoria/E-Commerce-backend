@@ -31,6 +31,24 @@ export PAYMENT_EVENTS_QUEUE_URL="${PAYMENT_EVENTS_QUEUE_URL:-payment-events-queu
 export PAYMENT_REQUEST_QUEUE_URL="${PAYMENT_REQUEST_QUEUE_URL:-payment-request-queue}"
 export NOTIFICATION_SQS_QUEUE_URL="${NOTIFICATION_SQS_QUEUE_URL:-notification-queue}"
 
+# Apply the checked-in schema before any service starts. This includes the
+# Postgres-backed message_queues table used by the migrated SNS/SQS adapters.
+if [[ "${RUN_MIGRATIONS:-true}" == "true" ]]; then
+    if [[ -z "${DATABASE_URL:-}" ]]; then
+        POSTGRES_USER="${POSTGRES_USER:-postgres}"
+        POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
+        POSTGRES_HOST="${POSTGRES_HOST:-localhost}"
+        POSTGRES_PORT="${POSTGRES_PORT:-5432}"
+        POSTGRES_DB="${POSTGRES_DB:-ecommerce}"
+        POSTGRES_SSLMODE="${POSTGRES_SSLMODE:-disable}"
+        DATABASE_URL="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}?sslmode=${POSTGRES_SSLMODE}"
+    fi
+
+    echo "-> Applying PostgreSQL migrations..."
+    migrate -path /app/migrations -database "$DATABASE_URL" up
+    echo "-> PostgreSQL migrations complete."
+fi
+
 # If OTEL_EXPORTER_OTLP_ENDPOINT points to local docker compose jaeger, disable it
 case "${OTEL_EXPORTER_OTLP_ENDPOINT:-}" in
     *jaeger*)
