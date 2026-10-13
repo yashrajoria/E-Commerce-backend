@@ -21,7 +21,7 @@ class Settings:
     SERVICE_VERSION: str = "4.0.0"
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "production")
     
-    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "ollama").lower()  # ollama | gemini | openai | auto
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "ollama").lower()  # ollama | groq | gemini | openai | auto
     LLM_SERVICE_URL: str = os.getenv("LLM_SERVICE_URL", "http://ollama:11434/api/chat")
     LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen2.5:7b")
     LLM_TIMEOUT: float = _safe_float(os.getenv("LLM_TIMEOUT"), 30.0)
@@ -32,6 +32,9 @@ class Settings:
     OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
     OPENAI_BASE_URL: str = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    GROQ_API_KEY: str | None = os.getenv("GROQ_API_KEY")
+    GROQ_BASE_URL: str = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+    GROQ_MODEL: str = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
     ENABLE_STREAMING: bool = os.getenv("ENABLE_STREAMING", "true").lower() in ("true", "1", "yes")
     
     TOOL_API_BASE_URL: str = os.getenv("TOOL_API_BASE_URL", "http://api-gateway:8080")

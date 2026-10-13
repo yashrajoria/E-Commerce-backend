@@ -59,3 +59,5 @@ sequenceDiagram
 ## Configuration and safety
 
 Configure the BFF base URL, LLM endpoint and credentials, request timeouts, and logging. Preserve correlation IDs across downstream calls. Do not persist tokens or sensitive prompts in session logs; session memory should be treated as ephemeral process state.
+
+For local development, set `LLM_PROVIDER=ollama` to use Ollama with Groq as an automatic fallback when `GROQ_API_KEY` is configured. Set `LLM_PROVIDER=groq` to use Groq directly with Ollama as the fallback. Groq uses its OpenAI-compatible endpoint at `https://api.groq.com/openai/v1`; keep `GROQ_API_KEY` in the untracked `.env` file only.

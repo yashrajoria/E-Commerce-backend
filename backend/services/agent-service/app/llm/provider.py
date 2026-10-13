@@ -214,11 +214,13 @@ class OpenAIProvider(BaseLLMProvider):
         base_url: Optional[str] = None,
         model: Optional[str] = None,
         timeout: Optional[float] = None,
+        provider_name: str = "openai",
     ):
         self.api_key = api_key or settings.OPENAI_API_KEY or ""
         self.base_url = (base_url or settings.OPENAI_BASE_URL).rstrip("/")
         self.model = model or settings.OPENAI_MODEL
         self.timeout = timeout or settings.LLM_TIMEOUT
+        self.provider_name = provider_name
 
     async def call(
         self,
@@ -240,8 +242,8 @@ class OpenAIProvider(BaseLLMProvider):
             payload["response_format"] = {"type": "json_object"}
 
         logger.info(
-            f"OpenAI call started | model={self.model} json_mode={json_mode}",
-            extra={"event": "llm.call", "provider": "openai"},
+            f"{self.provider_name} call started | model={self.model} json_mode={json_mode}",
+            extra={"event": "llm.call", "provider": self.provider_name},
         )
 
         url = f"{self.base_url}/chat/completions"
@@ -271,6 +273,11 @@ class OpenAIProvider(BaseLLMProvider):
             "stream": True,
         }
 
+        logger.info(
+            f"{self.provider_name} stream started | model={self.model}",
+            extra={"event": "llm.stream_start", "provider": self.provider_name},
+        )
+
         url = f"{self.base_url}/chat/completions"
         async with httpx.AsyncClient() as client:
             async with client.stream("POST", url, headers=headers, json=payload, timeout=self.timeout) as response:
@@ -290,6 +297,22 @@ class OpenAIProvider(BaseLLMProvider):
                                 yield delta
                     except json.JSONDecodeError:
                         continue
+
+
+class GroqProvider(OpenAIProvider):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+        timeout: Optional[float] = None,
+    ):
+        super().__init__(
+            api_key=api_key or settings.GROQ_API_KEY,
+            base_url=settings.GROQ_BASE_URL,
+            model=model or settings.GROQ_MODEL,
+            timeout=timeout,
+            provider_name="groq",
+        )
 
 
 class FallbackProvider(BaseLLMProvider):
@@ -332,17 +355,36 @@ class FallbackProvider(BaseLLMProvider):
 def get_llm_provider() -> BaseLLMProvider:
     provider_name = settings.LLM_PROVIDER
 
+    ollama = OllamaProvider()
+    groq = GroqProvider() if settings.GROQ_API_KEY else None
+
     # Explicit provider selection
     if provider_name == "gemini" and settings.GEMINI_API_KEY:
-        return FallbackProvider(GeminiProvider(), OllamaProvider())
+        return FallbackProvider(
+            GeminiProvider(),
+            FallbackProvider(ollama, groq) if groq else ollama,
+        )
     elif provider_name == "openai" and settings.OPENAI_API_KEY:
-        return FallbackProvider(OpenAIProvider(), OllamaProvider())
+        return FallbackProvider(
+            OpenAIProvider(),
+            FallbackProvider(ollama, groq) if groq else ollama,
+        )
+    elif provider_name == "groq" and groq:
+        return FallbackProvider(groq, ollama)
+    elif provider_name == "ollama":
+        return FallbackProvider(ollama, groq) if groq else ollama
     elif provider_name == "auto":
         if settings.GEMINI_API_KEY:
-            return FallbackProvider(GeminiProvider(), OllamaProvider())
+            return FallbackProvider(
+                GeminiProvider(),
+                FallbackProvider(ollama, groq) if groq else ollama,
+            )
         elif settings.OPENAI_API_KEY:
-            return FallbackProvider(OpenAIProvider(), OllamaProvider())
-        return OllamaProvider()
+            return FallbackProvider(
+                OpenAIProvider(),
+                FallbackProvider(ollama, groq) if groq else ollama,
+            )
+        return FallbackProvider(ollama, groq) if groq else ollama
 
     # Default to OllamaProvider
-    return OllamaProvider()
+    return FallbackProvider(ollama, groq) if groq else ollama

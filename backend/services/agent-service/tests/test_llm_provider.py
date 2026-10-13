@@ -2,6 +2,7 @@ import pytest
 from app.llm.provider import (
     BaseLLMProvider,
     GeminiProvider,
+    GroqProvider,
     OllamaProvider,
     OpenAIProvider,
     FallbackProvider,
@@ -41,6 +42,25 @@ def test_gemini_message_conversion():
     assert len(converted["contents"]) == 2
     assert converted["contents"][0]["role"] == "user"
     assert converted["contents"][1]["role"] == "model"
+
+
+def test_groq_provider_configuration():
+    provider = GroqProvider(api_key="test-key", model="llama-3.3-70b-versatile")
+
+    assert provider.api_key == "test-key"
+    assert provider.model == "llama-3.3-70b-versatile"
+    assert provider.base_url == "https://api.groq.com/openai/v1"
+
+
+def test_groq_provider_selection(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(settings, "GROQ_API_KEY", "test-key")
+
+    provider = get_llm_provider()
+
+    assert isinstance(provider, FallbackProvider)
+    assert isinstance(provider.primary, GroqProvider)
+    assert isinstance(provider.fallback, OllamaProvider)
 
 
 @pytest.mark.asyncio
