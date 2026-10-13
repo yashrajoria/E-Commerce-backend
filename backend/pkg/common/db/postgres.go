@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -18,13 +19,17 @@ func PostgresDSN(host, port, user, password, database, sslMode, timeZone string)
 	values := url.Values{}
 	values.Set("sslmode", sslMode)
 	values.Set("TimeZone", timeZone)
+	query := values.Encode()
+	// pgx expects the slash in an IANA timezone to remain literal in the
+	// connection URL query instead of receiving the percent-encoded value.
+	query = strings.Replace(query, "TimeZone="+url.QueryEscape(timeZone), "TimeZone="+timeZone, 1)
 
 	return (&url.URL{
 		Scheme:   "postgres",
 		Host:     host + ":" + port,
 		User:     url.UserPassword(user, password),
 		Path:     "/" + database,
-		RawQuery: values.Encode(),
+		RawQuery: query,
 	}).String()
 }
 
