@@ -49,10 +49,7 @@ func ConnectPostgres(autoMigrateModels ...interface{}) (*gorm.DB, error) {
 		dbTimeZone = "Asia/Kolkata"
 	}
 
-	dsn := fmt.Sprintf(
-		"host=%s user=%s password=%s dbname=%s port=%s sslmode=%s TimeZone=%s",
-		dbHost, dbUser, dbPassword, dbName, dbPort, dbSSLMode, dbTimeZone,
-	)
+	dsn := commondb.PostgresDSN(dbHost, dbPort, dbUser, dbPassword, dbName, dbSSLMode, dbTimeZone)
 
 	var db *gorm.DB
 	var err error
