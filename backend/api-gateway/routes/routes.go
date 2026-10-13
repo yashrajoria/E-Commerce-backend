@@ -103,6 +103,8 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	authProxy := forwardTo(authBase + "/auth")
 	notifications := forwardTo(notificationBase + "/notifications")
 	agent := forwardTo(agentBase + "/agent")
+	stores := forwardTo(userBase + "/stores")
+	plans := forwardTo(userBase + "/plans")
 
 	// ── route groups ──────────────────────────────────────────────────────────
 	public := r.Group("/")
@@ -159,6 +161,10 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	public.POST("/shopper/query", forwardTo(agentBase+"/agent/query"))
 	public.POST("/shopper/query/stream", forwardTo(agentBase+"/agent/query/stream"))
 
+	// Multi-tenant stores & plans — public lookup
+	public.GET("/stores/by-slug/:slug", stores)
+	public.GET("/plans", plans)
+
 	// ── Storefront aggregation (ex-BFF) ─────────────────────────────────────
 	// bff-service is deleted. Its storefront fan-outs (home, profile,
 	// checkout orchestration) are gone: callers use the domain routes below
@@ -211,6 +217,18 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	bffAdmin.GET("/notifications", notifications)
 	bffAdmin.GET("/notifications/log", forwardTo(notificationBase+"/notifications/log"))
 
+	// Stores — admin management
+	bffAdmin.GET("/stores", stores)
+	bffAdmin.POST("/stores", stores)
+	bffAdmin.GET("/stores/*any", stores)
+	bffAdmin.PUT("/stores/*any", stores)
+	bffAdmin.DELETE("/stores/*any", stores)
+	bffAdmin.POST("/stores/*any", stores)
+
+	// Plans & Subscriptions
+	bffAdmin.GET("/plans", plans)
+	bffAdmin.GET("/plans/*any", plans)
+
 	// Agent — ADMIN (JWT + Admin Role required)
 	agentAdmin := newAdminGroup(protected, "/agent")
 	agentAdmin.Any("", agent)
@@ -239,12 +257,22 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	protected.PUT("/users/*any", users)
 	protected.DELETE("/users/*any", users)
 
-	// Cart
-	protected.GET("/cart", cart)
-	protected.GET("/cart/*any", cart)
-	protected.POST("/cart/*any", cart)
-	protected.PUT("/cart/*any", cart)
-	protected.DELETE("/cart/*any", cart)
+	// Stores (tenant management)
+	protected.GET("/stores", stores)
+	protected.POST("/stores", stores)
+	protected.GET("/stores/*any", stores)
+	protected.PUT("/stores/*any", stores)
+	protected.DELETE("/stores/*any", stores)
+	protected.POST("/stores/*any", stores)
+
+	// Cart — accessible by authenticated users and guests with session
+	cartGroup := r.Group("/cart")
+	cartGroup.Use(middleware.OptionalJWTMiddleware())
+	cartGroup.GET("", cart)
+	cartGroup.GET("/*any", cart)
+	cartGroup.POST("/*any", cart)
+	cartGroup.PUT("/*any", cart)
+	cartGroup.DELETE("/*any", cart)
 
 	// Orders — create and read
 	protected.GET("/orders", orders)

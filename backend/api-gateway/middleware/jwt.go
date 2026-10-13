@@ -258,6 +258,38 @@ func AdminRoleMiddleware() gin.HandlerFunc {
 	}
 }
 
+// OptionalJWTMiddleware extracts JWT claims if provided, but does not abort if unauthenticated
+func OptionalJWTMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var tokenString string
+		authHeader := c.GetHeader("Authorization")
+		if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
+			tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+		}
+		if tokenString == "" {
+			if cookie, err := c.Cookie("__session"); err == nil && cookie != "" {
+				tokenString = cookie
+			}
+		}
+
+		if tokenString != "" {
+			claims, err := parseToken(tokenString, "access")
+			if err == nil {
+				if uid, ok := claims["user_id"].(string); ok && uid != "" {
+					c.Set("user_id", uid)
+				}
+				if email, ok := claims["email"].(string); ok && email != "" {
+					c.Set("email", email)
+				}
+				if role, ok := claims["role"].(string); ok && role != "" {
+					c.Set("role", role)
+				}
+			}
+		}
+		c.Next()
+	}
+}
+
 // parseToken validates and extracts claims
 func parseToken(tokenStr, expectedType string) (jwt.MapClaims, error) {
 	if len(secretKey) == 0 {

@@ -44,7 +44,7 @@ func CORSMiddleware() gin.HandlerFunc {
 	config := cors.Config{
 		AllowCredentials: true,
 		AllowMethods:     []string{"POST", "HEAD", "PATCH", "OPTIONS", "GET", "PUT", "DELETE"},
-		AllowHeaders:     []string{"Content-Type", "Content-Length", "Accept-Encoding", "X-CSRF-Token", "Authorization", "Accept", "Origin", "Cache-Control", "X-Requested-With", "X-Request-ID", "X-Correlation-ID", "Idempotency-Key"},
+		AllowHeaders:     []string{"Content-Type", "Content-Length", "Accept-Encoding", "X-CSRF-Token", "Authorization", "Accept", "Origin", "Cache-Control", "X-Requested-With", "X-Request-ID", "X-Correlation-ID", "Idempotency-Key", "X-Store-ID", "X-Store-Slug"},
 	}
 
 	if allowed == "*" {

@@ -53,6 +53,18 @@ var forwardHTTPClient = &http.Client{
 	}),
 }
 
+var forwardStreamingHTTPClient = &http.Client{
+	Timeout: 0, // No client timeout for server-sent events / long streams
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+	Transport: telemetry.HTTPTransport(&http.Transport{
+		MaxIdleConns:        50,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     120 * time.Second,
+	}),
+}
+
 func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 	// Build the path suffix to append to TargetBase.
 	// 1. Try the wildcard param (*any) used by most routes.
@@ -164,11 +176,30 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 		}
 	}
 
+	// Inject store tenant identity if present in Gin context or client headers
+	if storeID, exists := c.Get("store_id"); exists {
+		if sid, ok := storeID.(string); ok && sid != "" {
+			req.Header.Set("X-Store-ID", sid)
+		}
+	} else if clientStoreID := c.GetHeader("X-Store-ID"); clientStoreID != "" {
+		req.Header.Set("X-Store-ID", clientStoreID)
+	}
+	if clientStoreSlug := c.GetHeader("X-Store-Slug"); clientStoreSlug != "" {
+		req.Header.Set("X-Store-Slug", clientStoreSlug)
+	}
+
 	// Gateway is the trusted ingress — attach mesh token for internal-gated routes
 	// (e.g. inventory /check) that frontend users reach via JWT on the gateway.
 	internalauth.Apply(req)
 
-	resp, err := forwardHTTPClient.Do(req)
+	// Select HTTP client: use forwardStreamingHTTPClient for SSE / streaming endpoints
+	client := forwardHTTPClient
+	if strings.Contains(strings.ToLower(c.GetHeader("Accept")), "text/event-stream") ||
+		strings.Contains(targetPath, "/stream") {
+		client = forwardStreamingHTTPClient
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		logger.Log.Error("Failed to forward request", zap.Error(err))
 		c.JSON(http.StatusBadGateway, gin.H{"error": "service unreachable"})
@@ -208,11 +239,37 @@ func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 		}
 	}
 
+	isSSE := strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream")
+	if isSSE {
+		c.Writer.Header().Set("Cache-Control", "no-cache")
+		c.Writer.Header().Set("Connection", "keep-alive")
+		c.Writer.Header().Set("X-Accel-Buffering", "no")
+	}
+
 	// Set status AFTER all headers are set
 	c.Status(resp.StatusCode)
 
-	// Copy response body
-	if _, err := io.Copy(c.Writer, resp.Body); err != nil {
-		logger.Log.Error("Failed to copy response body", zap.Error(err))
+	if isSSE {
+		flusher, isFlusher := c.Writer.(http.Flusher)
+		buf := make([]byte, 4096)
+		for {
+			n, readErr := resp.Body.Read(buf)
+			if n > 0 {
+				if _, writeErr := c.Writer.Write(buf[:n]); writeErr != nil {
+					break
+				}
+				if isFlusher {
+					flusher.Flush()
+				}
+			}
+			if readErr != nil {
+				break
+			}
+		}
+	} else {
+		// Copy response body
+		if _, err := io.Copy(c.Writer, resp.Body); err != nil {
+			logger.Log.Error("Failed to copy response body", zap.Error(err))
+		}
 	}
 }
