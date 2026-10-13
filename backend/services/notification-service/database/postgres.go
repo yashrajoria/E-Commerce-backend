@@ -9,9 +9,9 @@ import (
 	"notification-service/models"
 
 	"github.com/joho/godotenv"
+	commondb "github.com/yashrajoria/common/db"
 	"go.uber.org/zap"
 	"gorm.io/driver/postgres"
-	commondb "github.com/yashrajoria/common/db"
 	"gorm.io/gorm"
 )
 
@@ -53,10 +53,7 @@ func ConnectPostgres(logger *zap.Logger, autoMigrateModels ...interface{}) (*gor
 		dbTimeZone = "Asia/Kolkata"
 	}
 
-	dsn := fmt.Sprintf(
-		"host=%s user=%s password=%s dbname=%s port=%s sslmode=%s TimeZone=%s",
-		dbHost, dbUser, dbPassword, dbName, dbPort, dbSSLMode, dbTimeZone,
-	)
+	dsn := commondb.PostgresDSN(dbHost, dbPort, dbUser, dbPassword, dbName, dbSSLMode, dbTimeZone)
 
 	var db *gorm.DB
 	var err error

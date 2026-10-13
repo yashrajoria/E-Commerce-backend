@@ -3,6 +3,7 @@ package db
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"time"
 
@@ -11,6 +12,21 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+// PostgresDSN builds an escaped PostgreSQL URL from service configuration.
+func PostgresDSN(host, port, user, password, database, sslMode, timeZone string) string {
+	values := url.Values{}
+	values.Set("sslmode", sslMode)
+	values.Set("TimeZone", timeZone)
+
+	return (&url.URL{
+		Scheme:   "postgres",
+		Host:     host + ":" + port,
+		User:     url.UserPassword(user, password),
+		Path:     "/" + database,
+		RawQuery: values.Encode(),
+	}).String()
+}
 
 // DefaultGormConfig returns a *gorm.Config configured with a 2-second slow query
 // threshold suitable for cloud PostgreSQL connections across network regions.
@@ -54,10 +70,7 @@ func ConnectPostgres(autoMigrateModels ...interface{}) (*gorm.DB, error) {
 		dbTimeZone = "Asia/Kolkata"
 	}
 
-	dsn := fmt.Sprintf(
-		"host=%s user=%s password=%s dbname=%s port=%s sslmode=%s TimeZone=%s",
-		dbHost, dbUser, dbPassword, dbName, dbPort, dbSSLMode, dbTimeZone,
-	)
+	dsn := PostgresDSN(dbHost, dbPort, dbUser, dbPassword, dbName, dbSSLMode, dbTimeZone)
 
 	var db *gorm.DB
 	var err error

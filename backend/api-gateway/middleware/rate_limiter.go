@@ -33,7 +33,7 @@ func rateLimiter(client *redis.Client, prefix string, limit int, duration time.D
 		ip := c.ClientIP()
 		key := fmt.Sprintf("rate:%s:%s", prefix, ip)
 
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 		defer cancel()
 
 		// Fixed window counter. INCR + expiry run atomically in one script, and the
