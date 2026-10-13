@@ -87,6 +87,14 @@ Re-checked via Context7 MCP against:
 - All SQL migrations made **idempotent** (`IF NOT EXISTS` / `duplicate_object` guards / `CASCADE` downs)
 - Removed leftover Mongo `bson` tags from product/category domain models (DynamoDB-only persistence)
 
+### Applied package-practice hardening
+
+- PostgreSQL URLs are built with `net/url` and `url.UserPassword`, so credentials and database names containing reserved characters are escaped consistently across Go services.
+- Redis rate-limit operations use the incoming Gin request context, allowing cancelled requests to stop in-flight Redis work.
+- The agent service reuses one explicitly configured HTTPX client, serializes client/pool initialization and shutdown, disables automatic redirects for authenticated internal calls, and disables implicit environment proxy settings.
+- The agent service passes PostgreSQL connection parameters to `asyncpg.create_pool` directly rather than interpolating credentials into a URL.
+- These changes follow the package guidance for [GORM](https://gorm.io/docs/), [go-redis](https://redis.uptrace.dev/), [Gin](https://gin-gonic.com/docs/), [HTTPX](https://www.python-httpx.org/advanced/clients/), and [asyncpg](https://magicstack.github.io/asyncpg/current/).
+
 ### Intentional deviations (personal project — keep; don’t “fix”)
 
 This is a **personal** project. Prefer simplicity over enterprise isolation unless something actually hurts (latency, cost, or ops pain).
