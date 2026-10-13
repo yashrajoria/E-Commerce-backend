@@ -1,0 +1,9 @@
+-- Migration 000021_store_scoping.down.sql
+
+ALTER TABLE IF EXISTS catalog.products DROP COLUMN IF EXISTS store_id;
+ALTER TABLE IF EXISTS catalog.categories DROP COLUMN IF EXISTS store_id;
+ALTER TABLE IF EXISTS orders DROP COLUMN IF EXISTS store_id;
+ALTER TABLE IF EXISTS coupons DROP COLUMN IF EXISTS store_id;
+ALTER TABLE IF EXISTS notification_logs DROP COLUMN IF EXISTS store_id;
+ALTER TABLE IF EXISTS payments DROP COLUMN IF EXISTS store_id;
+ALTER TABLE IF EXISTS agent_audit_log DROP COLUMN IF EXISTS store_id;
