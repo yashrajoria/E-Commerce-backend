@@ -13,6 +13,9 @@ import (
 	"identity-service/database"
 	"identity-service/middleware"
 	"identity-service/repository"
+	storecontrollers "identity-service/stores/controllers"
+	storeroutes "identity-service/stores/routes"
+	storeservices "identity-service/stores/services"
 	usercontrollers "identity-service/users/controllers"
 	userroutes "identity-service/users/routes"
 	userservices "identity-service/users/services"
@@ -145,6 +148,14 @@ func main() {
 	adminUserRoutes := r.Group("/users")
 	adminUserRoutes.Use(middleware.AuthMiddleware(), middleware.AdminOnly())
 	userroutes.RegisterAdminRoutes(adminUserRoutes, userController)
+
+	// Multi-tenant Store & Subscription routes
+	storeRepo := repository.NewStoreRepository(database.DB)
+	storeService := storeservices.NewStoreService(storeRepo, userRepo)
+	storeController := storecontrollers.NewStoreController(storeService)
+
+	rootGroup := r.Group("/")
+	storeroutes.RegisterStoreRoutes(rootGroup, rootGroup, storeController)
 
 	// --- Graceful Shutdown ---
 
