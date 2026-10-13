@@ -182,8 +182,13 @@ func (cm *CacheManager) getCacheVersion(ctx context.Context) (int64, error) {
 
 // generateListCacheKey creates a unique cache key for product lists
 func (cm *CacheManager) generateListCacheKey(version int64, page, perPage int, filters *ProductFilters) string {
+	storeID := ""
+	if filters.StoreID != nil {
+		storeID = filters.StoreID.String()
+	}
+
 	return fmt.Sprintf(
-		"%s%d:p:%d:l:%d:f:%s:c:%s:s:%s:min:%s:max:%s",
+		"%s%d:p:%d:l:%d:f:%s:c:%s:s:%s:min:%s:max:%s:store:%s",
 		ProductListCachePrefix,
 		version,
 		page,
@@ -193,6 +198,7 @@ func (cm *CacheManager) generateListCacheKey(version int64, page, perPage int, f
 		filters.SortParam,
 		formatFloatForCache(filters.MinPrice),
 		formatFloatForCache(filters.MaxPrice),
+		storeID,
 	)
 }
 
