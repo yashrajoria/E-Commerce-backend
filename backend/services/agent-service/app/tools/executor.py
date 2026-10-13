@@ -42,6 +42,7 @@ def _headers(
     correlation_id: Optional[str],
     user_id: Optional[str],
     user_role: Optional[str],
+    store_id: Optional[str] = None,
 ) -> Dict[str, str]:
     headers: Dict[str, str] = {"Content-Type": "application/json"}
     if auth_header:
@@ -54,6 +55,8 @@ def _headers(
         headers["X-User-ID"] = user_id
     if user_role:
         headers["X-User-Role"] = user_role
+    if store_id:
+        headers["X-Store-ID"] = store_id
     return headers
 
 
@@ -68,10 +71,12 @@ async def _request(
     correlation_id: Optional[str] = None,
     user_id: Optional[str] = None,
     user_role: Optional[str] = None,
+    store_id: Optional[str] = None,
 ) -> Any:
     client = await get_http_client()
     url = f"{_API_BASE}{path}"
     req_params = {k: v for k, v in (params or {}).items() if v is not None}
+    resolved_store_id = store_id or (params.get("store_id") if params else None)
 
     start = time.perf_counter()
     response = await client.request(
@@ -79,7 +84,7 @@ async def _request(
         url=url,
         params=req_params,
         json=json_body,
-        headers=_headers(auth_header, cookie_header, correlation_id, user_id, user_role),
+        headers=_headers(auth_header, cookie_header, correlation_id, user_id, user_role, resolved_store_id),
     )
     duration_ms = int((time.perf_counter() - start) * 1000)
 
@@ -114,6 +119,7 @@ async def _request_with_fallback(
     correlation_id: Optional[str] = None,
     user_id: Optional[str] = None,
     user_role: Optional[str] = None,
+    store_id: Optional[str] = None,
 ) -> Any:
     last_exc: Optional[Exception] = None
     for path in paths:
@@ -127,6 +133,7 @@ async def _request_with_fallback(
                 correlation_id=correlation_id,
                 user_id=user_id,
                 user_role=user_role,
+                store_id=store_id,
             )
         except httpx.HTTPStatusError as exc:
             last_exc = exc
@@ -1055,7 +1062,11 @@ async def execute_tool(
     correlation_id: Optional[str] = None,
     user_id: Optional[str] = None,
     user_role: Optional[str] = None,
+    store_id: Optional[str] = None,
 ) -> Dict[str, Any]:
+    if store_id and "store_id" not in params:
+        params["store_id"] = store_id
+
     # Deferred import: app.tools.registry imports this module's handler
     # functions at module load time, so importing it back at module scope
     # here would be circular. TOOL_REGISTRY is the single source of truth

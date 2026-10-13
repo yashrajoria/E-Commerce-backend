@@ -20,6 +20,7 @@ async def execute_concurrent(
     user_role: Optional[str],
     logger: CorrelationAdapter,
     prompt: str = "",
+    store_id: Optional[str] = None,
 ) -> List[ToolResult]:
     if not tool_calls:
         return []
@@ -41,7 +42,7 @@ async def execute_concurrent(
         )
         try:
             raw_res = await asyncio.wait_for(
-                execute_tool(call.tool, call.params, auth_header, cookie_header, logger.extra.get('correlation_id'), user_id, user_role),
+                execute_tool(call.tool, call.params, auth_header, cookie_header, logger.extra.get('correlation_id'), user_id, user_role, store_id),
                 timeout=settings.TOOL_TIMEOUT
             )
             raw_res.setdefault("tool", call.tool)
@@ -78,6 +79,7 @@ async def execute_concurrent(
                 status="completed" if result.success else "failed",
                 result=result.data,
                 error=result.error,
+                store_id=store_id,
             )
         except Exception as audit_exc:
             logger.error(
@@ -96,6 +98,7 @@ async def execute_concurrent(
                 prompt=prompt,
                 tool=call.tool,
                 arguments=call.params,
+                store_id=store_id,
             )
         except Exception as audit_exc:
             logger.error(

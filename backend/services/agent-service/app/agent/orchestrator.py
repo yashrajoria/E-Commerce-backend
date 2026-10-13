@@ -36,6 +36,7 @@ async def run_agent(
     user_role: Optional[str],
     logger: CorrelationAdapter,
     correlation_id: Optional[str] = None,
+    store_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     cid = correlation_id or logger.extra.get("correlation_id") or str(uuid4())
     history = get_history(session_id)
@@ -51,6 +52,7 @@ async def run_agent(
         user_role=user_role,
         logger=logger,
         prompt=prompt,
+        store_id=store_id,
     )
     formatted_results = format_all_results(tool_results)
 
@@ -122,6 +124,7 @@ async def run_agent_workflow(
     user_id: Optional[str],
     user_role: Optional[str],
     logger: CorrelationAdapter,
+    store_id: Optional[str] = None,
 ) -> Tuple[str, List[ToolResult]]:
     response = await run_agent(
         prompt=prompt,
@@ -132,6 +135,7 @@ async def run_agent_workflow(
         user_role=user_role,
         logger=logger,
         correlation_id=logger.extra.get("correlation_id"),
+        store_id=store_id,
     )
     return response["answer"], response["tool_results"]
 
@@ -145,6 +149,7 @@ async def run_agent_stream(
     user_role: Optional[str],
     logger: CorrelationAdapter,
     correlation_id: Optional[str] = None,
+    store_id: Optional[str] = None,
 ) -> AsyncIterator[str]:
     cid = correlation_id or logger.extra.get("correlation_id") or str(uuid4())
     history = get_history(session_id)
@@ -168,6 +173,7 @@ async def run_agent_stream(
                 user_role=user_role,
                 logger=logger,
                 prompt=prompt,
+                store_id=store_id,
             )
             formatted_results = format_all_results(tool_results)
             for res in formatted_results:

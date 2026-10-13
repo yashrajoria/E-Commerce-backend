@@ -29,13 +29,14 @@ async def record_tool_call(
     status: str,
     result: Optional[Any] = None,
     error: Optional[str] = None,
+    store_id: Optional[str] = None,
 ) -> None:
     pool = await get_pool()
     await pool.execute(
         """
         INSERT INTO agent_audit_log
-            (id, request_id, user_id, prompt, tool, arguments, mutating, status, result, error)
-        VALUES ($1, $1, $2, $3, $4, $5, $6, $7, $8, $9)
+            (id, request_id, user_id, prompt, tool, arguments, mutating, status, result, error, store_id)
+        VALUES ($1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         """,
         request_id,
         _to_uuid_or_none(user_id),
@@ -46,6 +47,7 @@ async def record_tool_call(
         status,
         json.dumps(result) if result is not None else None,
         error,
+        _to_uuid_or_none(store_id),
     )
 
 
@@ -56,6 +58,7 @@ async def record_pending_mutation(
     prompt: str,
     tool: str,
     arguments: Dict[str, Any],
+    store_id: Optional[str] = None,
 ) -> None:
     await record_tool_call(
         request_id=request_id,
@@ -65,6 +68,7 @@ async def record_pending_mutation(
         arguments=arguments,
         mutating=True,
         status="pending_confirmation",
+        store_id=store_id,
     )
 
 

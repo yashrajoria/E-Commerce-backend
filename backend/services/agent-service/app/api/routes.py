@@ -31,9 +31,10 @@ async def query_agent(request: AgentQueryRequestV2, req: Request) -> AgentRespon
     cookie = req.headers.get("cookie")
     user_id = req.headers.get("x-user-id")
     user_role = req.headers.get("x-user-role", "guest")
+    store_id = req.headers.get("x-store-id")
 
     logger.info(
-        f"Query received | Session={session_id} Role={user_role}",
+        f"Query received | Session={session_id} Role={user_role} Store={store_id}",
         extra={"event": "request.start"},
     )
 
@@ -47,6 +48,7 @@ async def query_agent(request: AgentQueryRequestV2, req: Request) -> AgentRespon
             user_role=user_role,
             logger=logger,
             correlation_id=correlation_id,
+            store_id=store_id,
         )
         return AgentResponseV2(**response)
 
@@ -70,9 +72,10 @@ async def query_agent_stream(request: AgentQueryRequestV2, req: Request):
     cookie = req.headers.get("cookie")
     user_id = req.headers.get("x-user-id")
     user_role = req.headers.get("x-user-role", "guest")
+    store_id = req.headers.get("x-store-id")
 
     logger.info(
-        f"Streaming query received | Session={session_id} Role={user_role}",
+        f"Streaming query received | Session={session_id} Role={user_role} Store={store_id}",
         extra={"event": "request.stream_start"},
     )
 
@@ -85,6 +88,7 @@ async def query_agent_stream(request: AgentQueryRequestV2, req: Request):
         user_role=user_role,
         logger=logger,
         correlation_id=correlation_id,
+        store_id=store_id,
     )
 
     return StreamingResponse(
