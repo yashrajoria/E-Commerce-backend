@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 const (
 	ChannelEmail = "email"
@@ -23,15 +27,16 @@ const (
 )
 
 type NotificationLog struct {
-	ID         int64     `json:"id" db:"id" gorm:"primaryKey;autoIncrement"`
-	UserID     string    `json:"user_id" db:"user_id"`
-	Recipient  string    `json:"recipient" db:"recipient"`
-	Type       string    `json:"type" db:"type"`
-	Channel    string    `json:"channel" db:"channel"`
-	Status     string    `json:"status" db:"status"`
-	Error      string    `json:"error,omitempty" db:"error"`
-	RetryCount int       `json:"retry_count" db:"retry_count"`
-	CreatedAt  time.Time `json:"created_at" db:"created_at" gorm:"autoCreateTime"`
+	ID         int64      `json:"id" db:"id" gorm:"primaryKey;autoIncrement"`
+	UserID     string     `json:"user_id" db:"user_id"`
+	StoreID    *uuid.UUID `json:"store_id,omitempty" db:"store_id" gorm:"type:uuid;index"`
+	Recipient  string     `json:"recipient" db:"recipient"`
+	Type       string     `json:"type" db:"type"`
+	Channel    string     `json:"channel" db:"channel"`
+	Status     string     `json:"status" db:"status"`
+	Error      string     `json:"error,omitempty" db:"error"`
+	RetryCount int        `json:"retry_count" db:"retry_count"`
+	CreatedAt  time.Time  `json:"created_at" db:"created_at" gorm:"autoCreateTime"`
 }
 
 type NotificationEvent struct {
