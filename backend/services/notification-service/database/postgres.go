@@ -11,7 +11,6 @@ import (
 	"github.com/joho/godotenv"
 	commondb "github.com/yashrajoria/common/db"
 	"go.uber.org/zap"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
