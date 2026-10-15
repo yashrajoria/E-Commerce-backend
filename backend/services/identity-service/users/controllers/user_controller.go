@@ -159,6 +159,21 @@ func (ctrl *UserController) ChangePassword(c *gin.Context) {
 func (ctrl *UserController) GetAllUsers(c *gin.Context) {
 	pageStr := c.DefaultQuery("page", "1")
 	pageSizeStr := c.DefaultQuery("page_size", "20")
+	search := strings.TrimSpace(c.Query("search"))
+	role := strings.TrimSpace(c.Query("role"))
+	sortBy := strings.TrimSpace(c.Query("sort"))
+	sortOrder := strings.ToLower(strings.TrimSpace(c.Query("order")))
+	if sortOrder != "" && sortOrder != "desc" {
+		sortOrder = "asc"
+	}
+	if len(search) > 100 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "search is too long"})
+		return
+	}
+	if role != "" && role != "admin" && role != "user" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role"})
+		return
+	}
 
 	page := 1
 	pageSize := 20
@@ -169,7 +184,7 @@ func (ctrl *UserController) GetAllUsers(c *gin.Context) {
 		pageSize = v
 	}
 
-	users, total, err := ctrl.userService.ListUsers(c.Request.Context(), page, pageSize)
+	users, total, err := ctrl.userService.ListUsers(c.Request.Context(), page, pageSize, search, role, sortBy, sortOrder)
 	if err != nil {
 		logger.Error(c.Request.Context(), "Failed to fetch users list", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch users"})

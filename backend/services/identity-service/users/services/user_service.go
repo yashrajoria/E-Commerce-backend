@@ -81,8 +81,8 @@ func (s *UserService) ChangeUserPassword(ctx context.Context, userID string, has
 	return nil
 }
 
-func (s *UserService) ListUsers(ctx context.Context, page, pageSize int) ([]models.User, int64, error) {
+func (s *UserService) ListUsers(ctx context.Context, page, pageSize int, search, role, sortBy, sortOrder string) ([]models.User, int64, error) {
 	logger.Info(ctx, "Listing users", zap.Int("page", page), zap.Int("page_size", pageSize))
 	offset := (page - 1) * pageSize
-	return s.repo.List(ctx, offset, pageSize)
+	return s.repo.List(ctx, offset, pageSize, search, role, sortBy, sortOrder)
 }

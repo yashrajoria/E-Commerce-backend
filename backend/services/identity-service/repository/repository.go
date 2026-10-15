@@ -108,17 +108,43 @@ func (r *UserRepository) GetByID(ctx context.Context, id string) (*models.User, 
 	return &user, nil
 }
 
-func (r *UserRepository) List(ctx context.Context, offset, limit int) ([]models.User, int64, error) {
+func (r *UserRepository) List(ctx context.Context, offset, limit int, search, role, sortBy, sortOrder string) ([]models.User, int64, error) {
 	var users []models.User
 	var total int64
+	query := r.db.WithContext(ctx).Model(&models.User{}).Where("deleted_at IS NULL")
+	if search != "" {
+		term := "%" + search + "%"
+		query = query.Where("name ILIKE ? OR email ILIKE ? OR phone_number ILIKE ?", term, term, term)
+	}
+	if role != "" {
+		query = query.Where("role = ?", role)
+	}
 
-	if err := r.db.WithContext(ctx).Model(&models.User{}).Count(&total).Error; err != nil {
+	if err := query.Count(&total).Error; err != nil {
 		logger.Error(ctx, "Failed to count users", err)
 		return nil, 0, err
 	}
 
-	err := r.db.WithContext(ctx).
-		Order("created_at DESC").
+	order := "created_at DESC"
+	switch sortBy {
+	case "name":
+		order = "name"
+	case "email":
+		order = "email"
+	case "role":
+		order = "role"
+	case "created_at":
+		order = "created_at"
+	}
+	if sortBy != "" {
+		if sortOrder == "desc" {
+			order += " DESC"
+		} else {
+			order += " ASC"
+		}
+	}
+	err := query.
+		Order(order + ", id").
 		Offset(offset).
 		Limit(limit).
 		Find(&users).Error
