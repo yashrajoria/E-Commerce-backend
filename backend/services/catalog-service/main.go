@@ -91,11 +91,8 @@ func main() {
 	if err != nil {
 		zap.L().Fatal("Failed to get Postgres handle", zap.Error(err))
 	}
-	// Small fixed pool: five services share one Supabase connection budget.
-	// ponytail: constants, not config; make them env-driven if tuning is ever needed.
-	sqlDB.SetMaxOpenConns(10)
-	sqlDB.SetMaxIdleConns(5)
-	sqlDB.SetConnMaxLifetime(30 * time.Minute)
+	// Small fixed pool: services share one Supabase connection budget.
+	commondb.ConfigurePool(sqlDB, 3, 2)
 
 	queuePublisher := messaging.NewPGQueuePublisher(gdb, zap.L())
 

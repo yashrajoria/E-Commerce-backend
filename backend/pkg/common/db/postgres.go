@@ -1,10 +1,12 @@
 package db
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +33,67 @@ func PostgresDSN(host, port, user, password, database, sslMode, timeZone string)
 		Path:     "/" + database,
 		RawQuery: query,
 	}).String()
+}
+
+// NewPostgresDialector constructs a gorm.Dialector with PreferSimpleProtocol set to true.
+// This ensures compatibility with both standard PostgreSQL (:5432) and transaction poolers
+// like Supabase Supavisor (:6543) or PgBouncer by avoiding extended protocol prepared statement caching.
+func NewPostgresDialector(dsn string) gorm.Dialector {
+	return postgres.New(postgres.Config{
+		DSN:                  dsn,
+		PreferSimpleProtocol: true,
+	})
+}
+
+// ConfigurePool configures connection pool limits on a *sql.DB instance.
+// Designed to keep multi-service deployments within cloud pool limits (e.g. Supabase
+// session mode pool limit of 15 connections shared across microservices).
+//
+// Environment variable overrides:
+// - DB_MAX_OPEN_CONNS: integer > 0 (defaults to defaultMaxOpen, usually 3-4)
+// - DB_MAX_IDLE_CONNS: integer >= 0 (defaults to defaultMaxIdle, usually 2)
+// - DB_CONN_MAX_LIFETIME: duration e.g. "30m" (defaults to 30m)
+// - DB_CONN_MAX_IDLE_TIME: duration e.g. "2m" (defaults to 2m)
+func ConfigurePool(sqlDB *sql.DB, defaultMaxOpen, defaultMaxIdle int) {
+	if sqlDB == nil {
+		return
+	}
+
+	maxOpen := defaultMaxOpen
+	if envVal := os.Getenv("DB_MAX_OPEN_CONNS"); envVal != "" {
+		if v, err := strconv.Atoi(envVal); err == nil && v > 0 {
+			maxOpen = v
+		}
+	}
+
+	maxIdle := defaultMaxIdle
+	if envVal := os.Getenv("DB_MAX_IDLE_CONNS"); envVal != "" {
+		if v, err := strconv.Atoi(envVal); err == nil && v >= 0 {
+			maxIdle = v
+		}
+	}
+	if maxIdle > maxOpen {
+		maxIdle = maxOpen
+	}
+
+	maxLifetime := 30 * time.Minute
+	if envVal := os.Getenv("DB_CONN_MAX_LIFETIME"); envVal != "" {
+		if d, err := time.ParseDuration(envVal); err == nil && d > 0 {
+			maxLifetime = d
+		}
+	}
+
+	maxIdleTime := 2 * time.Minute
+	if envVal := os.Getenv("DB_CONN_MAX_IDLE_TIME"); envVal != "" {
+		if d, err := time.ParseDuration(envVal); err == nil && d > 0 {
+			maxIdleTime = d
+		}
+	}
+
+	sqlDB.SetMaxOpenConns(maxOpen)
+	sqlDB.SetMaxIdleConns(maxIdle)
+	sqlDB.SetConnMaxLifetime(maxLifetime)
+	sqlDB.SetConnMaxIdleTime(maxIdleTime)
 }
 
 // DefaultGormConfig returns a *gorm.Config configured with a 2-second slow query
@@ -80,9 +143,12 @@ func ConnectPostgres(autoMigrateModels ...interface{}) (*gorm.DB, error) {
 	var db *gorm.DB
 	var err error
 	for i := 0; i < 10; i++ {
-		db, err = gorm.Open(postgres.Open(dsn), DefaultGormConfig())
+		db, err = gorm.Open(NewPostgresDialector(dsn), DefaultGormConfig())
 		if err == nil {
 			log.Println("Connected to PostgreSQL successfully!")
+			if sqlDB, dbErr := db.DB(); dbErr == nil {
+				ConfigurePool(sqlDB, 3, 2)
+			}
 			if len(autoMigrateModels) > 0 && AllowAutoMigrate() {
 				if err := db.AutoMigrate(autoMigrateModels...); err != nil {
 					return nil, fmt.Errorf("AutoMigrate failed: %w", err)

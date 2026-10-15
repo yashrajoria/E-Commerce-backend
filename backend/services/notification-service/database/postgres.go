@@ -59,14 +59,12 @@ func ConnectPostgres(logger *zap.Logger, autoMigrateModels ...interface{}) (*gor
 	var err error
 
 	for i := 0; i < 10; i++ {
-		db, err = gorm.Open(postgres.Open(dsn), commondb.DefaultGormConfig())
+		db, err = gorm.Open(commondb.NewPostgresDialector(dsn), commondb.DefaultGormConfig())
 		if err == nil {
-			// Configure connection pool
+			// Configure connection pool with conservative limits for Supabase session pool
 			sqlDB, poolErr := db.DB()
 			if poolErr == nil {
-				sqlDB.SetMaxOpenConns(25)
-				sqlDB.SetMaxIdleConns(5)
-				sqlDB.SetConnMaxLifetime(5 * time.Minute)
+				commondb.ConfigurePool(sqlDB, 3, 2)
 			}
 
 			logger.Info("Connected to PostgreSQL successfully")

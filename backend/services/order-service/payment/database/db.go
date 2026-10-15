@@ -57,16 +57,14 @@ func ConnectPostgres(autoMigrateModels ...interface{}) (*gorm.DB, error) {
 	var db *gorm.DB
 	var err error
 	for i := 0; i < 10; i++ {
-		db, err = gorm.Open(postgres.Open(dsn), commondb.DefaultGormConfig())
+		db, err = gorm.Open(commondb.NewPostgresDialector(dsn), commondb.DefaultGormConfig())
 		if err == nil {
 			log.Println("Connected to PostgreSQL successfully!")
 			sqlDB, poolErr := db.DB()
 			if poolErr != nil {
 				return nil, fmt.Errorf("failed to get sql.DB for pool config: %w", poolErr)
 			}
-			sqlDB.SetMaxOpenConns(20)
-			sqlDB.SetMaxIdleConns(10)
-			sqlDB.SetConnMaxLifetime(2 * time.Hour)
+			commondb.ConfigurePool(sqlDB, 3, 2)
 			if len(autoMigrateModels) > 0 && commondb.AllowAutoMigrate() {
 				if err := db.AutoMigrate(autoMigrateModels...); err != nil {
 					return nil, fmt.Errorf("AutoMigrate failed: %w", err)

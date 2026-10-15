@@ -15,11 +15,21 @@ type PurgeJob struct{ Table, Where string }
 
 const purgeBatch = 5000
 
-// StartPurger runs jobs once now and then every `every` until ctx is done.
-// Deletes are batched so a first run over a big backlog doesn't hold a long lock.
-// ponytail: fixed batch, no jitter; add jitter if many replicas contend.
+// StartPurger runs jobs periodically until ctx is done.
+// Deletes are batched so a run over a big backlog doesn't hold a long lock.
+// An initial delay is applied to prevent startup connection spikes when multiple services boot.
 func StartPurger(ctx context.Context, gdb *gorm.DB, every time.Duration, jobs ...PurgeJob) {
 	go func() {
+		initialDelay := time.Minute
+		if every < initialDelay {
+			initialDelay = every
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(initialDelay):
+		}
+
 		t := time.NewTicker(every)
 		defer t.Stop()
 		for {
