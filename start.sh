@@ -44,8 +44,18 @@ if [[ "${RUN_MIGRATIONS:-true}" == "true" ]]; then
         DATABASE_URL="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}?sslmode=${POSTGRES_SSLMODE}"
     fi
 
+    # If using transaction pooler on port 6543, disable advisory lock which requires session mode
+    MIGRATE_URL="$DATABASE_URL"
+    if [[ "$MIGRATE_URL" == *":6543"* ]] && [[ "$MIGRATE_URL" != *"x-no-lock"* ]]; then
+        if [[ "$MIGRATE_URL" == *"?"* ]]; then
+            MIGRATE_URL="${MIGRATE_URL}&x-no-lock=true"
+        else
+            MIGRATE_URL="${MIGRATE_URL}?x-no-lock=true"
+        fi
+    fi
+
     echo "-> Applying PostgreSQL migrations..."
-    migrate -path /app/migrations -database "$DATABASE_URL" up
+    migrate -path /app/migrations -database "$MIGRATE_URL" up
     echo "-> PostgreSQL migrations complete."
 fi
 
