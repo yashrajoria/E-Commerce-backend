@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/gin-gonic/gin"
 	"catalog-service/inventory/models"
 	"catalog-service/inventory/repository"
 	"catalog-service/inventory/services"
+	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
 
@@ -232,7 +232,7 @@ func (ic *InventoryController) ListStock(c *gin.Context) {
 		pageSize = v
 	}
 
-	items, err := ic.service.ListAllStock(c.Request.Context(), page, pageSize)
+	items, total, err := ic.service.ListAllStock(c.Request.Context(), page, pageSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list inventory"})
 		return
@@ -241,9 +241,12 @@ func (ic *InventoryController) ListStock(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"inventory": items,
 		"meta": gin.H{
-			"page":      page,
-			"page_size": pageSize,
-			"count":     len(items),
+			"page":        page,
+			"page_size":   pageSize,
+			"count":       len(items),
+			"total":       total,
+			"total_pages": (total + int64(pageSize) - 1) / int64(pageSize),
+			"has_more":    int64(page*pageSize) < total,
 		},
 	})
 }

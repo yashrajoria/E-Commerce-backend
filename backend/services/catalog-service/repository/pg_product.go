@@ -49,7 +49,7 @@ func (p pgProduct) model() (*models.Product, error) {
 	m := &models.Product{
 		ID: p.ID, Name: p.Name, SKU: p.SKU, Price: p.Price, Quantity: p.Quantity,
 		Description: p.Description, Brand: p.Brand, IsFeatured: p.IsFeatured,
-		StoreID: p.StoreID,
+		StoreID:   p.StoreID,
 		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt, DeletedAt: p.DeletedAt,
 	}
 	for _, f := range []struct {
@@ -115,6 +115,11 @@ func productWhere(filter map[string]interface{}) (string, []interface{}) {
 				conds, args = append(conds, "p.store_id = ?"), append(args, id)
 			}
 		}
+		if v, ok := filter["search"].(string); ok && strings.TrimSpace(v) != "" {
+			term := "%" + strings.TrimSpace(v) + "%"
+			conds = append(conds, "(p.name ILIKE ? OR p.description ILIKE ? OR p.brand ILIKE ? OR p.sku ILIKE ?)")
+			args = append(args, term, term, term, term)
+		}
 	}
 	if len(conds) == 0 {
 		return "TRUE", nil
@@ -123,9 +128,9 @@ func productWhere(filter map[string]interface{}) (string, []interface{}) {
 }
 
 // query returns live products matching where, newest first. tail is " LIMIT ? OFFSET ?" etc.
-func (r *PGProductRepo) query(ctx context.Context, where, tail string, args ...interface{}) ([]*models.Product, error) {
+func (r *PGProductRepo) query(ctx context.Context, where, orderBy, tail string, args ...interface{}) ([]*models.Product, error) {
 	var rows []pgProduct
-	q := productSelect + " WHERE p.deleted_at IS NULL AND (" + where + ") ORDER BY p.created_at DESC, p.id" + tail
+	q := productSelect + " WHERE p.deleted_at IS NULL AND (" + where + ") ORDER BY " + orderBy + tail
 	if err := r.db.WithContext(ctx).Raw(q, args...).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -141,7 +146,7 @@ func (r *PGProductRepo) query(ctx context.Context, where, tail string, args ...i
 }
 
 func (r *PGProductRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.Product, error) {
-	ps, err := r.query(ctx, "p.id = ?", "", id)
+	ps, err := r.query(ctx, "p.id = ?", "p.created_at DESC, p.id", "", id)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +169,22 @@ func (r *PGProductRepo) Find(ctx context.Context, filter map[string]interface{},
 		tail += " OFFSET ?"
 		args = append(args, skip)
 	}
-	return r.query(ctx, where, tail, args...)
+	orderBy := "p.created_at DESC, p.id"
+	switch filter["sort"] {
+	case "price_asc":
+		orderBy = "p.price ASC, p.id"
+	case "price_desc":
+		orderBy = "p.price DESC, p.id"
+	case "created_at_asc":
+		orderBy = "p.created_at ASC, p.id"
+	case "created_at_desc":
+		orderBy = "p.created_at DESC, p.id"
+	case "name_asc":
+		orderBy = "p.name ASC, p.id"
+	case "name_desc":
+		orderBy = "p.name DESC, p.id"
+	}
+	return r.query(ctx, where, orderBy, tail, args...)
 }
 
 func (r *PGProductRepo) Count(ctx context.Context, filter map[string]interface{}) (int64, error) {
@@ -174,6 +194,32 @@ func (r *PGProductRepo) Count(ctx context.Context, filter map[string]interface{}
 		Raw("SELECT count(*) FROM catalog.products p WHERE p.deleted_at IS NULL AND ("+where+")", args...).
 		Scan(&n).Error
 	return n, err
+}
+
+func (r *PGProductRepo) CountByCategoryIDs(ctx context.Context, categoryIDs []uuid.UUID) (map[uuid.UUID]int, error) {
+	counts := make(map[uuid.UUID]int, len(categoryIDs))
+	if len(categoryIDs) == 0 {
+		return counts, nil
+	}
+
+	var rows []struct {
+		CategoryID uuid.UUID
+		Count      int
+	}
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT pc.category_id, COUNT(DISTINCT pc.product_id) AS count
+		FROM catalog.product_categories pc
+		JOIN catalog.products p ON p.id = pc.product_id
+		WHERE pc.category_id IN ? AND p.deleted_at IS NULL
+		GROUP BY pc.category_id
+	`, categoryIDs).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		counts[row.CategoryID] = row.Count
+	}
+	return counts, nil
 }
 
 func (r *PGProductRepo) Create(ctx context.Context, p *models.Product) error {
@@ -345,7 +391,7 @@ func (r *PGProductRepo) FindBySKUs(ctx context.Context, skus []string) ([]models
 	if len(uniq) == 0 {
 		return nil, nil
 	}
-	ps, err := r.query(ctx, "p.sku IN ?", "", uniq)
+	ps, err := r.query(ctx, "p.sku IN ?", "p.created_at DESC, p.id", "", uniq)
 	if err != nil {
 		return nil, err
 	}
@@ -367,5 +413,5 @@ func (r *PGProductRepo) GetProductsByIDs(ctx context.Context, ids []string) ([]*
 	if len(valid) == 0 {
 		return nil, nil
 	}
-	return r.query(ctx, "p.id IN ?", "", valid)
+	return r.query(ctx, "p.id IN ?", "p.created_at DESC, p.id", "", valid)
 }

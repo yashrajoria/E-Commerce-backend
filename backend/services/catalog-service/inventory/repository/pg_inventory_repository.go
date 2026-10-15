@@ -321,9 +321,16 @@ func (r *PGInventoryRepository) ListAll(ctx context.Context, limit, offset int) 
 		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
+
 	out := make([]models.Inventory, len(rows))
 	for i, row := range rows {
 		out[i] = *row.model()
 	}
 	return out, nil
+}
+
+func (r *PGInventoryRepository) CountAll(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("catalog.inventory").Count(&count).Error
+	return count, err
 }

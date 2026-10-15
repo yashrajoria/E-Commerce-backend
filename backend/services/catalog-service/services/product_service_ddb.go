@@ -6,11 +6,11 @@ import (
 	"io"
 	"mime/multipart"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"catalog-service/models"
 	"catalog-service/repository"
-
 
 	"github.com/google/uuid"
 	"github.com/yashrajoria/common/events"
@@ -133,6 +133,12 @@ func (s *ProductServiceDDB) ListProducts(ctx context.Context, params ListProduct
 	}
 	if params.StoreID != nil {
 		filter["store_id"] = *params.StoreID
+	}
+	if strings.TrimSpace(params.Search) != "" {
+		filter["search"] = strings.TrimSpace(params.Search)
+	}
+	if params.Sort != "" {
+		filter["sort"] = params.Sort
 	}
 
 	limit := params.PerPage
@@ -487,8 +493,6 @@ func (s *ProductServiceDDB) GetProductsInternal(ctx context.Context, ids []uuid.
 	}
 	return dtos, nil
 }
-
-
 
 // updateCategoryCountsAfterProductCreation updates product counts for all affected categories.
 // Called asynchronously after a product is created.

@@ -27,4 +27,5 @@ type InventoryRepository interface {
 	RestockAll(ctx context.Context, orderID string, items []models.ReserveItem) error
 	CheckStock(ctx context.Context, productID string, quantity int) (*models.StockCheckResult, error)
 	ListAll(ctx context.Context, limit, offset int) ([]models.Inventory, error)
+	CountAll(ctx context.Context) (int64, error)
 }

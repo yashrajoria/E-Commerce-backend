@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
+	"catalog-service/inventory/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"catalog-service/inventory/models"
 )
 
 // MockInventoryRepository is a mock of the repository interface
@@ -69,7 +69,13 @@ func (m *MockInventoryRepository) ListAll(ctx context.Context, limit, offset int
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
+
 	return args.Get(0).([]models.Inventory), args.Error(1)
+}
+
+func (m *MockInventoryRepository) CountAll(ctx context.Context) (int64, error) {
+	args := m.Called(ctx)
+	return args.Get(0).(int64), args.Error(1)
 }
 
 func TestReserveStock_TransactionalSuccess(t *testing.T) {
@@ -133,8 +139,9 @@ func TestListAllStock_PageBecomesOffset(t *testing.T) {
 	repo := new(MockInventoryRepository)
 	service := NewInventoryService(repo, nil)
 	repo.On("ListAll", mock.Anything, 20, 40).Return([]models.Inventory{{ProductID: "p"}}, nil)
+	repo.On("CountAll", mock.Anything).Return(int64(41), nil)
 
-	items, err := service.ListAllStock(context.Background(), 3, 20)
+	items, _, err := service.ListAllStock(context.Background(), 3, 20)
 
 	assert.NoError(t, err)
 	assert.Len(t, items, 1)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,8 +13,8 @@ import (
 	"catalog-service/services"
 
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
@@ -21,6 +22,7 @@ import (
 type CategoryServiceAPI interface {
 	CreateCategory(ctx context.Context, req services.CategoryCreateRequest) (*models.Category, error)
 	GetCategoryTree(ctx context.Context) ([]*models.Category, error)
+	ListCategories(ctx context.Context, params services.ListCategoriesParams) (*services.CategoryPage, error)
 	UpdateCategory(ctx context.Context, id uuid.UUID, req services.CategoryCreateRequest) (int64, error)
 	DeleteCategory(ctx context.Context, id uuid.UUID) error
 	GetCategory(ctx context.Context, id uuid.UUID) (*models.Category, error)
@@ -86,14 +88,43 @@ func (ctrl *CategoryController) GetCategories(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), ctrl.timeout)
 	defer cancel()
 
-	categoryTree, err := ctrl.service.GetCategoryTree(ctx)
+	page, perPage, err := ctrl.validator.ParsePagination(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	active := (*bool)(nil)
+	if raw := strings.TrimSpace(c.Query("is_active")); raw != "" {
+		value, parseErr := strconv.ParseBool(raw)
+		if parseErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid boolean value for 'is_active'"})
+			return
+		}
+		active = &value
+	}
+	sortBy := strings.TrimSpace(c.Query("sort"))
+	switch sortBy {
+	case "", "name_asc", "name_desc", "created_at_asc", "created_at_desc":
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sort value"})
+		return
+	}
+
+	result, err := ctrl.service.ListCategories(ctx, services.ListCategoriesParams{
+		Page:    page,
+		PerPage: perPage,
+		Search:  strings.TrimSpace(c.Query("search")),
+		Active:  active,
+		Sort:    sortBy,
+	})
 	if err != nil {
 		zap.L().Error("Service failed to get category tree", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch categories"})
 		return
 	}
 
-	c.JSON(http.StatusOK, categoryTree)
+	c.JSON(http.StatusOK, result)
 }
 
 // GetCategory retrieves a single category by ID

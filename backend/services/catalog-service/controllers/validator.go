@@ -56,14 +56,14 @@ type CreateProductRequest struct {
 
 // CreateProductJSONRequest defines the expected JSON structure for creating a product.
 type CreateProductJSONRequest struct {
-	Name        string   `json:"name" validate:"required"`
-	Description string   `json:"description" validate:"required"`
-	Brand       string   `json:"brand" validate:"required"`
-	SKU         string   `json:"sku" validate:"required"`
-	Price       float64  `json:"price" validate:"required,gt=0"`
-	Quantity    int      `json:"quantity" validate:"required,gte=0"`
-	IsFeatured  bool     `json:"is_featured"`
-	Categories  []string `json:"category" validate:"required,min=1,dive,required"`
+	Name        string     `json:"name" validate:"required"`
+	Description string     `json:"description" validate:"required"`
+	Brand       string     `json:"brand" validate:"required"`
+	SKU         string     `json:"sku" validate:"required"`
+	Price       float64    `json:"price" validate:"required,gt=0"`
+	Quantity    int        `json:"quantity" validate:"required,gte=0"`
+	IsFeatured  bool       `json:"is_featured"`
+	Categories  []string   `json:"category" validate:"required,min=1,dive,required"`
 	StoreID     *uuid.UUID `json:"store_id,omitempty"`
 }
 
@@ -79,6 +79,7 @@ type ProductFilters struct {
 	Brand            string
 	InStockParsed    *bool
 	StoreID          *uuid.UUID
+	Search           string
 }
 
 // RequestValidator handles all input validation
@@ -144,6 +145,7 @@ func (rv *RequestValidator) ParseFilters(c *gin.Context) (*ProductFilters, error
 	if err := rv.parseBrand(c, filters); err != nil {
 		return nil, err
 	}
+	filters.Search = strings.TrimSpace(c.Query("search"))
 
 	// Parse in_stock
 	if err := rv.parseInStock(c, filters); err != nil {

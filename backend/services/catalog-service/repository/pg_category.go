@@ -112,6 +112,45 @@ func (r *PGCategoryRepo) FindAll(ctx context.Context) ([]models.Category, error)
 	return r.find(ctx, "TRUE")
 }
 
+func (r *PGCategoryRepo) FindPage(ctx context.Context, search string, active *bool, sortBy string, limit, offset int) ([]models.Category, int64, error) {
+	query := r.db.WithContext(ctx).Table("catalog.categories").Where("deleted_at IS NULL")
+	if search != "" {
+		term := "%" + search + "%"
+		query = query.Where("name ILIKE ? OR slug ILIKE ?", term, term)
+	}
+	if active != nil {
+		query = query.Where("is_active = ?", *active)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	order := "level ASC, name ASC, id"
+	switch sortBy {
+	case "name_desc":
+		order = "name DESC, id"
+	case "created_at_asc":
+		order = "created_at ASC, id"
+	case "created_at_desc":
+		order = "created_at DESC, id"
+	case "name_asc":
+		order = "name ASC, id"
+	}
+	var rows []pgCategory
+	if err := query.Select(categoryCols).Order(order).Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	out := make([]models.Category, 0, len(rows))
+	for _, row := range rows {
+		m, err := row.model()
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, *m)
+	}
+	return out, total, nil
+}
+
 func (r *PGCategoryRepo) Create(ctx context.Context, c *models.Category) error {
 	return r.db.WithContext(ctx).Exec(`
 		INSERT INTO catalog.categories

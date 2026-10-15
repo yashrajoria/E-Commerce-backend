@@ -1,12 +1,17 @@
 package services
 
-import "github.com/google/uuid"
+import (
+	"catalog-service/models"
+
+	"github.com/google/uuid"
+)
 
 // ListProductsParams contains parameters for listing products with filters
 type ListProductsParams struct {
 	Page       int
 	PerPage    int
 	Sort       string
+	Search     string
 	IsFeatured *bool
 	CategoryID []uuid.UUID
 	MinPrice   *float64
@@ -14,6 +19,27 @@ type ListProductsParams struct {
 	Brand      *string
 	InStock    *bool
 	StoreID    *uuid.UUID
+}
+
+type ListCategoriesParams struct {
+	Page    int
+	PerPage int
+	Search  string
+	Active  *bool
+	Sort    string
+}
+
+type CategoryPage struct {
+	Categories []*models.Category `json:"categories"`
+	Meta       CategoryPageMeta   `json:"meta"`
+}
+
+type CategoryPageMeta struct {
+	Page       int  `json:"page"`
+	PerPage    int  `json:"perPage"`
+	Total      int  `json:"total"`
+	TotalPages int  `json:"totalPages"`
+	HasMore    bool `json:"hasMore"`
 }
 
 // ProductCreateRequest is the request payload for creating a product

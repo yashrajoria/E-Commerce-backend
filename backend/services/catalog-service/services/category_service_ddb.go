@@ -118,53 +118,64 @@ func (s *CategoryServiceDDB) GetCategoryTree(ctx context.Context) ([]*models.Cat
 		}
 	}
 
-	// Attach product counts to all categories
+	categoryIDs := make([]uuid.UUID, 0, len(categories))
+	for i := range categories {
+		categoryIDs = append(categoryIDs, categories[i].ID)
+	}
+	directCounts, err := s.productRepo.CountByCategoryIDs(ctx, categoryIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count category products: %w", err)
+	}
+
+	// Attach product counts to all categories with one grouped query instead of
+	// issuing a count query for every category and descendant.
 	for _, cat := range rootCategories {
-		s.attachProductCounts(ctx, cat, categoryMap)
+		s.attachProductCounts(cat, directCounts)
 	}
 
 	return rootCategories, nil
 }
 
-// attachProductCounts recursively attaches direct and total product counts to categories and their children.
-func (s *CategoryServiceDDB) attachProductCounts(ctx context.Context, cat *models.Category, categoryMap map[uuid.UUID]*models.Category) {
-	// Compute direct product count for this category
-	directCount, err := s.productRepo.Count(ctx, map[string]interface{}{
-		"category_ids": cat.ID.String(),
-	})
-	if err == nil {
-		cat.DirectProductCount = int(directCount)
+func (s *CategoryServiceDDB) ListCategories(ctx context.Context, params ListCategoriesParams) (*CategoryPage, error) {
+	if params.Page < 1 {
+		params.Page = 1
 	}
+	if params.PerPage < 1 {
+		params.PerPage = 20
+	}
+	if params.PerPage > 100 {
+		params.PerPage = 100
+	}
+	categories, total, err := s.repo.FindPage(ctx, strings.TrimSpace(params.Search), params.Active, params.Sort, params.PerPage, (params.Page-1)*params.PerPage)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*models.Category, 0, len(categories))
+	for i := range categories {
+		result = append(result, &categories[i])
+	}
+	totalPages := (int(total) + params.PerPage - 1) / params.PerPage
 
-	// Compute total product count (including descendants)
-	totalCount := int(directCount) // start with direct products
-	if len(cat.Children) > 0 {
-		descendantCount := s.countDescendantProducts(ctx, cat, categoryMap)
-		totalCount += descendantCount
-	}
-	cat.TotalProductCount = totalCount
-
-	// Recursively process children
-	for _, child := range cat.Children {
-		s.attachProductCounts(ctx, child, categoryMap)
-	}
+	return &CategoryPage{
+		Categories: result,
+		Meta: CategoryPageMeta{
+			Page:       params.Page,
+			PerPage:    params.PerPage,
+			Total:      int(total),
+			TotalPages: totalPages,
+			HasMore:    params.Page < totalPages,
+		},
+	}, nil
 }
 
-// countDescendantProducts recursively counts all products in descendant categories.
-func (s *CategoryServiceDDB) countDescendantProducts(ctx context.Context, cat *models.Category, categoryMap map[uuid.UUID]*models.Category) int {
-	total := 0
+// attachProductCounts recursively attaches direct and total product counts.
+func (s *CategoryServiceDDB) attachProductCounts(cat *models.Category, directCounts map[uuid.UUID]int) {
+	cat.DirectProductCount = directCounts[cat.ID]
+	cat.TotalProductCount = cat.DirectProductCount
 	for _, child := range cat.Children {
-		// Direct count for this child
-		directCount, err := s.productRepo.Count(ctx, map[string]interface{}{
-			"category_ids": child.ID.String(),
-		})
-		if err == nil {
-			total += int(directCount)
-		}
-		// Recurse to grandchildren
-		total += s.countDescendantProducts(ctx, child, categoryMap)
+		s.attachProductCounts(child, directCounts)
+		cat.TotalProductCount += child.TotalProductCount
 	}
-	return total
 }
 
 // RecalculateProductCountsForCategory recalculates product counts for a specific category and updates storage.
@@ -299,7 +310,7 @@ func (s *CategoryServiceDDB) CreateBulkCategories(ctx context.Context, req BulkC
 	})
 
 	results := make([]*models.Category, 0, len(req.Items))
-	
+
 	// Note: We iterate and call CreateCategory for each item.
 	// This ensures consistency and proper ancestry resolution, though it's less efficient
 	// than a batch write. For category import (infrequent), this is acceptable.
@@ -315,7 +326,7 @@ func (s *CategoryServiceDDB) CreateBulkCategories(ctx context.Context, req BulkC
 		}
 		results = append(results, cat)
 	}
-	
+
 	return results, nil
 }
 

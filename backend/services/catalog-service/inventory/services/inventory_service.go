@@ -162,7 +162,7 @@ func (s *InventoryService) CheckStock(ctx context.Context, items []models.Reserv
 }
 
 // ListAllStock returns inventory page `page` (1-indexed) with `pageSize` items.
-func (s *InventoryService) ListAllStock(ctx context.Context, page, pageSize int) ([]models.Inventory, error) {
+func (s *InventoryService) ListAllStock(ctx context.Context, page, pageSize int) ([]models.Inventory, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -175,7 +175,11 @@ func (s *InventoryService) ListAllStock(ctx context.Context, page, pageSize int)
 
 	items, err := s.repo.ListAll(ctx, pageSize, (page-1)*pageSize)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list inventory: %w", err)
+		return nil, 0, fmt.Errorf("failed to list inventory: %w", err)
 	}
-	return items, nil
+	total, err := s.repo.CountAll(ctx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count inventory: %w", err)
+	}
+	return items, total, nil
 }

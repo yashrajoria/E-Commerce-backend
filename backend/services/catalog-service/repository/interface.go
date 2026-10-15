@@ -14,6 +14,7 @@ type ProductRepo interface {
 	FindByID(ctx context.Context, id uuid.UUID) (*models.Product, error)
 	Find(ctx context.Context, filter map[string]interface{}, limit, skip int) ([]*models.Product, error)
 	Count(ctx context.Context, filter map[string]interface{}) (int64, error)
+	CountByCategoryIDs(ctx context.Context, categoryIDs []uuid.UUID) (map[uuid.UUID]int, error)
 	Create(ctx context.Context, product *models.Product) error
 	CreateMany(ctx context.Context, products []models.Product) error
 	Update(ctx context.Context, id uuid.UUID, updates map[string]interface{}) error
@@ -30,6 +31,7 @@ type CategoryRepo interface {
 	FindByName(ctx context.Context, name string) (*models.Category, error)
 	FindByNames(ctx context.Context, names []string) ([]models.Category, error)
 	FindAll(ctx context.Context) ([]models.Category, error)
+	FindPage(ctx context.Context, search string, active *bool, sortBy string, limit, offset int) ([]models.Category, int64, error)
 	Create(ctx context.Context, category *models.Category) error
 	Update(ctx context.Context, id uuid.UUID, updates map[string]interface{}) error
 	Delete(ctx context.Context, id uuid.UUID) error

@@ -37,6 +37,7 @@ func buildServiceParams(page, perPage int, filters *ProductFilters) services.Lis
 		Page:    page,
 		PerPage: perPage,
 		Sort:    filters.SortParam,
+		Search:  filters.Search,
 	}
 
 	if filters.IsFeaturedParsed != nil {
