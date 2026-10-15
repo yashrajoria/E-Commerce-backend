@@ -99,8 +99,18 @@ func (cc *CartController) Checkout(c *gin.Context) {
 	if correlationID == "" {
 		correlationID = uuid.NewString()
 	}
+
+	var reqBody struct {
+		PromoCode string `json:"promo_code"`
+	}
+	_ = c.ShouldBindJSON(&reqBody)
+	couponCode := cart.CouponCode
+	if couponCode == "" && reqBody.PromoCode != "" {
+		couponCode = strings.TrimSpace(reqBody.PromoCode)
+	}
+
 	// Build SNS payload
-	event := buildCheckoutEvent(userID, cart, orderID, scopedIdemKey, correlationID)
+	event := buildCheckoutEvent(userID, cart, orderID, scopedIdemKey, correlationID, couponCode)
 
 	eventBytes, err := json.Marshal(event)
 	if err != nil {
@@ -132,7 +142,11 @@ func (cc *CartController) Checkout(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"order_id": orderID, "status": "PENDING"})
 }
 
-func buildCheckoutEvent(userID string, cart *models.Cart, orderID, idempotencyKey, correlationID string) models.CheckoutEvent {
+func buildCheckoutEvent(userID string, cart *models.Cart, orderID, idempotencyKey, correlationID string, couponCodes ...string) models.CheckoutEvent {
+	couponCode := cart.CouponCode
+	if len(couponCodes) > 0 && couponCodes[0] != "" {
+		couponCode = couponCodes[0]
+	}
 	return models.CheckoutEvent{
 		Event:          "checkout.requested",
 		UserID:         userID,
@@ -140,7 +154,7 @@ func buildCheckoutEvent(userID string, cart *models.Cart, orderID, idempotencyKe
 		IdempotencyKey: idempotencyKey,
 		Timestamp:      time.Now(),
 		OrderID:        orderID,
-		CouponCode:     cart.CouponCode,
+		CouponCode:     couponCode,
 		CorrelationID:  correlationID,
 	}
 }

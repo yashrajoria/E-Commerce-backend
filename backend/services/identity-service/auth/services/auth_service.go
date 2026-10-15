@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -215,6 +216,76 @@ func (s *AuthService) provisionWithRepo(ctx context.Context, repo IUserRepositor
 	}
 
 	return nil
+}
+
+type GuestSessionInput struct {
+	Email string
+	Name  string
+	Phone string
+}
+
+const guestAccountMarker = "GUEST_ACCOUNT"
+
+// GuestSession provisions or retrieves a guest user session for checkout.
+// If the email belongs to a registered account with a password, ErrAccountExists is returned.
+func (s *AuthService) GuestSession(ctx context.Context, in GuestSessionInput) (*TokenPair, error) {
+	email := strings.TrimSpace(strings.ToLower(in.Email))
+	if email == "" {
+		return nil, fmt.Errorf("email is required")
+	}
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		name = "Guest Customer"
+	}
+
+	user, err := s.userRepo.FindByEmail(ctx, email)
+	if err == nil {
+		if user.VerificationCode != guestAccountMarker {
+			// Account was registered with a password — require proper login.
+			return nil, ErrAccountExists
+		}
+	} else if errors.Is(err, gorm.ErrRecordNotFound) {
+		randomPassword := uuid.NewString() + uuid.NewString()
+		hashedPassword, hashErr := bcrypt.GenerateFromPassword([]byte(randomPassword), bcrypt.DefaultCost)
+		if hashErr != nil {
+			return nil, fmt.Errorf("failed to hash password")
+		}
+
+		user = &models.User{
+			ID:               uuid.New(),
+			Email:            email,
+			Name:             name,
+			Password:         string(hashedPassword),
+			Role:             "user",
+			EmailVerified:    true,
+			VerificationCode: guestAccountMarker,
+		}
+
+		if createErr := s.userRepo.Create(ctx, user); createErr != nil {
+			return nil, fmt.Errorf("failed to create guest account: %w", createErr)
+		}
+	} else {
+		return nil, err
+	}
+
+	tokenPair, refreshTokenID, err := s.tokenService.GenerateTokenPair(
+		user.ID.String(), user.Email, user.Role,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	rt := &models.RefreshToken{
+		TokenID:   refreshTokenID,
+		UserID:    user.ID,
+		FamilyID:  uuid.New(),
+		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
+	}
+	if err := s.userRepo.CreateRefreshToken(ctx, rt); err != nil {
+		return nil, fmt.Errorf("failed to store refresh token: %w", err)
+	}
+
+	return tokenPair, nil
 }
 
 // BootstrapAdminFromEnv creates the first admin when none exist.

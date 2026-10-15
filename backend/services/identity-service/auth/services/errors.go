@@ -9,4 +9,5 @@ var (
 	ErrUserNotFound            = errors.New("user not found")
 	ErrInvalidVerificationCode = errors.New("invalid verification code")
 	ErrEmailAlreadyVerified    = errors.New("email already verified")
+	ErrAccountExists           = errors.New("an account already exists with this email")
 )

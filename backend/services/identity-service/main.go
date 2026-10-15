@@ -126,6 +126,7 @@ func main() {
 		bruteForceLimit := commonmw.RateLimitMiddleware()
 		authRoutes.POST("/register", bruteForceLimit, authController.Register)
 		authRoutes.POST("/login", bruteForceLimit, authController.Login)
+		authRoutes.POST("/guest", bruteForceLimit, authController.GuestSession)
 		authRoutes.POST("/verify-email", authController.VerifyEmail)
 		authRoutes.POST("/resend-verification", authController.ResendVerificationEmail)
 		authRoutes.POST("/logout", authController.Logout)

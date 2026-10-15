@@ -126,6 +126,7 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	}
 	authStrict.POST("/login", authProxy)
 	authStrict.POST("/register", authProxy)
+	authStrict.POST("/guest", authProxy)
 	authStrict.POST("/resend-verification", authProxy)
 	// Refresh must be public: access JWT is often expired when this is called.
 	// Auth is the refresh_token cookie, not __session.

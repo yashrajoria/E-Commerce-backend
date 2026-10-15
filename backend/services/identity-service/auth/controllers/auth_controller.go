@@ -25,6 +25,7 @@ type IAuthService interface {
 	Logout(ctx context.Context, refreshToken string) error
 	ResendVerificationEmail(ctx context.Context, email string) error
 	GetUserByID(ctx context.Context, userID string) (*models.User, error)
+	GuestSession(ctx context.Context, in services.GuestSessionInput) (*services.TokenPair, error)
 }
 
 type AuthController struct {
@@ -328,4 +329,53 @@ func (ctrl *AuthController) AdminCreateUser(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"message": "User created successfully", "email": req.Email, "role": req.Role})
+}
+
+func (ctrl *AuthController) GuestSession(c *gin.Context) {
+	var req struct {
+		Email string `json:"email" binding:"required,email"`
+		Name  string `json:"name"`
+		Phone string `json:"phone"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body", "details": err.Error()})
+		return
+	}
+
+	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
+
+	tokenPair, err := ctrl.service.GuestSession(c.Request.Context(), services.GuestSessionInput{
+		Email: req.Email,
+		Name:  req.Name,
+		Phone: req.Phone,
+	})
+	if err != nil {
+		if errors.Is(err, services.ErrAccountExists) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error":   "ACCOUNT_EXISTS",
+				"message": "An account already exists with this email. Please sign in to complete your purchase.",
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not initiate guest checkout session"})
+		return
+	}
+
+	domain := os.Getenv("COOKIE_DOMAIN")
+	sameSite, secure := cookieSettings()
+
+	c.SetSameSite(sameSite)
+	c.SetCookie("__session", tokenPair.AccessToken, 900, "/", domain, secure, true)
+	c.SetCookie("refresh_token", tokenPair.RefreshToken, 604800, "/", domain, secure, true)
+	c.SetCookie("user_id", tokenPair.UserID, 604800, "/", domain, secure, true)
+	c.SetCookie("user_role", tokenPair.Role, 604800, "/", domain, secure, true)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Guest session active",
+		"user": gin.H{
+			"id":    tokenPair.UserID,
+			"email": req.Email,
+			"role":  tokenPair.Role,
+		},
+	})
 }
