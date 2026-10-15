@@ -18,7 +18,7 @@ ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
     go build -ldflags="-w -s" -o /api-gateway .
 
-FROM alpine:3.19
+FROM alpine:3.23
 
 RUN addgroup -S app && adduser -S -G app app
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/

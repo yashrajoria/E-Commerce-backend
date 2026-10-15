@@ -305,7 +305,7 @@ services:
       - ecommerce-network
 
   stripe-cli:
-    image: stripe/stripe-cli:latest
+    image: stripe/stripe-cli:v1.53.1
     restart: unless-stopped
     command: listen --forward-to http://api-gateway:8080/stripe/webhook
     env_file:
@@ -316,7 +316,7 @@ services:
       - ecommerce-network
 
   docs:
-    image: swaggerapi/swagger-ui:latest
+    image: swaggerapi/swagger-ui:v5.33.2
     restart: unless-stopped
     ports:
       - "8099:8080"

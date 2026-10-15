@@ -15,7 +15,7 @@ ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
     go build -ldflags="-w -s" -o /catalog-service .
 
-FROM alpine:3.19
+FROM alpine:3.23
 
 # Add timezone data
 RUN apk add --no-cache tzdata
