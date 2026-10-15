@@ -1,3 +1,4 @@
+// Package models defines database entities and schemas for notification logs and incoming events.
 package models
 
 import (
@@ -24,8 +25,13 @@ const (
 	TypeOTPSMS                 = "otp_sms"
 	TypePriceDropRefund        = "order.price_drop_refund.requested"
 	TypePriceDropRefundAlias   = "price_drop_refund"
+	TypeStoreCreditGranted     = "store_credit.granted"
+	TypeStoreCreditRedeemed    = "store_credit.redeemed"
+	TypeStoreCreditReleased    = "store_credit.released"
+	TypeStoreCreditAdjusted    = "store_credit.adjusted"
 )
 
+// NotificationLog represents notification log.
 type NotificationLog struct {
 	ID         int64      `json:"id" db:"id" gorm:"primaryKey;autoIncrement"`
 	UserID     string     `json:"user_id" db:"user_id"`
@@ -39,6 +45,7 @@ type NotificationLog struct {
 	CreatedAt  time.Time  `json:"created_at" db:"created_at" gorm:"autoCreateTime"`
 }
 
+// NotificationEvent represents a domain event message for notification event.
 type NotificationEvent struct {
 	EventID     string    `gorm:"column:event_id;primaryKey"`
 	Status      string    `gorm:"column:status;not null"`
@@ -48,6 +55,7 @@ type NotificationEvent struct {
 
 const NotificationEventDelivered = "delivered"
 
+// NotificationFilter defines query filter criteria for notification.
 type NotificationFilter struct {
 	UserID   string
 	Status   string
@@ -56,6 +64,7 @@ type NotificationFilter struct {
 	PageSize int
 }
 
+// EventPayload represents event payload.
 type EventPayload struct {
 	EventID       string                 `json:"event_id,omitempty"`
 	EventType     string                 `json:"event_type"`

@@ -30,7 +30,7 @@ type ProductValidator interface {
 // product validator wired in (fail-closed: checkout cannot proceed unvalidated).
 var errValidatorUnavailable = errors.New("product validator not configured")
 
-// Checkout initiates the order process via SNS and clears it
+// Checkout handles POST /cart/checkout, validating inventory holds and emitting checkout events to initiate order placement.
 func (cc *CartController) Checkout(c *gin.Context) {
 	userID := c.GetHeader("X-User-ID")
 	if userID == "" {
@@ -107,6 +107,7 @@ func (cc *CartController) Checkout(c *gin.Context) {
 			Email string `json:"email"`
 			Phone string `json:"phone"`
 		} `json:"contact"`
+		StoreCreditAmount int64 `json:"store_credit_amount"`
 	}
 	_ = c.ShouldBindJSON(&reqBody)
 	couponCode := cart.CouponCode
@@ -123,6 +124,8 @@ func (cc *CartController) Checkout(c *gin.Context) {
 
 	// Build SNS payload
 	event := buildCheckoutEvent(userID, cart, orderID, scopedIdemKey, correlationID, couponCode)
+	event.StoreCreditAmount = reqBody.StoreCreditAmount
+	event.StoreID = c.GetHeader("X-Store-ID")
 	event.Email = customerEmail
 	event.ShippingAddress = reqBody.ShippingAddress
 
@@ -212,4 +215,3 @@ func (cc *CartController) validateProductsBatch(ctx context.Context, productIDs 
 	}
 	return invalid, nil
 }
-

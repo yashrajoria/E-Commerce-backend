@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"order-service/credit"
 	promotionservices "order-service/promotion/services"
 
 	"github.com/google/uuid"
@@ -20,6 +21,7 @@ import (
 	"github.com/yashrajoria/common/telemetry"
 )
 
+// SQSCheckoutConsumer represents sqs checkout consumer.
 type SQSCheckoutConsumer struct {
 	sqsConsumer          messaging.Consumer
 	sqsPublisher         messaging.Consumer // For sending payment requests
@@ -30,7 +32,14 @@ type SQSCheckoutConsumer struct {
 	notificationTopicArn string
 	promotionService     promotionservices.CouponService
 	storeCurrency        string
+	creditService        *credit.Service
+	allocRepo            repositories.AllocationRepository
 }
+
+// SetCreditService sets the credit service of the c.
+func (c *SQSCheckoutConsumer) SetCreditService(s *credit.Service)                    { c.creditService = s }
+// SetAllocationRepo sets the allocation repo of the c.
+func (c *SQSCheckoutConsumer) SetAllocationRepo(a repositories.AllocationRepository) { c.allocRepo = a }
 
 // NewSQSCheckoutConsumer creates a new SQS-based checkout consumer
 func NewSQSCheckoutConsumer(sqsConsumer messaging.Consumer, sqsPublisher messaging.Consumer, orderRepo repositories.OrderRepository, inventoryClient *InventoryClient, _ any, productServiceURL string, snsClient messaging.Publisher, notificationTopicArn string, promotionService promotionservices.CouponService, storeCurrency string) *SQSCheckoutConsumer {
@@ -189,6 +198,26 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 	if finalTotal < 0 {
 		finalTotal = 0
 	}
+	creditAmount := evt.StoreCreditAmount
+	if creditAmount < 0 || creditAmount > int64(finalTotal) {
+		return fmt.Errorf("invalid store credit amount")
+	}
+	creditIdem := evt.IdempotencyKey
+	if creditIdem == "" {
+		creditIdem = evt.OrderID
+	}
+	if creditAmount > 0 {
+		if c.creditService == nil || evt.StoreID == "" {
+			return fmt.Errorf("store credit is unavailable for this checkout")
+		}
+		storeID, err := uuid.Parse(evt.StoreID)
+		if err != nil {
+			return fmt.Errorf("invalid store id: %w", err)
+		}
+		if err := c.creditService.Hold(ctx, storeID, userUUID, creditAmount, c.storeCurrency, "checkout-hold:"+creditIdem, &orderIDUUID); err != nil {
+			return fmt.Errorf("hold store credit: %w", err)
+		}
+	}
 
 	// Reserve inventory via inventory service before creating the order/payment request
 	if c.inventoryClient != nil {
@@ -250,16 +279,17 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 	}
 
 	req := models.PaymentRequest{
-		EventID:         uuid.New().String(),
-		OrderID:         order.ID.String(),
-		UserID:          order.UserID.String(),
-		Email:           customerEmail,
-		ShippingAddress: evt.ShippingAddress,
-		Amount:          order.Amount,
-		Currency:        c.storeCurrency,
-		StoreID:         evt.StoreID,
-		IdempotencyKey:  idemKey,
-		CorrelationID:   evt.CorrelationID,
+		EventID:           uuid.New().String(),
+		OrderID:           order.ID.String(),
+		UserID:            order.UserID.String(),
+		Email:             customerEmail,
+		ShippingAddress:   evt.ShippingAddress,
+		Amount:            order.Amount,
+		Currency:          c.storeCurrency,
+		StoreID:           evt.StoreID,
+		IdempotencyKey:    idemKey,
+		CorrelationID:     evt.CorrelationID,
+		StoreCreditAmount: creditAmount,
 	}
 	reqBytes, err := json.Marshal(req)
 	if err != nil {
@@ -318,6 +348,29 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 			}
 		}
 		return err
+	}
+
+	if c.allocRepo != nil {
+		if creditAmount > 0 {
+			_ = c.allocRepo.Create(ctx, &models.OrderPaymentAllocation{
+				OrderID:       order.ID,
+				PaymentMethod: "store_credit",
+				Amount:        creditAmount,
+				Currency:      c.storeCurrency,
+				Status:        "allocated",
+				ReferenceID:   "checkout-hold:" + creditIdem,
+			})
+		}
+		remainingPayable := int64(finalTotal) - creditAmount
+		if remainingPayable > 0 {
+			_ = c.allocRepo.Create(ctx, &models.OrderPaymentAllocation{
+				OrderID:       order.ID,
+				PaymentMethod: "stripe",
+				Amount:        remainingPayable,
+				Currency:      c.storeCurrency,
+				Status:        "allocated",
+			})
+		}
 	}
 
 	log.Printf("order created id=%s user=%s items=%d total_amount=%d",

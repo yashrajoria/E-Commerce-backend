@@ -8,11 +8,14 @@ import (
 	"testing"
 	"time"
 
+	"order-service/credit"
 	"order-service/models"
 	paymentservices "order-service/payment/services"
 	repositories "order-service/repository"
 
 	"github.com/google/uuid"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 type fakeSNSPublisher struct {
@@ -402,13 +405,13 @@ func TestRefundOrder_RejectsInvalidStates(t *testing.T) {
 
 	// 2. Already refunded
 	repoRefunded := &fakeOrderRepo{
-		order: models.Order{ID: orderID, UserID: userID, Status: "refunded"},
+		order: models.Order{ID: orderID, UserID: userID, Status: "refunded", Amount: 2000, RefundedAmount: 2000},
 	}
 	svc = NewOrderServiceSQS(repoRefunded, nil, "", "", nil)
 	svc.SetRefunder(&fakeDetailedRefunder{})
 	_, serr = svc.RefundOrder(context.Background(), orderID, userID.String(), "", &RefundOrderRequest{})
-	if serr == nil || serr.StatusCode != 409 || serr.Message != "order is already refunded" {
-		t.Fatalf("expected 409 'order is already refunded', got %v", serr)
+	if serr == nil || serr.StatusCode != 409 || serr.Message != "order is already fully refunded" {
+		t.Fatalf("expected 409 'order is already fully refunded', got %v", serr)
 	}
 
 	// 3. Cancelled
@@ -509,5 +512,151 @@ func TestRefundOrder_StripeFailure(t *testing.T) {
 	}
 	if repo.order.Status != "paid" {
 		t.Fatalf("order status should stay paid on error, got %s", repo.order.Status)
+	}
+}
+
+type fakeAllocRepo struct {
+	allocs []models.OrderPaymentAllocation
+}
+
+func (f *fakeAllocRepo) Create(ctx context.Context, allocation *models.OrderPaymentAllocation) error {
+	f.allocs = append(f.allocs, *allocation)
+	return nil
+}
+
+func (f *fakeAllocRepo) FindByOrderID(ctx context.Context, orderID uuid.UUID) ([]models.OrderPaymentAllocation, error) {
+	var result []models.OrderPaymentAllocation
+	for _, a := range f.allocs {
+		if a.OrderID == orderID {
+			result = append(result, a)
+		}
+	}
+	return result, nil
+}
+
+func (f *fakeAllocRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status string) error {
+	for i := range f.allocs {
+		if f.allocs[i].ID == id {
+			f.allocs[i].Status = status
+			return nil
+		}
+	}
+	return nil
+}
+
+func (f *fakeAllocRepo) UpdateRefunded(ctx context.Context, id uuid.UUID, refundedAmount int64) error {
+	for i := range f.allocs {
+		if f.allocs[i].ID == id {
+			f.allocs[i].RefundedAmount = refundedAmount
+			return nil
+		}
+	}
+	return nil
+}
+
+func TestRefundOrder_AllocationSplit_ProportionalAndSubsequent(t *testing.T) {
+	orderID := uuid.New()
+	userID := uuid.New()
+	storeID := uuid.New()
+
+	order := models.Order{
+		ID:             orderID,
+		UserID:         userID,
+		StoreID:        &storeID,
+		Status:         "paid",
+		Amount:         10000, // £100
+		RefundedAmount: 0,
+		Currency:       "gbp",
+	}
+	repo := &fakeOrderRepo{order: order}
+
+	allocRepo := &fakeAllocRepo{
+		allocs: []models.OrderPaymentAllocation{
+			{
+				ID:             uuid.New(),
+				OrderID:        orderID,
+				PaymentMethod:  "store_credit",
+				Amount:         4000, // £40
+				RefundedAmount: 0,
+				Status:         "captured",
+			},
+			{
+				ID:             uuid.New(),
+				OrderID:        orderID,
+				PaymentMethod:  "stripe",
+				Amount:         6000, // £60
+				RefundedAmount: 0,
+				Status:         "captured",
+			},
+		},
+	}
+
+	// Use in-memory SQLite DB for credit service
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("failed to open test sqlite: %v", err)
+	}
+	_ = db.AutoMigrate(&models.StoreCreditAccount{}, &models.StoreCreditLedgerEntry{})
+	creditSvc := credit.NewService(db)
+
+	stripeRefunder := &fakeDetailedRefunder{}
+	svc := NewOrderServiceSQS(repo, nil, "", "", nil)
+	svc.SetRefunder(stripeRefunder)
+	svc.SetCreditService(creditSvc)
+	svc.SetAllocationRepo(allocRepo)
+
+	// 1. Partial refund of 5000 (£50)
+	reqAmt := 5000
+	updatedOrder, serr := svc.RefundOrder(context.Background(), orderID, userID.String(), "customer", &RefundOrderRequest{
+		Amount: &reqAmt,
+		Reason: "customer return partial",
+	})
+	if serr != nil {
+		t.Fatalf("partial refund failed: %v", serr)
+	}
+	if updatedOrder.Status != "refunded" {
+		t.Fatalf("expected status 'refunded', got %s", updatedOrder.Status)
+	}
+	if updatedOrder.RefundedAmount != 5000 {
+		t.Fatalf("expected refunded amount 5000, got %d", updatedOrder.RefundedAmount)
+	}
+
+	// Verify allocations updated proportionally:
+	// Credit: 4000 / 10000 * 5000 = 2000
+	// Stripe: 6000 / 10000 * 5000 = 3000
+	allocs, _ := allocRepo.FindByOrderID(context.Background(), orderID)
+	for _, a := range allocs {
+		if a.PaymentMethod == "store_credit" && a.RefundedAmount != 2000 {
+			t.Fatalf("expected credit allocation refunded 2000, got %d", a.RefundedAmount)
+		}
+		if a.PaymentMethod == "stripe" && a.RefundedAmount != 3000 {
+			t.Fatalf("expected stripe allocation refunded 3000, got %d", a.RefundedAmount)
+		}
+	}
+
+	// Verify customer received 2000 store credit in balance
+	avail, _, _, _ := creditSvc.Balance(context.Background(), storeID, userID)
+	if avail != 2000 {
+		t.Fatalf("expected customer credit balance 2000, got %d", avail)
+	}
+
+	// 2. Second partial refund of remaining 5000
+	fullOrder, serr := svc.RefundOrder(context.Background(), orderID, userID.String(), "customer", &RefundOrderRequest{
+		Reason: "return remaining items",
+	})
+	if serr != nil {
+		t.Fatalf("second refund failed: %v", serr)
+	}
+	if fullOrder.Status != "refunded" {
+		t.Fatalf("expected final status 'refunded', got %s", fullOrder.Status)
+	}
+	if fullOrder.RefundedAmount != 10000 {
+		t.Fatalf("expected total refunded 10000, got %d", fullOrder.RefundedAmount)
+	}
+
+	// 3. Third refund attempt on fully refunded order must fail with 409
+	_, serr = svc.RefundOrder(context.Background(), orderID, userID.String(), "customer", &RefundOrderRequest{})
+	if serr == nil || serr.StatusCode != 409 {
+		t.Fatalf("expected 409 on third refund attempt, got %v", serr)
 	}
 }

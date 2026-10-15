@@ -13,6 +13,7 @@ import (
 	"github.com/yashrajoria/common/events"
 	"github.com/yashrajoria/common/messaging"
 	"github.com/yashrajoria/common/telemetry"
+	"order-service/credit"
 )
 
 // SQSPaymentConsumer consumes payment events from SQS and updates order status
@@ -24,6 +25,8 @@ type SQSPaymentConsumer struct {
 	notificationTopicArn string
 	productServiceURL    string
 	cartClearer          CartClearer
+	creditService        *credit.Service
+	allocRepo            repositories.AllocationRepository
 }
 
 // CartClearer empties a user's cart once their order is paid.
@@ -32,7 +35,11 @@ type CartClearer interface {
 }
 
 // SetCartClearer enables clearing the cart after a successful payment.
-func (c *SQSPaymentConsumer) SetCartClearer(cc CartClearer) { c.cartClearer = cc }
+func (c *SQSPaymentConsumer) SetCartClearer(cc CartClearer)                         { c.cartClearer = cc }
+// SetCreditService sets the credit service of the c.
+func (c *SQSPaymentConsumer) SetCreditService(s *credit.Service)                    { c.creditService = s }
+// SetAllocationRepo sets the allocation repo of the c.
+func (c *SQSPaymentConsumer) SetAllocationRepo(a repositories.AllocationRepository) { c.allocRepo = a }
 
 // NewSQSPaymentConsumer creates a new SQS-based payment event consumer
 func NewSQSPaymentConsumer(sqsConsumer messaging.Consumer, orderRepo repositories.OrderRepository, inventoryClient *InventoryClient, _ any, snsClient messaging.Publisher, notificationTopicArn string, productServiceURL string) *SQSPaymentConsumer {
@@ -101,6 +108,27 @@ func (c *SQSPaymentConsumer) handleMessage(ctx context.Context, body string) err
 			if err := c.confirmInventory(ctx, evt.OrderID); err != nil {
 				return err
 			}
+			if applied && c.creditService != nil && evt.StoreCreditAmount > 0 && evt.StoreID != "" {
+				storeID, parseErr := uuid.Parse(evt.StoreID)
+				if parseErr == nil {
+					orderUUID, orderErr := uuid.Parse(evt.OrderID)
+					if orderErr == nil {
+						_ = c.creditService.Capture(ctx, storeID, uuid.MustParse(evt.UserID), evt.StoreCreditAmount, evt.Currency, "checkout-capture:"+evt.OrderID, &orderUUID)
+					}
+				}
+			}
+			if applied && c.allocRepo != nil {
+				if orderUUID, orderErr := uuid.Parse(evt.OrderID); orderErr == nil {
+					allocs, err := c.allocRepo.FindByOrderID(ctx, orderUUID)
+					if err == nil {
+						for _, a := range allocs {
+							if a.Status == "allocated" {
+								_ = c.allocRepo.UpdateStatus(ctx, a.ID, "captured")
+							}
+						}
+					}
+				}
+			}
 		}
 		if applied {
 			c.publishOrderConfirmedNotification(ctx, evt)
@@ -118,6 +146,27 @@ func (c *SQSPaymentConsumer) handleMessage(ctx context.Context, body string) err
 			return err
 		}
 		if applied || already {
+			if applied && c.creditService != nil && evt.StoreCreditAmount > 0 && evt.StoreID != "" {
+				storeID, parseErr := uuid.Parse(evt.StoreID)
+				if parseErr != nil {
+					return parseErr
+				}
+				if err := c.creditService.Release(ctx, storeID, uuid.MustParse(evt.UserID), evt.StoreCreditAmount, evt.Currency, "checkout-release:"+evt.OrderID, func() *uuid.UUID { id := uuid.MustParse(evt.OrderID); return &id }()); err != nil {
+					return err
+				}
+			}
+			if applied && c.allocRepo != nil {
+				if orderUUID, orderErr := uuid.Parse(evt.OrderID); orderErr == nil {
+					allocs, err := c.allocRepo.FindByOrderID(ctx, orderUUID)
+					if err == nil {
+						for _, a := range allocs {
+							if a.PaymentMethod == "store_credit" && a.Status == "allocated" {
+								_ = c.allocRepo.UpdateStatus(ctx, a.ID, "released")
+							}
+						}
+					}
+				}
+			}
 			if err := c.releaseInventory(ctx, evt.OrderID); err != nil {
 				return err
 			}

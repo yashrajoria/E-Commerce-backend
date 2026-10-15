@@ -1,3 +1,4 @@
+// Package main provides the entrypoint, consumers, and HTTP server lifecycle for the Order Service.
 package main
 
 import (
@@ -9,28 +10,29 @@ import (
 	"syscall"
 	"time"
 
+	adminroutes "order-service/admin"
 	"order-service/controllers"
+	"order-service/credit"
 	"order-service/database"
 	"order-service/middleware"
 	"order-service/models"
-	adminroutes "order-service/admin"
-	repositories "order-service/repository"
-	"order-service/routes"
-	"order-service/services"
 	paymentcontrollers "order-service/payment/controllers"
 	paymentmodels "order-service/payment/models"
 	paymentrepository "order-service/payment/repository"
 	paymentroutes "order-service/payment/routes"
 	paymentservices "order-service/payment/services"
-	promotioncontrollers "order-service/promotion/controllers"
 	promotionconsumer "order-service/promotion/consumer"
-	promotionroutes "order-service/promotion/routes"
+	promotioncontrollers "order-service/promotion/controllers"
 	promotionmodels "order-service/promotion/models"
 	promotionrepository "order-service/promotion/repository"
+	promotionroutes "order-service/promotion/routes"
 	promotionservices "order-service/promotion/services"
+	repositories "order-service/repository"
+	"order-service/routes"
+	"order-service/services"
 	shippingcontrollers "order-service/shipping/controllers"
-	shippingroutes "order-service/shipping/routes"
 	shippingproviders "order-service/shipping/providers"
+	shippingroutes "order-service/shipping/routes"
 	shippingservices "order-service/shipping/services"
 
 	"github.com/gin-gonic/gin"
@@ -68,7 +70,7 @@ func main() {
 		logger.Fatal("DB connection failed", zap.Error(err))
 	}
 	if commondb.AllowAutoMigrate() {
-		if err := database.DB.AutoMigrate(&models.Order{}, &models.OrderItem{}, &models.OutboxEvent{}, &promotionmodels.Coupon{}, &promotionmodels.CouponUsage{}, &paymentmodels.Payment{}, &paymentmodels.StripeProcessedEvent{}, &paymentmodels.OutboxEvent{}); err != nil {
+		if err := database.DB.AutoMigrate(&models.Order{}, &models.OrderItem{}, &models.OutboxEvent{}, &models.StoreCreditAccount{}, &models.StoreCreditLedgerEntry{}, &models.OrderPaymentAllocation{}, &promotionmodels.Coupon{}, &promotionmodels.CouponUsage{}, &paymentmodels.Payment{}, &paymentmodels.StripeProcessedEvent{}, &paymentmodels.OutboxEvent{}); err != nil {
 			logger.Fatal("Migration failed", zap.Error(err))
 		}
 	}
@@ -172,6 +174,12 @@ func main() {
 	)
 	orderService.SetRefunder(paymentservices.NewOrderRefunder(paymentRepo, stripeSvc))
 	orderController := controllers.NewOrderController(orderService)
+	allocRepo := repositories.NewGormAllocationRepository(database.DB)
+	orderService.SetAllocationRepo(allocRepo)
+	creditService := credit.NewService(database.DB)
+	creditService.SetEventPublisher(pgPublisher, cfg.NotificationSNSTopicARN)
+	orderService.SetCreditService(creditService)
+	creditController := credit.NewController(creditService)
 
 	// Promotion controller & routes
 	promoController := promotioncontrollers.NewCouponController(promoService)
@@ -179,7 +187,7 @@ func main() {
 	basketOptController := promotioncontrollers.NewBasketOptimizerController(basketOptService)
 	shippingController := shippingcontrollers.NewShippingController(shippingService)
 	paymentController := paymentcontrollers.NewPaymentController(stripeSvc, pgPublisher, cfg.PaymentSNSTopicARN, cfg.NotificationSNSTopicARN, cfg.StoreCurrency, paymentRepo, logger)
-	routes.RegisterOrderRoutes(r, orderController)
+	routes.RegisterOrderRoutes(r, orderController, creditController)
 	promotionroutes.RegisterPromotionRoutes(r, promoController, basketOptController)
 
 	shippingroutes.RegisterShippingRoutes(r, shippingController)
@@ -232,6 +240,8 @@ func main() {
 		promotionClient,
 		cfg.StoreCurrency,
 	)
+	checkoutConsumer.SetCreditService(creditService)
+	checkoutConsumer.SetAllocationRepo(allocRepo)
 	go checkoutConsumer.Start(shutdownCtx)
 	logger.Info("Started checkout consumer", zap.String("queue", checkoutQueueURL))
 
@@ -250,6 +260,8 @@ func main() {
 		cfg.ProductServiceURL,
 	)
 	paymentConsumer.SetCartClearer(services.NewCartClient(cfg.ProductServiceURL))
+	paymentConsumer.SetCreditService(creditService)
+	paymentConsumer.SetAllocationRepo(allocRepo)
 	go paymentConsumer.Start(shutdownCtx)
 	logger.Info("Started payment events consumer", zap.String("queue", paymentEventsQueueURL))
 

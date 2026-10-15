@@ -234,6 +234,7 @@ func TestRefundOrderRoute_RejectsInvalidStates(t *testing.T) {
 
 	// 2. Already refunded order
 	repo.order.Status = "refunded"
+	repo.order.RefundedAmount = 5000
 	w2 := httptest.NewRecorder()
 	serveWithInternalToken(r, w2, req)
 

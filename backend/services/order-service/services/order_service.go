@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"order-service/credit"
 	"order-service/models"
 	paymentservices "order-service/payment/services"
 	repositories "order-service/repository"
@@ -17,23 +18,28 @@ import (
 	"gorm.io/gorm"
 )
 
+// ContextKey represents context key.
 type ContextKey string
 
 const IdempotencyKeyContextKey ContextKey = "idempotency_key"
 
+// CreateOrderRequest defines the request payload for create order operations.
 type CreateOrderRequest struct {
 	Items []struct {
 		ProductID uuid.UUID `json:"product_id" binding:"required"`
 		Quantity  int       `json:"quantity" binding:"required,min=1"`
 	} `json:"items" binding:"required,dive"`
-	StoreID *uuid.UUID `json:"store_id,omitempty"`
+	StoreID           *uuid.UUID `json:"store_id,omitempty"`
+	StoreCreditAmount int64      `json:"store_credit_amount,omitempty"`
 }
 
+// OrderResponse defines the response structure for order operations.
 type OrderResponse struct {
 	Orders []models.Order `json:"orders"`
 	Meta   MetaData       `json:"meta"`
 }
 
+// MetaData represents meta data.
 type MetaData struct {
 	Page        int   `json:"page"`
 	Limit       int   `json:"limit"`
@@ -42,11 +48,13 @@ type MetaData struct {
 	HasMore     bool  `json:"has_more"`
 }
 
+// ServiceError represents service error.
 type ServiceError struct {
 	StatusCode int
 	Message    string
 }
 
+// Error executes business logic for error.
 func (e *ServiceError) Error() string {
 	return e.Message
 }
@@ -70,16 +78,21 @@ var cancellableStatuses = map[string]bool{
 
 // refundableStatuses are the order statuses an order may be refunded from.
 var refundableStatuses = map[string]bool{
-	"paid":      true,
-	"fulfilled": true,
-	"completed": true,
+	"paid":               true,
+	"fulfilled":          true,
+	"completed":          true,
+	"partially_refunded": true,
+	"refunded":           true, // remaining balance is checked via refunded_amount
 }
 
+// RefundOrderRequest defines the request payload for refund order operations.
 type RefundOrderRequest struct {
-	Reason string `json:"reason,omitempty"`
-	Amount *int   `json:"amount,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+	Amount  *int   `json:"amount,omitempty"`
+	Funding string `json:"funding,omitempty"` // stripe (default) or credit
 }
 
+// OrderService represents order service.
 type OrderService struct {
 	orderRepo            repositories.OrderRepository
 	snsClient            messaging.Publisher
@@ -87,6 +100,8 @@ type OrderService struct {
 	notificationTopicArn string
 	inventoryClient      InventoryReleaser
 	refunder             PaymentRefunder
+	creditService        *credit.Service
+	allocRepo            repositories.AllocationRepository
 }
 
 // PaymentRefunder refunds the captured payment of a paid order (idempotent).
@@ -100,7 +115,11 @@ type DetailedPaymentRefunder interface {
 }
 
 // SetRefunder enables Stripe refunds when a paid order is cancelled.
-func (s *OrderService) SetRefunder(r PaymentRefunder) { s.refunder = r }
+func (s *OrderService) SetRefunder(r PaymentRefunder)                         { s.refunder = r }
+// SetCreditService executes business logic for set credit service.
+func (s *OrderService) SetCreditService(c *credit.Service)                    { s.creditService = c }
+// SetAllocationRepo executes business logic for set allocation repo.
+func (s *OrderService) SetAllocationRepo(a repositories.AllocationRepository) { s.allocRepo = a }
 
 // NewOrderServiceSQS creates an OrderService that uses SNS/SQS instead of Kafka
 func NewOrderServiceSQS(orderRepo repositories.OrderRepository, snsClient messaging.Publisher, snsTopicArn, notificationTopicArn string, inventoryClient InventoryReleaser) *OrderService {
@@ -145,6 +164,7 @@ func (s *OrderService) CreateOrder(ctx context.Context, userID, email string, re
 	if req.StoreID != nil {
 		checkoutEvent.StoreID = req.StoreID.String()
 	}
+	checkoutEvent.StoreCreditAmount = req.StoreCreditAmount
 
 	if idemKey, ok := ctx.Value(IdempotencyKeyContextKey).(string); ok && idemKey != "" {
 		checkoutEvent.IdempotencyKey = idemKey
@@ -257,6 +277,7 @@ func (s *OrderService) GetStoreOrders(ctx context.Context, storeID uuid.UUID, pa
 	}, nil
 }
 
+// GetRevenueStats executes business logic for get revenue stats.
 func (s *OrderService) GetRevenueStats(ctx context.Context) (map[string]interface{}, *ServiceError) {
 	stats, err := s.orderRepo.GetRevenueAnalytics(ctx)
 	if err != nil {
@@ -389,10 +410,10 @@ func (s *OrderService) RefundOrder(ctx context.Context, orderID uuid.UUID, calle
 	}
 
 	currentStatus := strings.ToLower(strings.TrimSpace(order.Status))
-	if currentStatus == "refunded" {
+	if order.RefundedAmount >= int64(order.Amount) {
 		return nil, &ServiceError{
 			StatusCode: 409,
-			Message:    "order is already refunded",
+			Message:    "order is already fully refunded",
 		}
 	}
 
@@ -403,17 +424,26 @@ func (s *OrderService) RefundOrder(ctx context.Context, orderID uuid.UUID, calle
 		}
 	}
 
+	remainingRefundable := int64(order.Amount) - order.RefundedAmount
+	if remainingRefundable <= 0 {
+		return nil, &ServiceError{StatusCode: 409, Message: "order has no refundable balance"}
+	}
+
+	refundAmount := remainingRefundable
 	if req.Amount != nil {
 		if *req.Amount <= 0 {
 			return nil, &ServiceError{StatusCode: 400, Message: "Refund amount must be greater than zero"}
 		}
-		if *req.Amount > order.Amount {
-			return nil, &ServiceError{StatusCode: 400, Message: "Refund amount exceeds order total"}
+		if int64(*req.Amount) > remainingRefundable {
+			return nil, &ServiceError{StatusCode: 400, Message: "Refund amount exceeds refundable balance"}
 		}
+		refundAmount = int64(*req.Amount)
 	}
 
-	if s.refunder == nil {
-		return nil, &ServiceError{StatusCode: 500, Message: "Payment refunder not configured"}
+	actor, parseErr := uuid.Parse(callerID)
+	var actorPtr *uuid.UUID
+	if parseErr == nil {
+		actorPtr = &actor
 	}
 
 	idemKey := ""
@@ -421,49 +451,179 @@ func (s *OrderService) RefundOrder(ctx context.Context, orderID uuid.UUID, calle
 		idemKey = v
 	}
 
+	var creditRefundAmount int64
+	var stripeRefundAmount int64
 	var refundDetails *paymentservices.RefundDetails
-	if detailed, ok := s.refunder.(DetailedPaymentRefunder); ok {
-		var rErr error
-		refundDetails, rErr = detailed.RefundPayment(ctx, orderID, req.Amount, req.Reason, idemKey)
-		if rErr != nil {
-			if errors.Is(rErr, paymentservices.ErrPaymentNotFound) {
-				return nil, &ServiceError{StatusCode: 404, Message: "Payment record not found for order"}
+
+	// Check if payment allocations exist for this order
+	var allocations []models.OrderPaymentAllocation
+	if s.allocRepo != nil {
+		allocations, _ = s.allocRepo.FindByOrderID(ctx, orderID)
+	}
+
+	if len(allocations) > 0 {
+		var creditAlloc *models.OrderPaymentAllocation
+		var stripeAlloc *models.OrderPaymentAllocation
+		for i := range allocations {
+			if allocations[i].PaymentMethod == "store_credit" {
+				creditAlloc = &allocations[i]
+			} else if allocations[i].PaymentMethod == "stripe" {
+				stripeAlloc = &allocations[i]
 			}
-			if errors.Is(rErr, paymentservices.ErrPaymentAlreadyRefunded) {
-				return nil, &ServiceError{StatusCode: 409, Message: "Payment is already refunded"}
+		}
+
+		var creditRemaining int64
+		var stripeRemaining int64
+		if creditAlloc != nil {
+			creditRemaining = creditAlloc.Amount - creditAlloc.RefundedAmount
+		}
+		if stripeAlloc != nil {
+			stripeRemaining = stripeAlloc.Amount - stripeAlloc.RefundedAmount
+		}
+
+		if strings.EqualFold(req.Funding, "credit") {
+			creditRefundAmount = refundAmount
+			if creditRefundAmount > creditRemaining {
+				creditRefundAmount = creditRemaining
 			}
-			if errors.Is(rErr, paymentservices.ErrPaymentNotSucceeded) {
-				return nil, &ServiceError{StatusCode: 409, Message: rErr.Error()}
+			stripeRefundAmount = refundAmount - creditRefundAmount
+			if stripeRefundAmount > stripeRemaining {
+				return nil, &ServiceError{StatusCode: 400, Message: "Refund amount exceeds available allocated balances"}
 			}
-			if errors.Is(rErr, paymentservices.ErrMissingStripePaymentID) {
-				return nil, &ServiceError{StatusCode: 400, Message: rErr.Error()}
+		} else if strings.EqualFold(req.Funding, "stripe") || strings.EqualFold(req.Funding, "card") {
+			stripeRefundAmount = refundAmount
+			if stripeRefundAmount > stripeRemaining {
+				stripeRefundAmount = stripeRemaining
 			}
-			zap.L().Error("failed to refund payment via Stripe", zap.String("order_id", orderID.String()), zap.Error(rErr))
-			return nil, &ServiceError{StatusCode: 502, Message: fmt.Sprintf("Failed to refund payment: %v", rErr)}
+			creditRefundAmount = refundAmount - stripeRefundAmount
+			if creditRefundAmount > creditRemaining {
+				return nil, &ServiceError{StatusCode: 400, Message: "Refund amount exceeds available allocated balances"}
+			}
+		} else {
+			// Proportional split according to allocation remaining balances
+			totalAvail := creditRemaining + stripeRemaining
+			if totalAvail <= 0 {
+				return nil, &ServiceError{StatusCode: 409, Message: "no remaining allocation balance to refund"}
+			}
+			if creditRemaining > 0 && stripeRemaining > 0 {
+				creditRefundAmount = (refundAmount * creditRemaining) / totalAvail
+				stripeRefundAmount = refundAmount - creditRefundAmount
+			} else if creditRemaining > 0 {
+				creditRefundAmount = refundAmount
+			} else {
+				stripeRefundAmount = refundAmount
+			}
+		}
+
+		// Execute credit portion
+		if creditRefundAmount > 0 {
+			if s.creditService == nil || order.StoreID == nil {
+				return nil, &ServiceError{StatusCode: 500, Message: "store credit service not configured for order"}
+			}
+			idemCredit := fmt.Sprintf("refund-credit-%s-%d", orderID, order.RefundedAmount+creditRefundAmount)
+			if idemKey != "" {
+				idemCredit = fmt.Sprintf("%s:credit", idemKey)
+			}
+			if err := s.creditService.Refund(ctx, *order.StoreID, order.UserID, creditRefundAmount, order.Currency, "order_refund", idemCredit, actorPtr, &orderID); err != nil {
+				return nil, &ServiceError{StatusCode: 500, Message: "failed to refund store credit allocation"}
+			}
+			if creditAlloc != nil {
+				_ = s.allocRepo.UpdateRefunded(ctx, creditAlloc.ID, creditAlloc.RefundedAmount+creditRefundAmount)
+			}
+		}
+
+		// Execute stripe portion
+		if stripeRefundAmount > 0 {
+			if s.refunder == nil {
+				return nil, &ServiceError{StatusCode: 500, Message: "Payment refunder not configured"}
+			}
+			idemStripe := fmt.Sprintf("refund-stripe-%s-%d", orderID, order.RefundedAmount+stripeRefundAmount)
+			if idemKey != "" {
+				idemStripe = fmt.Sprintf("%s:stripe", idemKey)
+			}
+			stripeRefundInt := int(stripeRefundAmount)
+			if detailed, ok := s.refunder.(DetailedPaymentRefunder); ok {
+				var rErr error
+				refundDetails, rErr = detailed.RefundPayment(ctx, orderID, &stripeRefundInt, req.Reason, idemStripe)
+				if rErr != nil {
+					return nil, &ServiceError{StatusCode: 502, Message: fmt.Sprintf("Failed to refund stripe payment: %v", rErr)}
+				}
+			} else {
+				if err := s.refunder.RefundOrder(ctx, orderID); err != nil {
+					return nil, &ServiceError{StatusCode: 502, Message: fmt.Sprintf("Failed to refund stripe payment: %v", err)}
+				}
+			}
+			if stripeAlloc != nil {
+				_ = s.allocRepo.UpdateRefunded(ctx, stripeAlloc.ID, stripeAlloc.RefundedAmount+stripeRefundAmount)
+			}
 		}
 	} else {
-		if err := s.refunder.RefundOrder(ctx, orderID); err != nil {
-			if errors.Is(err, paymentservices.ErrPaymentNotFound) {
-				return nil, &ServiceError{StatusCode: 404, Message: "Payment record not found for order"}
+		// Fallback for orders without allocation records:
+		creditRefund := strings.EqualFold(req.Funding, "credit")
+		if creditRefund {
+			if s.creditService == nil || order.StoreID == nil {
+				return nil, &ServiceError{StatusCode: 500, Message: "store credit is not configured for this order"}
 			}
-			zap.L().Error("failed to refund payment via refunder", zap.String("order_id", orderID.String()), zap.Error(err))
-			return nil, &ServiceError{StatusCode: 502, Message: fmt.Sprintf("Failed to refund payment: %v", err)}
+			idem := fmt.Sprintf("refund-credit-%s-%d", orderID, order.RefundedAmount+refundAmount)
+			if idemKey != "" {
+				idem = fmt.Sprintf("%s:credit", idemKey)
+			}
+			if err := s.creditService.Refund(ctx, *order.StoreID, order.UserID, refundAmount, order.Currency, "order_refund", idem, actorPtr, &orderID); err != nil {
+				return nil, &ServiceError{StatusCode: 500, Message: "failed to issue store credit refund"}
+			}
+		} else {
+			if s.refunder == nil {
+				return nil, &ServiceError{StatusCode: 500, Message: "Payment refunder not configured"}
+			}
+			refundInt := int(refundAmount)
+			if detailed, ok := s.refunder.(DetailedPaymentRefunder); ok {
+				var rErr error
+				refundDetails, rErr = detailed.RefundPayment(ctx, orderID, &refundInt, req.Reason, idemKey)
+				if rErr != nil {
+					if errors.Is(rErr, paymentservices.ErrPaymentNotFound) {
+						return nil, &ServiceError{StatusCode: 404, Message: "Payment record not found for order"}
+					}
+					if errors.Is(rErr, paymentservices.ErrPaymentAlreadyRefunded) {
+						return nil, &ServiceError{StatusCode: 409, Message: "Payment is already refunded"}
+					}
+					if errors.Is(rErr, paymentservices.ErrPaymentNotSucceeded) {
+						return nil, &ServiceError{StatusCode: 409, Message: rErr.Error()}
+					}
+					if errors.Is(rErr, paymentservices.ErrMissingStripePaymentID) {
+						return nil, &ServiceError{StatusCode: 400, Message: rErr.Error()}
+					}
+					zap.L().Error("failed to refund payment via Stripe", zap.String("order_id", orderID.String()), zap.Error(rErr))
+					return nil, &ServiceError{StatusCode: 502, Message: fmt.Sprintf("Failed to refund payment: %v", rErr)}
+				}
+			} else {
+				if err := s.refunder.RefundOrder(ctx, orderID); err != nil {
+					if errors.Is(err, paymentservices.ErrPaymentNotFound) {
+						return nil, &ServiceError{StatusCode: 404, Message: "Payment record not found for order"}
+					}
+					return nil, &ServiceError{StatusCode: 502, Message: fmt.Sprintf("Failed to refund payment: %v", err)}
+				}
+			}
 		}
 	}
 
 	now := time.Now().UTC()
+	newRefundedAmount := order.RefundedAmount + refundAmount
+	newStatus := "refunded"
+
 	extra := map[string]interface{}{
-		"updated_at": now,
+		"updated_at":      now,
+		"refunded_amount": newRefundedAmount,
 	}
-	if err := s.orderRepo.UpdateOrderStatus(ctx, orderID, order.Status, "refunded", extra); err != nil {
+	if err := s.orderRepo.UpdateOrderStatus(ctx, orderID, order.Status, newStatus, extra); err != nil {
 		if errors.Is(err, repositories.ErrStatusConflict) {
 			return nil, &ServiceError{StatusCode: 409, Message: "order status changed concurrently, please retry"}
 		}
 		zap.L().Error("failed to update order status to refunded", zap.String("order_id", orderID.String()), zap.Error(err))
-		return nil, &ServiceError{StatusCode: 500, Message: "Failed to update order status to refunded"}
+		return nil, &ServiceError{StatusCode: 500, Message: "Failed to update order status"}
 	}
 
-	order.Status = "refunded"
+	order.RefundedAmount = newRefundedAmount
+	order.Status = newStatus
 	order.UpdatedAt = now
 
 	// Restock inventory for refunded paid/fulfilled orders
@@ -479,15 +639,12 @@ func (s *OrderService) RefundOrder(ctx context.Context, orderID uuid.UUID, calle
 	}
 
 	// Publish refunded event
-	refundedAmount := order.Amount
-	if req.Amount != nil && *req.Amount > 0 {
-		refundedAmount = *req.Amount
-	}
+	refundedAmount := refundAmount
 	paymentEvt := models.PaymentEvent{
 		Type:      "payment_refunded",
 		OrderID:   orderID.String(),
 		UserID:    order.UserID.String(),
-		Amount:    refundedAmount,
+		Amount:    int(refundedAmount),
 		Currency:  order.Currency,
 		Timestamp: now,
 	}
@@ -507,7 +664,7 @@ func (s *OrderService) RefundOrder(ctx context.Context, orderID uuid.UUID, calle
 		zap.String("order_id", orderID.String()),
 		zap.String("caller_id", callerID),
 		zap.String("reason", req.Reason),
-		zap.Int("amount", refundedAmount),
+		zap.Int64("amount", refundedAmount),
 	)
 
 	return order, nil
