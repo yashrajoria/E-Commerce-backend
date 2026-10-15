@@ -16,9 +16,8 @@ The notification service consumes asynchronous notification events, sends email,
 
 ```mermaid
 flowchart LR
-  Auth[Auth Service] --> Events[(SNS auth/notification events)]
-  Payment[Payment Service] --> Events
-  Promo[Promotion Service] --> Events
+  Identity[Identity Service] --> Events[(SNS auth/notification events)]
+  Order[Order Service\npayments, coupons] --> Events
   Events --> Queue[SQS notification-queue]
   Queue --> Worker[Notification Service :8092\nSQS worker]
   Worker --> SMTP[(SMTP provider)]

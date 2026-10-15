@@ -6,7 +6,7 @@
   ![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL-336791?logo=postgresql&logoColor=white)
   ![Redis](https://img.shields.io/badge/Cache-Redis-DC382D?logo=redis&logoColor=white)
   ![Docker](https://img.shields.io/badge/Deploy-Docker-2496ED?logo=docker&logoColor=white)
-  ![LocalStack](https://img.shields.io/badge/Local-AWS-LocalStack-purple)
+  ![LocalStack](https://img.shields.io/badge/Local-LocalStack-purple)
 </div>
 
 ---
@@ -23,6 +23,31 @@ ShopSwift backend is a Go (plus Python agent) microservices platform with an API
 | **Domain services** | Identity, catalog, order, notification, agent |
 | **Data** | Postgres (transactions; catalog/inventory in schema `catalog`), Redis (cart/cache/idempotency), S3 (images) |
 | **Messaging** | SNS topics → SQS queues (checkout, payment, notifications) |
+
+```mermaid
+flowchart LR
+  Client[Storefront / Admin] --> GW["API Gateway :8080"]
+  Stripe[Stripe] -->|webhook| GW
+  GW --> ID["identity :8081"]
+  GW --> CAT["catalog :8082"]
+  GW --> ORD["order :8083"]
+  GW --> NOT["notification :8092"]
+  GW --> AG["agent :8089"]
+  AG -->|tool calls| GW
+  GW --> RD[("Redis")]
+  ID --> PG[("Postgres")]
+  ORD --> PG
+  NOT --> PG
+  CAT --> PG
+  CAT --> RD
+  CAT --> S3[("S3")]
+  CAT -->|SNS order-events| Q[["SQS + DLQs"]]
+  Q --> ORD
+  Q --> NOT
+  ORD -->|HTTP: stock reserve/confirm/release| CAT
+  ORD <--> Stripe
+  ORD -->|payment-events| Q
+```
 
 See [MICROSERVICE_ARCHITECTURE.md](MICROSERVICE_ARCHITECTURE.md), [SERVICES_AND_DATABASES.md](SERVICES_AND_DATABASES.md), [SERVICE_ISSUES_AND_AUDIT.md](SERVICE_ISSUES_AND_AUDIT.md), [CLAUDE.md](CLAUDE.md), [backend/docs/architecture.md](backend/docs/architecture.md), [backend/docs/data-and-messaging.md](backend/docs/data-and-messaging.md), and [backend/docs/best-practices-and-gaps.md](backend/docs/best-practices-and-gaps.md).
 
@@ -42,7 +67,7 @@ Phase 1 integrity protections are covered by regression tests: coupon usage incr
 | identity-service | 8081 | Go | Postgres |
 | catalog-service | 8082 | Go | Postgres + Redis + S3 |
 | order-service | 8083 | Go | Postgres + SQS/SNS + Stripe |
-| agent-service | 8089→8000 | Python FastAPI | Stateless (via gateway) |
+| agent-service | 8089→8000 | Python FastAPI | Postgres (agent audit log); calls domain APIs via gateway |
 | notification-service | 8092 | Go | Postgres + SQS |
 | docs (Swagger UI) | 8099 | swagger-ui | — |
 | LocalStack | 4566 | AWS emulator | S3/DDB/SNS/SQS |
@@ -65,10 +90,10 @@ Phase 1 integrity protections are covered by regression tests: coupon usage incr
 E-Commerce-backend/
 └── backend/
     ├── api-gateway/
+    ├── pkg/common/                 # Shared Go libs (auth, db, events, messaging, telemetry)
     ├── services/
     │   ├── agent-service/          # Python AI agent
     │   ├── catalog-service/
-    │   ├── common/                 # Shared Go libs
     │   ├── identity-service/
     │   ├── notification-service/
     │   ├── order-service/
@@ -86,7 +111,7 @@ E-Commerce-backend/
 ### Prerequisites
 
 - Docker + Docker Compose
-- Go 1.25+ (optional, for running services outside Docker)
+- Go 1.26+ (optional, for running services outside Docker)
 - Copy `backend/.env.example` → `backend/.env` and set secrets (JWT, Stripe, SMTP, Postgres password)
 
 ### Run the full stack (recommended)
@@ -159,7 +184,7 @@ LocalStack bootstraps five source SQS queues and five explicit DLQs. Existing so
 - [ ] Broader contract / SQS consumer tests in CI
 - [ ] Full OpenAPI agent-ready pass (`operationId`, error schemas)
 - [ ] Prometheus / OpenTelemetry exporters
-- [ ] Remove unused Mongo helpers and dormant shipping DB code
+- [ ] Remove dormant shipping DB code
 
 ## Author
 

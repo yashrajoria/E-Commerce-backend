@@ -37,23 +37,22 @@ sequenceDiagram
   participant SNS
   participant CheckoutQ as Order Queue
   participant Order
-  participant Inventory
+  participant Inventory as Catalog (inventory)
+  participant Stripe
   participant DB as PostgreSQL
-  participant PaymentQ as Payment Queue
-  participant Payment
 
   Cart->>SNS: checkout.requested
   SNS->>CheckoutQ: Deliver message
   CheckoutQ->>Order: Consume with idempotency key
-  Order->>Product: Validate product snapshot
+  Order->>Inventory: Validate product snapshot
   Order->>Inventory: Reserve stock
   Order->>DB: Insert pending order and items (+ coupon + payment rows)
   Order->>Stripe: Create checkout session (in-process consumer)
   Stripe-->>Order: webhook → payment.succeeded via outbox
   Order->>DB: Mark paid and confirm inventory
-
-  Checkout correlation metadata is optional for backward compatibility. When order persistence fails after a successful reservation, the consumer releases the reservation before returning the error for retry.
 ```
+
+Checkout correlation metadata is optional for backward compatibility. When order persistence fails after a successful reservation, the consumer releases the reservation before returning the error for retry.
 
 ## HTTP surface
 
