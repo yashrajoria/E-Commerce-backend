@@ -1,3 +1,4 @@
+// Package controllers provides HTTP handlers for products, categories, presigned image URLs, and bulk import.
 package controllers
 
 import (
@@ -13,8 +14,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
@@ -27,6 +28,7 @@ type BulkImportHandler struct {
 	timeout        time.Duration
 }
 
+// NewBulkImportHandler creates and initializes a new BulkImportHandler instance.
 func NewBulkImportHandler(ps ProductServiceAPI, redis *redis.Client, cache *CacheManager, validator *RequestValidator) *BulkImportHandler {
 	return &BulkImportHandler{
 		productService: ps,

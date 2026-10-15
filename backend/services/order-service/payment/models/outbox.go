@@ -1,3 +1,4 @@
+// Package models defines data models for payments, payment methods, transaction events, and outbox records.
 package models
 
 import (
@@ -17,6 +18,7 @@ const (
 	OutboxDestinationSNS = "sns"
 )
 
+// OutboxEvent represents a domain event message for outbox event.
 type OutboxEvent struct {
 	ID              uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
 	AggregateType   string    `gorm:"type:varchar(100);not null"`
@@ -37,6 +39,7 @@ type OutboxEvent struct {
 	UpdatedAt       time.Time `gorm:"autoUpdateTime"`
 }
 
+// TableName specifies the custom database table name in GORM.
 func (OutboxEvent) TableName() string {
 	return "payment_outbox_events"
 }

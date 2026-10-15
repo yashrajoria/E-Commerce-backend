@@ -1,3 +1,4 @@
+// Package database handles PostgreSQL database connections and migrations for notification logs.
 package database
 
 import (
@@ -16,6 +17,7 @@ import (
 
 var DB *gorm.DB
 
+// ConnectPostgres establishes a database connection pool.
 func ConnectPostgres(logger *zap.Logger, autoMigrateModels ...interface{}) (*gorm.DB, error) {
 	if err := godotenv.Load(); err != nil {
 		logger.Info("No .env file found, using system environment variables")
@@ -88,6 +90,7 @@ func ConnectPostgres(logger *zap.Logger, autoMigrateModels ...interface{}) (*gor
 	return nil, fmt.Errorf("failed to connect to PostgreSQL after retries: %w", err)
 }
 
+// Connect establishes a database connection pool.
 func Connect(logger *zap.Logger) error {
 	var err error
 	DB, err = ConnectPostgres(logger, &models.NotificationLog{}, &models.NotificationEvent{})
@@ -98,6 +101,7 @@ func Connect(logger *zap.Logger) error {
 	return nil
 }
 
+// Close terminates connections and releases associated resources.
 func Close() error {
 	if DB == nil {
 		return nil

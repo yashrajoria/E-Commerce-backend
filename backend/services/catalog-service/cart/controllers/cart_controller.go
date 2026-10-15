@@ -1,3 +1,4 @@
+// Package controllers provides HTTP request handlers for cart operations and checkout initialization.
 package controllers
 
 import (
@@ -14,13 +15,15 @@ import (
 	"go.uber.org/zap"
 )
 
+// CartController represents cart controller.
 type CartController struct {
-	Repo       *database.CartRepository
-	SNSClient  messaging.Publisher
-	CartTTL    time.Duration
-	Validator  ProductValidator
+	Repo      *database.CartRepository
+	SNSClient messaging.Publisher
+	CartTTL   time.Duration
+	Validator ProductValidator
 }
 
+// NewCartController creates and initializes a new CartController instance.
 func NewCartController(repo *database.CartRepository, snsClient messaging.Publisher, cartTTL time.Duration, validator ProductValidator) *CartController {
 	return &CartController{
 		Repo:      repo,
@@ -49,7 +52,7 @@ func resolveUserID(c *gin.Context) string {
 	return ""
 }
 
-// GetCart returns the current cart for a user
+// GetCart handles GET /cart, retrieving the active shopping cart and computing line item totals.
 func (cc *CartController) GetCart(c *gin.Context) {
 	userID := resolveUserID(c)
 	if userID == "" {
@@ -76,7 +79,7 @@ func (cc *CartController) GetCart(c *gin.Context) {
 	c.JSON(http.StatusOK, cart)
 }
 
-// AddItem adds or updates an item in the cart
+// AddItemsRequest specifies items to add or update in a customer's shopping cart.
 type AddItemsRequest struct {
 	Items []struct {
 		ProductID string `json:"product_id" binding:"required,uuid"`
@@ -89,6 +92,7 @@ const (
 	maxDistinctItems      = 100
 )
 
+// AddItems handles POST /cart/items, adding new product items or incrementing quantities in the shopping cart.
 func (cc *CartController) AddItems(c *gin.Context) {
 	userID := resolveUserID(c)
 	if userID == "" {
@@ -151,7 +155,7 @@ func (cc *CartController) AddItems(c *gin.Context) {
 	c.JSON(http.StatusOK, cart)
 }
 
-// RemoveItem removes a specific item from the cart
+// RemoveItem handles DELETE /cart/items/:id, removing a product line item from the cart.
 func (cc *CartController) RemoveItem(c *gin.Context) {
 	userID := resolveUserID(c)
 	productID := c.Param("product_id")
@@ -193,7 +197,7 @@ func (cc *CartController) RemoveItem(c *gin.Context) {
 	c.JSON(http.StatusOK, cart)
 }
 
-// ClearCart removes all items from the cart
+// ClearCart handles DELETE /cart, emptying all items from the shopping cart session.
 func (cc *CartController) ClearCart(c *gin.Context) {
 	userID := resolveUserID(c)
 	if userID == "" {
@@ -214,6 +218,7 @@ func (cc *CartController) ClearCart(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "cart cleared"})
 }
 
+// MergeCartRequest defines the request payload for merge cart operations.
 type MergeCartRequest struct {
 	GuestSessionID string `json:"guest_session_id" binding:"required"`
 }
@@ -290,7 +295,7 @@ func (cc *CartController) ClearUserCart(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "cart cleared"})
 }
 
-// ApplyCoupon and adds a coupon code to the user's cart
+// ApplyCoupon validates and associates a promotional coupon code with the user's active shopping cart.
 func (cc *CartController) ApplyCoupon(c *gin.Context) {
 	userID := c.GetHeader("X-User-ID")
 	if userID == "" {
@@ -339,4 +344,3 @@ func (cc *CartController) ApplyCoupon(c *gin.Context) {
 		"coupon_code": req.CouponCode,
 	})
 }
-

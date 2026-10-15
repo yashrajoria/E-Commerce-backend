@@ -11,11 +11,13 @@ import (
 	"gorm.io/gorm"
 )
 
+// SNSPublisher represents sns publisher.
 type SNSPublisher struct {
 	publisher messaging.Publisher
 	topic     string
 }
 
+// NewSNSPublisherWithDB creates and initializes a new SNSPublisherWithDB instance.
 func NewSNSPublisherWithDB(db *gorm.DB) *SNSPublisher {
 	topic := os.Getenv("NOTIFICATION_SNS_TOPIC_ARN")
 	if topic == "" {
@@ -31,6 +33,7 @@ func NewSNSPublisherWithDB(db *gorm.DB) *SNSPublisher {
 	}
 }
 
+// NewSNSPublisher creates and initializes a new SNSPublisher instance.
 func NewSNSPublisher(ctx context.Context) (*SNSPublisher, error) {
 	// Fallback constructor
 	topic := os.Getenv("NOTIFICATION_SNS_TOPIC_ARN")
@@ -45,6 +48,7 @@ func NewSNSPublisher(ctx context.Context) (*SNSPublisher, error) {
 	}, nil
 }
 
+// Publish dispatches the message payload to the configured broker.
 func (p *SNSPublisher) Publish(ctx context.Context, eventType string, payload map[string]interface{}) error {
 	if p.publisher == nil {
 		zap.L().Warn("Publisher not configured, skipping event publish", zap.String("eventType", eventType))

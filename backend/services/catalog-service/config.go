@@ -8,11 +8,11 @@ import (
 
 // Config holds all environment variables for catalog-service.
 type Config struct {
-	Port               string        // Service port (default: 8082)
-	JWTSecret          string        // JWT secret
-	RedisURL           string        // Redis (product cache + cart + bulk queue)
-	S3Prefix           string        // Image storage prefix (default: products/)
-	CartTTL            time.Duration
+	Port      string // Service port (default: 8082)
+	JWTSecret string // JWT secret
+	RedisURL  string // Redis (product cache + cart + bulk queue)
+	S3Prefix  string // Image storage prefix (default: products/)
+	CartTTL   time.Duration
 }
 
 // LoadConfig loads environment variables into Config struct and validates them.

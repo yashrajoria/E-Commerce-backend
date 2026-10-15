@@ -1,3 +1,4 @@
+// Package middleware implements HTTP middlewares for CORS, rate limiting, and JWT authentication.
 package middleware
 
 import (

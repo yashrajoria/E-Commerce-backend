@@ -1,3 +1,4 @@
+// Package database manages Redis connection pools and shopping cart persistence.
 package database
 
 import (
@@ -11,11 +12,13 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// CartRepository represents cart repository.
 type CartRepository struct {
 	client *redis.Client
 	ttl    time.Duration
 }
 
+// NewCartRepository creates and initializes a new CartRepository instance.
 func NewCartRepository(client *redis.Client, ttl time.Duration) *CartRepository {
 	return &CartRepository{
 		client: client,
@@ -27,6 +30,7 @@ func (r *CartRepository) getKey(userID string) string {
 	return fmt.Sprintf("cart:user:%s", userID)
 }
 
+// GetCart queries the database for cart.
 func (r *CartRepository) GetCart(ctx context.Context, userID string) (*models.Cart, error) {
 	key := r.getKey(userID)
 	data, err := r.client.Get(ctx, key).Result()
@@ -45,6 +49,7 @@ func (r *CartRepository) GetCart(ctx context.Context, userID string) (*models.Ca
 	return &cart, nil
 }
 
+// SaveCart persists a new t record in the database.
 func (r *CartRepository) SaveCart(ctx context.Context, cart *models.Cart) error {
 	key := r.getKey(cart.UserID)
 	cart.UpdatedAt = time.Now()
@@ -57,6 +62,7 @@ func (r *CartRepository) SaveCart(ctx context.Context, cart *models.Cart) error 
 	return r.client.Set(ctx, key, data, r.ttl).Err()
 }
 
+// DeleteCart deletes cart from the database.
 func (r *CartRepository) DeleteCart(ctx context.Context, userID string) error {
 	key := r.getKey(userID)
 	return r.client.Del(ctx, key).Err()
@@ -67,6 +73,7 @@ func (r *CartRepository) getIdemKey(key string) string {
 	return "idem:cart:" + key
 }
 
+// GetIdempotency queries the database for idempotency.
 func (r *CartRepository) GetIdempotency(ctx context.Context, key string) (string, error) {
 	val, err := r.client.Get(ctx, r.getIdemKey(key)).Result()
 	if err == redis.Nil {
@@ -78,6 +85,7 @@ func (r *CartRepository) GetIdempotency(ctx context.Context, key string) (string
 	return val, nil
 }
 
+// SetIdempotency sets the idempotency of the r.
 func (r *CartRepository) SetIdempotency(ctx context.Context, key, orderID string, ttl time.Duration) error {
 	return r.client.Set(ctx, r.getIdemKey(key), orderID, ttl).Err()
 }

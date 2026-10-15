@@ -1,12 +1,14 @@
+// Package routes registers HTTP endpoints for payment processing and Stripe webhook callbacks.
 package routes
 
 import (
-	"order-service/payment/controllers"
 	"order-service/middleware"
+	"order-service/payment/controllers"
 
 	"github.com/gin-gonic/gin"
 )
 
+// RegisterPaymentRoutes configures and mounts HTTP route handlers on the router.
 func RegisterPaymentRoutes(r *gin.Engine, pc *controllers.PaymentController) {
 	// NOTE: /health* is owned by main.go — do not re-register here (gin panics
 	// on duplicate route registration at boot).

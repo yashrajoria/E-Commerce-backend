@@ -100,4 +100,3 @@ func TestGuestSession_EmptyEmailFails(t *testing.T) {
 		t.Fatal("expected error for empty email")
 	}
 }
-

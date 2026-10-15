@@ -1,3 +1,4 @@
+// Package storage provides multi-backend object storage interfaces for local disk and S3/Wasabi.
 package storage
 
 import (
@@ -162,11 +163,13 @@ type LocalStorage struct {
 	baseURL string
 }
 
+// NewLocalStorage creates and initializes a new LocalStorage instance.
 func NewLocalStorage(baseDir, baseURL string) *LocalStorage {
 	_ = os.MkdirAll(baseDir, 0755)
 	return &LocalStorage{baseDir: baseDir, baseURL: strings.TrimRight(baseURL, "/")}
 }
 
+// Upload performs upload on l.
 func (l *LocalStorage) Upload(ctx context.Context, key string, body []byte, contentType string) (string, error) {
 	cleanKey := strings.TrimLeft(key, "/")
 	targetPath := filepath.Join(l.baseDir, cleanKey)
@@ -179,12 +182,14 @@ func (l *LocalStorage) Upload(ctx context.Context, key string, body []byte, cont
 	return l.PublicURL(cleanKey), nil
 }
 
+// GeneratePresignedUpload performs generate presigned upload on l.
 func (l *LocalStorage) GeneratePresignedUpload(ctx context.Context, key, contentType string, expiresSeconds int64) (string, string, error) {
 	cleanKey := strings.TrimLeft(key, "/")
 	publicURL := l.PublicURL(cleanKey)
 	return publicURL, publicURL, nil
 }
 
+// PublicURL performs public url on l.
 func (l *LocalStorage) PublicURL(key string) string {
 	cleanKey := strings.TrimLeft(key, "/")
 	return fmt.Sprintf("%s/%s", l.baseURL, cleanKey)

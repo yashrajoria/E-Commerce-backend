@@ -1,3 +1,4 @@
+// Package repository provides database persistence methods for products and category hierarchies.
 package repository
 
 import (

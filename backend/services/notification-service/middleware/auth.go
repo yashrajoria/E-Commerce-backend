@@ -1,3 +1,4 @@
+// Package middleware provides JWT authentication and admin verification for notification endpoints.
 package middleware
 
 import (
@@ -16,6 +17,7 @@ const (
 	AdminRole       = "admin"
 )
 
+// AuthMiddleware returns a Gin middleware handler for request processing.
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.GetHeader("X-User-ID")
@@ -60,6 +62,7 @@ func AuthMiddleware() gin.HandlerFunc {
 	}
 }
 
+// AdminOnly returns a Gin middleware handler for request processing.
 func AdminOnly() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role, exists := c.Get(RoleContextKey)
@@ -74,6 +77,7 @@ func AdminOnly() gin.HandlerFunc {
 
 // Helper functions for controllers
 
+// GetUserIDInt retrieves user id int.
 func GetUserIDInt(c *gin.Context) int64 {
 	if val, ok := c.Get(UserContextKey); ok {
 		if id, ok := val.(int64); ok {
@@ -83,6 +87,7 @@ func GetUserIDInt(c *gin.Context) int64 {
 	return 0
 }
 
+// GetUserID retrieves user id.
 func GetUserID(c *gin.Context) (string, error) {
 	if val, ok := c.Get(UserContextKey); ok {
 		if id, ok := val.(int64); ok {
@@ -92,6 +97,7 @@ func GetUserID(c *gin.Context) (string, error) {
 	return "", errors.New("user ID not found in context")
 }
 
+// GetRole retrieves role.
 func GetRole(c *gin.Context) (string, error) {
 	if val, ok := c.Get(RoleContextKey); ok {
 		if role, ok := val.(string); ok {
@@ -101,6 +107,7 @@ func GetRole(c *gin.Context) (string, error) {
 	return "", errors.New("role not found in context")
 }
 
+// GetEmail retrieves email.
 func GetEmail(c *gin.Context) (string, error) {
 	if val, ok := c.Get(EmailContextKey); ok {
 		if email, ok := val.(string); ok {

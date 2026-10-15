@@ -18,6 +18,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// ValidateBulkImport executes business logic for validate bulk import.
 func (s *ProductServiceDDB) ValidateBulkImport(ctx context.Context, file multipart.File) (*models.BulkImportValidation, error) {
 	r := csv.NewReader(file)
 	headers, err := r.Read()
@@ -185,6 +186,7 @@ func (s *ProductServiceDDB) ValidateBulkImport(ctx context.Context, file multipa
 	}, nil
 }
 
+// ProcessBulkImport executes business logic for process bulk import.
 func (s *ProductServiceDDB) ProcessBulkImport(ctx context.Context, file multipart.File, autoCreateCategories bool) (*models.BulkImportResult, error) {
 	r := csv.NewReader(file)
 	headers, err := r.Read()
@@ -496,4 +498,3 @@ func normalizePublicBaseURL(raw string) string {
 	}
 	return "https://" + base
 }
-

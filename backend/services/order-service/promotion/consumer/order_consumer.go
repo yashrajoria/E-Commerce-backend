@@ -1,3 +1,4 @@
+// Package consumer implements event listeners for order events to update promotion statistics.
 package consumer
 
 import (
@@ -13,11 +14,13 @@ import (
 	"github.com/yashrajoria/common/messaging"
 )
 
+// OrderCreatedConsumer represents order created consumer.
 type OrderCreatedConsumer struct {
 	sqsConsumer   messaging.Consumer
 	couponService services.CouponService
 }
 
+// NewOrderCreatedConsumer creates and initializes a new OrderCreatedConsumer instance.
 func NewOrderCreatedConsumer(sqsConsumer messaging.Consumer, couponService services.CouponService) *OrderCreatedConsumer {
 	return &OrderCreatedConsumer{
 		sqsConsumer:   sqsConsumer,
@@ -25,6 +28,7 @@ func NewOrderCreatedConsumer(sqsConsumer messaging.Consumer, couponService servi
 	}
 }
 
+// Start begins consumer loop execution.
 func (c *OrderCreatedConsumer) Start(ctx context.Context) {
 	log.Println("[order-service][OrderCreatedConsumer] Starting order_created queue consumer")
 

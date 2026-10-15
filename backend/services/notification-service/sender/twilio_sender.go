@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// TwilioSender represents twilio sender.
 type TwilioSender struct {
 	accountSID string
 	authToken  string
@@ -18,6 +19,7 @@ type TwilioSender struct {
 	httpClient *http.Client
 }
 
+// NewTwilioSender creates and initializes a new TwilioSender instance.
 func NewTwilioSender() (*TwilioSender, error) {
 	sid := os.Getenv("TWILIO_ACCOUNT_SID")
 	token := os.Getenv("TWILIO_AUTH_TOKEN")
@@ -41,6 +43,7 @@ func NewTwilioSender() (*TwilioSender, error) {
 	}, nil
 }
 
+// SendSMS dispatches message delivery via the provider.
 func (t *TwilioSender) SendSMS(ctx context.Context, to, msg string) (SendResult, error) {
 	apiURL := fmt.Sprintf(
 		"https://api.twilio.com/2010-04-01/Accounts/%s/Messages.json",

@@ -21,6 +21,7 @@ type ServiceError struct {
 	Message    string
 }
 
+// Error executes business logic for error.
 func (e *ServiceError) Error() string {
 	return e.Message
 }
@@ -156,6 +157,7 @@ func (s *couponServiceImpl) ValidateCoupon(ctx context.Context, req *models.Vali
 	}, nil
 }
 
+// IncrementCouponUsage executes business logic for increment coupon usage.
 func (s *couponServiceImpl) IncrementCouponUsage(ctx context.Context, code string, orderID, userID uuid.UUID) error {
 	coupon, err := s.repo.FindByCode(ctx, code)
 	if err != nil {

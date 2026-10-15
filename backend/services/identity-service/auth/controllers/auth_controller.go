@@ -1,3 +1,4 @@
+// Package controllers provides HTTP endpoints for user login, registration, and email verification.
 package controllers
 
 import (
@@ -16,6 +17,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// IAuthService defines the interface contract for i auth service.
 type IAuthService interface {
 	Login(ctx context.Context, email, password string) (*services.TokenPair, error)
 	Register(ctx context.Context, name, email, password, role string) error
@@ -28,10 +30,12 @@ type IAuthService interface {
 	GuestSession(ctx context.Context, in services.GuestSessionInput) (*services.TokenPair, error)
 }
 
+// AuthController represents auth controller.
 type AuthController struct {
 	service IAuthService
 }
 
+// NewAuthController creates and initializes a new AuthController instance.
 func NewAuthController(s IAuthService) *AuthController {
 	return &AuthController{service: s}
 }
@@ -59,6 +63,7 @@ func clearAuthCookies(c *gin.Context) {
 	c.SetCookie("user_role", "", -1, "/", domain, secure, true)
 }
 
+// Login handles POST /auth/login, authenticating credentials, enforcing brute-force lockouts, and issuing JWT tokens.
 func (ctrl *AuthController) Login(c *gin.Context) {
 	var req struct {
 		Email    string `json:"email" binding:"required,email"`
@@ -102,6 +107,7 @@ func (ctrl *AuthController) Login(c *gin.Context) {
 	})
 }
 
+// Register handles POST /auth/register, creating new accounts, hashing passwords, and generating verification OTPs.
 func (ctrl *AuthController) Register(c *gin.Context) {
 	var req struct {
 		Name     string `json:"name" binding:"required"`
@@ -146,6 +152,7 @@ func (ctrl *AuthController) Register(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"message": "Account created successfully. Please verify your email.", "email": req.Email})
 }
 
+// VerifyEmail handles POST /auth/verify-email, validating the submitted OTP hash and marking the user email as verified.
 func (ctrl *AuthController) VerifyEmail(c *gin.Context) {
 	var req struct {
 		Email string `json:"email" binding:"required,email"`
@@ -174,6 +181,7 @@ func (ctrl *AuthController) VerifyEmail(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Email verified successfully"})
 }
 
+// Logout handles POST /auth/logout, revoking active refresh tokens and clearing authentication session cookies.
 func (ctrl *AuthController) Logout(c *gin.Context) {
 	// Revoke server-side refresh token if present; best-effort — cookies are
 	// cleared regardless so the client is logged out even if this fails
@@ -190,6 +198,7 @@ func (ctrl *AuthController) Logout(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
 }
 
+// Refresh handles POST /auth/refresh, performing single-use token rotation, replay detection, and returning new JWT tokens.
 func (ctrl *AuthController) Refresh(c *gin.Context) {
 	refreshToken, err := c.Cookie("refresh_token")
 	if err != nil {
@@ -262,6 +271,7 @@ func (ctrl *AuthController) GetAuthStatus(c *gin.Context) {
 	})
 }
 
+// ResendVerificationEmail handles POST /auth/resend-verification, reissuing a new hashed OTP code and email event.
 func (ctrl *AuthController) ResendVerificationEmail(c *gin.Context) {
 	var req struct {
 		Email string `json:"email" binding:"required,email"`
@@ -289,6 +299,7 @@ func (ctrl *AuthController) ResendVerificationEmail(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Verification email sent successfully"})
 }
 
+// AdminCreateUser handles POST /auth/admin/users, allowing platform administrators to provision users with designated roles.
 func (ctrl *AuthController) AdminCreateUser(c *gin.Context) {
 	var req struct {
 		Name     string `json:"name" binding:"required"`
@@ -331,6 +342,7 @@ func (ctrl *AuthController) AdminCreateUser(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"message": "User created successfully", "email": req.Email, "role": req.Role})
 }
 
+// GuestSession handles POST /auth/guest, issuing anonymous temporary guest session tokens for cart checkout flows.
 func (ctrl *AuthController) GuestSession(c *gin.Context) {
 	var req struct {
 		Email string `json:"email" binding:"required,email"`

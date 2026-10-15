@@ -1,3 +1,4 @@
+// Package routes mounts HTTP endpoints for user profile queries and updates.
 package routes
 
 import (
@@ -7,7 +8,7 @@ import (
 	commonlog "github.com/yashrajoria/common/logger"
 )
 
-// Accepts a RouterGroup which already applies auth middleware
+// RegisterUserRoutes configures user profile endpoints on the provided router group.
 func RegisterUserRoutes(rg *gin.RouterGroup, ctrl *controllers.UserController) {
 	commonlog.Log.Info("Registering user routes")
 	rg.GET("/profile", ctrl.GetProfile)

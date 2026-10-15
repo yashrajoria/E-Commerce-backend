@@ -19,6 +19,7 @@ var (
 	ErrInvalidLeaseToken = errors.New("invalid or expired lease token")
 )
 
+// WaitingRoomService defines the interface contract for waiting room service.
 type WaitingRoomService interface {
 	Configure(ctx context.Context, req *models.ConfigureFlashSaleRequest) error
 	EnterQueue(ctx context.Context, req *models.EnterQueueRequest) (*models.EnterQueueResponse, error)
@@ -33,6 +34,7 @@ type waitingRoomServiceImpl struct {
 	logger *zap.Logger
 }
 
+// NewWaitingRoomService creates and initializes a new WaitingRoomService instance.
 func NewWaitingRoomService(rdb *redis.Client, logger *zap.Logger) WaitingRoomService {
 	return &waitingRoomServiceImpl{
 		rdb:    rdb,
@@ -41,11 +43,17 @@ func NewWaitingRoomService(rdb *redis.Client, logger *zap.Logger) WaitingRoomSer
 }
 
 // Key helpers
-func configKey(productID string) string       { return fmt.Sprintf("flash:config:%s", productID) }
-func queueKey(productID string) string        { return fmt.Sprintf("flash:queue:%s", productID) }
-func userTokenKey(productID, uID string) string { return fmt.Sprintf("flash:user_token:%s:%s", productID, uID) }
-func leaseKey(productID, token string) string { return fmt.Sprintf("flash:lease:%s:%s", productID, token) }
-func activeLeasesKey(productID string) string { return fmt.Sprintf("flash:active_leases:%s", productID) }
+func configKey(productID string) string { return fmt.Sprintf("flash:config:%s", productID) }
+func queueKey(productID string) string  { return fmt.Sprintf("flash:queue:%s", productID) }
+func userTokenKey(productID, uID string) string {
+	return fmt.Sprintf("flash:user_token:%s:%s", productID, uID)
+}
+func leaseKey(productID, token string) string {
+	return fmt.Sprintf("flash:lease:%s:%s", productID, token)
+}
+func activeLeasesKey(productID string) string {
+	return fmt.Sprintf("flash:active_leases:%s", productID)
+}
 
 // Lua script to enter queue or immediately acquire lease if slot available
 const enterQueueLua = `
@@ -227,6 +235,7 @@ func generateToken() string {
 	return "fairpass_" + hex.EncodeToString(b)
 }
 
+// Configure executes business logic for configure.
 func (s *waitingRoomServiceImpl) Configure(ctx context.Context, req *models.ConfigureFlashSaleRequest) error {
 	ttl := req.LeaseTTLSeconds
 	if ttl <= 0 {
@@ -255,6 +264,7 @@ func (s *waitingRoomServiceImpl) Configure(ctx context.Context, req *models.Conf
 	return nil
 }
 
+// EnterQueue executes business logic for enter queue.
 func (s *waitingRoomServiceImpl) EnterQueue(ctx context.Context, req *models.EnterQueueRequest) (*models.EnterQueueResponse, error) {
 	candidateToken := generateToken()
 	nowMs := time.Now().UTC().UnixMilli()
@@ -303,6 +313,7 @@ func (s *waitingRoomServiceImpl) EnterQueue(ctx context.Context, req *models.Ent
 	return resp, nil
 }
 
+// GetStatus executes business logic for get status.
 func (s *waitingRoomServiceImpl) GetStatus(ctx context.Context, productID, userID string) (*models.QueueStatusResponse, error) {
 	candidateToken := generateToken()
 	nowMs := time.Now().UTC().UnixMilli()
@@ -348,6 +359,7 @@ func (s *waitingRoomServiceImpl) GetStatus(ctx context.Context, productID, userI
 	return resp, nil
 }
 
+// ClaimLease executes business logic for claim lease.
 func (s *waitingRoomServiceImpl) ClaimLease(ctx context.Context, req *models.ClaimLeaseRequest) (bool, error) {
 	keys := []string{
 		leaseKey(req.ProductID, req.LeaseToken),
@@ -364,6 +376,7 @@ func (s *waitingRoomServiceImpl) ClaimLease(ctx context.Context, req *models.Cla
 	return code == 1, nil
 }
 
+// ReleaseLease executes business logic for release lease.
 func (s *waitingRoomServiceImpl) ReleaseLease(ctx context.Context, req *models.ReleaseLeaseRequest) error {
 	keys := []string{
 		configKey(req.ProductID),
@@ -379,6 +392,7 @@ func (s *waitingRoomServiceImpl) ReleaseLease(ctx context.Context, req *models.R
 	return nil
 }
 
+// Reset executes business logic for reset.
 func (s *waitingRoomServiceImpl) Reset(ctx context.Context, productID string) error {
 	keys := []string{
 		configKey(productID),

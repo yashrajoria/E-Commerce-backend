@@ -1,3 +1,4 @@
+// Package utils provides HTTP request proxying and forwarder helpers.
 package utils
 
 import (
@@ -34,6 +35,7 @@ func isSecurityHeader(lowerKey string) bool {
 	return securityHeaderKeys[lowerKey]
 }
 
+// ForwardOptions specifies parameters and options for forward.
 type ForwardOptions struct {
 	TargetBase  string
 	StripPrefix string
@@ -65,6 +67,7 @@ var forwardStreamingHTTPClient = &http.Client{
 	}),
 }
 
+// ForwardRequest performs forward request.
 func ForwardRequest(c *gin.Context, opts ForwardOptions) {
 	// Build the path suffix to append to TargetBase.
 	// 1. Try the wildcard param (*any) used by most routes.

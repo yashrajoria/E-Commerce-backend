@@ -1,3 +1,4 @@
+// Package main provides the entrypoint and HTTP server setup for the Identity Service.
 package main
 
 import (
@@ -22,10 +23,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	commondb "github.com/yashrajoria/common/db"
 	"github.com/yashrajoria/common/internalauth"
 	commonlog "github.com/yashrajoria/common/logger"
 	commonmw "github.com/yashrajoria/common/middleware"
-	commondb "github.com/yashrajoria/common/db"
 	"github.com/yashrajoria/common/telemetry"
 	"go.uber.org/zap"
 )

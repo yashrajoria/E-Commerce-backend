@@ -29,6 +29,7 @@ type CategoryServiceAPI interface {
 	CreateBulkCategories(ctx context.Context, req services.BulkCategoryCreateRequest) ([]*models.Category, error)
 }
 
+// CategoryController represents category controller.
 type CategoryController struct {
 	service   CategoryServiceAPI
 	cache     *CacheManager
@@ -36,6 +37,7 @@ type CategoryController struct {
 	timeout   time.Duration
 }
 
+// NewCategoryController creates and initializes a new CategoryController instance.
 func NewCategoryController(s CategoryServiceAPI, redisClient *redis.Client) *CategoryController {
 	return &CategoryController{
 		service:   s,
@@ -57,7 +59,7 @@ func (ctrl *CategoryController) WithTimeout(timeout time.Duration) *CategoryCont
 	return ctrl
 }
 
-// CreateCategory creates a new category
+// CreateCategory handles POST /categories (admin only), creating a new category node in the taxonomy.
 func (ctrl *CategoryController) CreateCategory(c *gin.Context) {
 	var req services.CategoryCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -83,7 +85,7 @@ func (ctrl *CategoryController) CreateCategory(c *gin.Context) {
 	c.JSON(http.StatusCreated, category)
 }
 
-// GetCategories retrieves the category tree
+// GetCategories handles GET /categories, returning category trees and product count hierarchies.
 func (ctrl *CategoryController) GetCategories(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), ctrl.timeout)
 	defer cancel()
@@ -153,7 +155,7 @@ func (ctrl *CategoryController) GetCategory(c *gin.Context) {
 	c.JSON(http.StatusOK, category)
 }
 
-// UpdateCategory updates an existing category
+// UpdateCategory handles PUT /categories/:id (admin only), modifying category title, slug, or parent.
 func (ctrl *CategoryController) UpdateCategory(c *gin.Context) {
 	id := c.Param("id")
 	categoryID, err := uuid.Parse(id)
@@ -191,7 +193,7 @@ func (ctrl *CategoryController) UpdateCategory(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Category updated successfully"})
 }
 
-// DeleteCategory deletes a category
+// DeleteCategory handles DELETE /categories/:id (admin only), deleting a category from the hierarchy.
 func (ctrl *CategoryController) DeleteCategory(c *gin.Context) {
 	id := c.Param("id")
 	categoryID, err := uuid.Parse(id)

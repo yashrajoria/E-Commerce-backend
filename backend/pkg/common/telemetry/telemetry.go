@@ -179,6 +179,7 @@ type tracingTransport struct {
 	base http.RoundTripper
 }
 
+// RoundTrip executes a single HTTP transaction and records telemetry.
 func (t *tracingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if enabled && trace.SpanFromContext(req.Context()).SpanContext().IsValid() {
 		otel.GetTextMapPropagator().Inject(req.Context(), propagation.HeaderCarrier(req.Header))

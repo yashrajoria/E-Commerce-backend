@@ -19,6 +19,7 @@ type PGInventoryRepository struct{ db *gorm.DB }
 
 var _ InventoryRepository = (*PGInventoryRepository)(nil)
 
+// NewPGInventoryRepository creates and initializes a new PGInventoryRepository instance.
 func NewPGInventoryRepository(db *gorm.DB) *PGInventoryRepository {
 	return &PGInventoryRepository{db: db}
 }
@@ -72,6 +73,7 @@ func mergeItems(items []models.ReserveItem) ([]stockLine, error) {
 	return lines, nil
 }
 
+// Get queries the database for .
 func (r *PGInventoryRepository) Get(ctx context.Context, productID string) (*models.Inventory, error) {
 	id, err := parseProductID(productID)
 	if err != nil {
@@ -128,6 +130,7 @@ func (r *PGInventoryRepository) BatchGet(ctx context.Context, productIDs []strin
 	return out, nil
 }
 
+// AddStock performs add stock on r.
 func (r *PGInventoryRepository) AddStock(ctx context.Context, productID string, delta, threshold int) (*models.Inventory, error) {
 	id, err := uuid.Parse(productID)
 	if err != nil {
@@ -300,6 +303,7 @@ func (r *PGInventoryRepository) RestockAll(ctx context.Context, orderID string, 
 	})
 }
 
+// CheckStock performs check stock on r.
 func (r *PGInventoryRepository) CheckStock(ctx context.Context, productID string, quantity int) (*models.StockCheckResult, error) {
 	m, err := r.BatchGet(ctx, []string{productID})
 	if err != nil {
@@ -329,6 +333,7 @@ func (r *PGInventoryRepository) ListAll(ctx context.Context, limit, offset int) 
 	return out, nil
 }
 
+// CountAll performs count all on r.
 func (r *PGInventoryRepository) CountAll(ctx context.Context) (int64, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Table("catalog.inventory").Count(&count).Error

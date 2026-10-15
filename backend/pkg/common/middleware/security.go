@@ -53,6 +53,7 @@ type limiterEntry struct {
 	lastSeen time.Time
 }
 
+// RateLimiter returns a Gin middleware handler for request processing.
 type RateLimiter struct {
 	ips   map[string]*limiterEntry
 	mu    *sync.RWMutex

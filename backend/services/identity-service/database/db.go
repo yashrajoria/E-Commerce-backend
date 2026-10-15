@@ -1,3 +1,4 @@
+// Package database handles PostgreSQL connections and database migrations for identity service.
 package database
 
 import (

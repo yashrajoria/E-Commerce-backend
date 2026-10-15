@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 )
 
+// StoreRepository defines the interface contract for store repository.
 type StoreRepository interface {
 	CreateStore(ctx context.Context, store *models.Store, ownerID uuid.UUID) (*models.Store, error)
 	FindByID(ctx context.Context, id uuid.UUID) (*models.Store, error)
@@ -35,10 +36,12 @@ type storeRepository struct {
 	db *gorm.DB
 }
 
+// NewStoreRepository creates and initializes a new StoreRepository instance.
 func NewStoreRepository(db *gorm.DB) StoreRepository {
 	return &storeRepository{db: db}
 }
 
+// CreateStore persists a new e record in the database.
 func (r *storeRepository) CreateStore(ctx context.Context, store *models.Store, ownerID uuid.UUID) (*models.Store, error) {
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 1. Insert store
@@ -91,6 +94,7 @@ func (r *storeRepository) CreateStore(ctx context.Context, store *models.Store, 
 	return store, nil
 }
 
+// FindByID queries the database for  by id.
 func (r *storeRepository) FindByID(ctx context.Context, id uuid.UUID) (*models.Store, error) {
 	var store models.Store
 	err := r.db.WithContext(ctx).
@@ -107,6 +111,7 @@ func (r *storeRepository) FindByID(ctx context.Context, id uuid.UUID) (*models.S
 	return &store, nil
 }
 
+// FindBySlug queries the database for  by slug.
 func (r *storeRepository) FindBySlug(ctx context.Context, slug string) (*models.Store, error) {
 	var store models.Store
 	err := r.db.WithContext(ctx).
@@ -122,6 +127,7 @@ func (r *storeRepository) FindBySlug(ctx context.Context, slug string) (*models.
 	return &store, nil
 }
 
+// ListUserStores retrieves a collection of user stores from the database.
 func (r *storeRepository) ListUserStores(ctx context.Context, userID uuid.UUID) ([]*models.Store, error) {
 	var memberships []models.StoreMembership
 	err := r.db.WithContext(ctx).
@@ -142,6 +148,7 @@ func (r *storeRepository) ListUserStores(ctx context.Context, userID uuid.UUID) 
 	return stores, nil
 }
 
+// UpdateStore updates store in the database.
 func (r *storeRepository) UpdateStore(ctx context.Context, store *models.Store) error {
 	return r.db.WithContext(ctx).
 		Model(store).
@@ -156,10 +163,12 @@ func (r *storeRepository) UpdateStore(ctx context.Context, store *models.Store) 
 		}).Error
 }
 
+// DeleteStore deletes store from the database.
 func (r *storeRepository) DeleteStore(ctx context.Context, id uuid.UUID) error {
 	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&models.Store{}).Error
 }
 
+// GetMembership queries the database for membership.
 func (r *storeRepository) GetMembership(ctx context.Context, storeID, userID uuid.UUID) (*models.StoreMembership, error) {
 	var m models.StoreMembership
 	err := r.db.WithContext(ctx).
@@ -174,6 +183,7 @@ func (r *storeRepository) GetMembership(ctx context.Context, storeID, userID uui
 	return &m, nil
 }
 
+// ListMembers retrieves a collection of members from the database.
 func (r *storeRepository) ListMembers(ctx context.Context, storeID uuid.UUID) ([]models.StoreMembership, error) {
 	var members []models.StoreMembership
 	err := r.db.WithContext(ctx).
@@ -183,10 +193,12 @@ func (r *storeRepository) ListMembers(ctx context.Context, storeID uuid.UUID) ([
 	return members, err
 }
 
+// AddMember performs add member on r.
 func (r *storeRepository) AddMember(ctx context.Context, membership *models.StoreMembership) error {
 	return r.db.WithContext(ctx).Create(membership).Error
 }
 
+// UpdateMemberRole updates member role in the database.
 func (r *storeRepository) UpdateMemberRole(ctx context.Context, storeID, userID uuid.UUID, role models.StoreRole) error {
 	return r.db.WithContext(ctx).
 		Model(&models.StoreMembership{}).
@@ -194,12 +206,14 @@ func (r *storeRepository) UpdateMemberRole(ctx context.Context, storeID, userID 
 		Update("role", role).Error
 }
 
+// RemoveMember performs remove member on r.
 func (r *storeRepository) RemoveMember(ctx context.Context, storeID, userID uuid.UUID) error {
 	return r.db.WithContext(ctx).
 		Where("store_id = ? AND user_id = ?", storeID, userID).
 		Delete(&models.StoreMembership{}).Error
 }
 
+// GetSettings queries the database for settings.
 func (r *storeRepository) GetSettings(ctx context.Context, storeID uuid.UUID) (*models.StoreSettings, error) {
 	var settings models.StoreSettings
 	err := r.db.WithContext(ctx).Where("store_id = ?", storeID).First(&settings).Error
@@ -221,10 +235,12 @@ func (r *storeRepository) GetSettings(ctx context.Context, storeID uuid.UUID) (*
 	return &settings, nil
 }
 
+// UpdateSettings updates settings in the database.
 func (r *storeRepository) UpdateSettings(ctx context.Context, settings *models.StoreSettings) error {
 	return r.db.WithContext(ctx).Save(settings).Error
 }
 
+// GetSubscription queries the database for subscription.
 func (r *storeRepository) GetSubscription(ctx context.Context, storeID uuid.UUID) (*models.StoreSubscription, error) {
 	var sub models.StoreSubscription
 	err := r.db.WithContext(ctx).
@@ -237,6 +253,7 @@ func (r *storeRepository) GetSubscription(ctx context.Context, storeID uuid.UUID
 	return &sub, nil
 }
 
+// ListPlans retrieves a collection of plans from the database.
 func (r *storeRepository) ListPlans(ctx context.Context) ([]models.Plan, error) {
 	var plans []models.Plan
 	err := r.db.WithContext(ctx).

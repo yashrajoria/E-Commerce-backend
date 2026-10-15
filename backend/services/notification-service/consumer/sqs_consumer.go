@@ -1,3 +1,4 @@
+// Package consumer implements AWS SQS consumer workers for asynchronous notification events.
 package consumer
 
 import (
@@ -14,12 +15,14 @@ import (
 	"gorm.io/gorm"
 )
 
+// SQSConsumer represents sqs consumer.
 type SQSConsumer struct {
 	consumer messaging.Consumer
 	service  services.NotificationService
 	logger   *zap.Logger
 }
 
+// NewSQSConsumerWithDB creates and initializes a new SQSConsumerWithDB instance.
 func NewSQSConsumerWithDB(db *gorm.DB, svc services.NotificationService, logger *zap.Logger) (*SQSConsumer, error) {
 	queueName := os.Getenv("SQS_QUEUE_URL")
 	if queueName == "" {
@@ -36,6 +39,7 @@ func NewSQSConsumerWithDB(db *gorm.DB, svc services.NotificationService, logger 
 	}, nil
 }
 
+// Start begins consumer loop execution.
 func (c *SQSConsumer) Start(ctx context.Context) {
 	if os.Getenv("ENABLE_SQS_CONSUMER") == "false" {
 		c.logger.Info("Notification queue consumer disabled (ENABLE_SQS_CONSUMER=false)")

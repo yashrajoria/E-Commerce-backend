@@ -179,11 +179,11 @@ func TestController_GetCoupon_Success(t *testing.T) {
 	svc := &mockCouponService{
 		getFn: func(_ context.Context, code string) (*models.Coupon, *services.ServiceError) {
 			return &models.Coupon{
-				ID:   uuid.New(),
-				Code: code,
-				Type: models.CouponTypeFlat,
-				Value: 20,
-				Active: true,
+				ID:        uuid.New(),
+				Code:      code,
+				Type:      models.CouponTypeFlat,
+				Value:     20,
+				Active:    true,
 				ExpiresAt: time.Now().Add(24 * time.Hour),
 			}, nil
 		},

@@ -1,3 +1,4 @@
+// Package main provides the entrypoint for the ShopSwift API Gateway service.
 package main
 
 import (
@@ -17,8 +18,8 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 	"github.com/joho/godotenv"
+	"github.com/redis/go-redis/v9"
 	apperrors "github.com/yashrajoria/common/errors"
 	"github.com/yashrajoria/common/internalauth"
 	commonmw "github.com/yashrajoria/common/middleware"
@@ -37,7 +38,7 @@ var defaultAllowedOrigins = []string{
 	"https://shopswift-admin.vercel.app",
 }
 
-// CORS Middleware - Apply this globally
+// CORSMiddleware cORS Middleware - Apply this globally
 func CORSMiddleware() gin.HandlerFunc {
 	// Use gin-contrib/cors with configuration from ALLOWED_ORIGINS
 	allowed := os.Getenv("ALLOWED_ORIGINS")

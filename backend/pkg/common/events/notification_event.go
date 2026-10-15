@@ -1,5 +1,7 @@
+// Package events defines domain event payloads and publisher contracts for cross-service messaging.
 package events
 
+// NotificationEvent represents a domain event message for notification event.
 type NotificationEvent struct {
 	EventID       string                 `json:"event_id,omitempty"`
 	EventType     string                 `json:"event_type"`
@@ -16,6 +18,7 @@ type NotificationItem struct {
 	Price       float64 `json:"price"`
 }
 
+// NewOrderCreatedEvent creates and initializes a new OrderCreatedEvent instance.
 func NewOrderCreatedEvent(userID, email, phone, name, orderID, couponCode string, total float64, items []NotificationItem) NotificationEvent {
 	return NotificationEvent{
 		EventType: "order_created",
@@ -50,6 +53,7 @@ func NewOrderConfirmedEvent(userID, email, name, orderID string, total float64, 
 	}
 }
 
+// NewOrderShippedEvent creates and initializes a new OrderShippedEvent instance.
 func NewOrderShippedEvent(userID, email, name, orderID, trackingCode string) NotificationEvent {
 	return NotificationEvent{
 		EventType: "order_shipped",
@@ -64,6 +68,7 @@ func NewOrderShippedEvent(userID, email, name, orderID, trackingCode string) Not
 	}
 }
 
+// NewOrderDeliveredEvent creates and initializes a new OrderDeliveredEvent instance.
 func NewOrderDeliveredEvent(userID, email, name, orderID string) NotificationEvent {
 	return NotificationEvent{
 		EventType: "order_delivered",
@@ -77,6 +82,7 @@ func NewOrderDeliveredEvent(userID, email, name, orderID string) NotificationEve
 	}
 }
 
+// NewPaymentFailedEvent creates and initializes a new PaymentFailedEvent instance.
 func NewPaymentFailedEvent(userID, email, phone, name, orderID string, amount float64) NotificationEvent {
 	return NotificationEvent{
 		EventType: "payment_failed",
@@ -92,6 +98,7 @@ func NewPaymentFailedEvent(userID, email, phone, name, orderID string, amount fl
 	}
 }
 
+// NewCouponAppliedEvent creates and initializes a new CouponAppliedEvent instance.
 func NewCouponAppliedEvent(userID, email, name, couponCode string, discount float64) NotificationEvent {
 	return NotificationEvent{
 		EventType: "coupon_applied",

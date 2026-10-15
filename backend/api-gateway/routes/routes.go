@@ -1,3 +1,4 @@
+// Package routes defines and mounts reverse-proxy routing rules for the API Gateway.
 package routes
 
 import (
@@ -32,6 +33,7 @@ func newAdminGroup(parent *gin.RouterGroup, relativePath string) *gin.RouterGrou
 	return g
 }
 
+// RegisterAllRoutes configures and mounts HTTP route handlers on the router.
 func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 
 	// ── Global Middlewares ────────────────────────────────────────────────────
@@ -95,6 +97,7 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	users := forwardTo(userBase + "/users")
 	cart := forwardTo(cartBase + "/cart")
 	orders := forwardTo(orderBase + "/orders")
+	storeCredit := forwardTo(orderBase + "/store-credit")
 	payment := forwardTo(orderBase + "/payment")
 	inventory := forwardTo(inventoryBase + "/inventory")
 	coupons := forwardTo(orderBase + "/coupons")
@@ -286,6 +289,14 @@ func RegisterAllRoutes(r *gin.Engine, redisClient *redis.Client) {
 	protected.GET("/orders/*any", orders)
 	protected.POST("/orders", orders)
 	protected.POST("/orders/*any", orders)
+
+	// Store credit is customer-readable; the order service performs the
+	// store/user scoping and owner/admin mutation authorization.
+	protected.GET("/store-credit/balance", storeCredit)
+	protected.GET("/store-credit/ledger", storeCredit)
+	protected.POST("/store-credit/grants", storeCredit)
+	protected.POST("/store-credit/adjustments", storeCredit)
+	protected.GET("/store-credit/reconcile", storeCredit)
 
 	// Payment
 	protected.POST("/payment", payment)

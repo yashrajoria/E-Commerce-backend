@@ -1,3 +1,4 @@
+// Package controllers provides HTTP endpoints for coupon verification and basket discount optimization.
 package controllers
 
 import (
@@ -8,10 +9,12 @@ import (
 	"order-service/promotion/services"
 )
 
+// BasketOptimizerController represents basket optimizer controller.
 type BasketOptimizerController struct {
 	service services.BasketOptimizerService
 }
 
+// NewBasketOptimizerController creates and initializes a new BasketOptimizerController instance.
 func NewBasketOptimizerController(service services.BasketOptimizerService) *BasketOptimizerController {
 	return &BasketOptimizerController{service: service}
 }

@@ -1,3 +1,4 @@
+// Package middleware provides RBAC authorization and internal service authentication for inventory.
 package middleware
 
 import (

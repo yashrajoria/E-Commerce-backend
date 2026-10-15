@@ -1,3 +1,4 @@
+// Package services implements core business logic for order processing, checkout consumption, and outbox publishing.
 package services
 
 import (
@@ -16,10 +17,12 @@ type CartClient struct {
 	httpClient *http.Client
 }
 
+// NewCartClient creates and initializes a new CartClient instance.
 func NewCartClient(baseURL string) *CartClient {
 	return &CartClient{baseURL: baseURL, httpClient: &http.Client{Timeout: 5 * time.Second}}
 }
 
+// ClearCart performs clear cart on c.
 func (c *CartClient) ClearCart(ctx context.Context, userID string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete,
 		fmt.Sprintf("%s/cart/internal/%s", c.baseURL, url.PathEscape(userID)), nil)

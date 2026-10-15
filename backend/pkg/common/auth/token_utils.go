@@ -1,3 +1,4 @@
+// Package auth provides shared JWT utilities, token parsing, and claims validation.
 package auth
 
 import (

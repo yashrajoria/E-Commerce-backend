@@ -1,3 +1,4 @@
+// Package services implements payment processing, Stripe integrations, and transactional outbox publishers.
 package services
 
 import (
@@ -46,6 +47,7 @@ type OrderRefunder struct {
 	stripe stripeRefundAPI
 }
 
+// NewOrderRefunder creates and initializes a new OrderRefunder instance.
 func NewOrderRefunder(repo repository.PaymentRepository, stripe stripeRefundAPI) *OrderRefunder {
 	return &OrderRefunder{repo: repo, stripe: stripe}
 }
@@ -94,8 +96,11 @@ func (r *OrderRefunder) RefundPayment(ctx context.Context, orderID uuid.UUID, am
 	if payment.Status == "refunded" {
 		return nil, ErrPaymentAlreadyRefunded
 	}
-	if payment.Status != "succeeded" {
+	if payment.Status != "succeeded" && payment.Status != "partially_refunded" {
 		return nil, fmt.Errorf("%w: current status %s", ErrPaymentNotSucceeded, payment.Status)
+	}
+	if payment.Amount > 0 && payment.RefundedAmount >= int64(payment.Amount) {
+		return nil, ErrPaymentAlreadyRefunded
 	}
 	if payment.StripePaymentID == nil || *payment.StripePaymentID == "" {
 		return nil, fmt.Errorf("%w for order %s", ErrMissingStripePaymentID, orderID)
@@ -145,8 +150,11 @@ func (r *OrderRefunder) RefundPayment(ctx context.Context, orderID uuid.UUID, am
 	})
 	payloadStr := string(payloadBytes)
 
+	newRefundedAmount := payment.RefundedAmount + refundAmount
+	status := "refunded"
 	updates := map[string]interface{}{
-		"status":               "refunded",
+		"status":               status,
+		"refunded_amount":      newRefundedAmount,
 		"stripe_event_payload": payloadStr,
 		"updated_at":           now,
 	}

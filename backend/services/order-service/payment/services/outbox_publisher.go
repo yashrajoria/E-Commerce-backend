@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// OutboxPublisherConfig holds configuration options for outbox publisher.
 type OutboxPublisherConfig struct {
 	BatchSize     int
 	LeaseDuration time.Duration
@@ -19,6 +20,7 @@ type OutboxPublisherConfig struct {
 	RetryMax      time.Duration
 }
 
+// OutboxPublisher represents outbox publisher.
 type OutboxPublisher struct {
 	repository repository.OutboxRepository
 	sns        messaging.Publisher
@@ -26,6 +28,7 @@ type OutboxPublisher struct {
 	config     OutboxPublisherConfig
 }
 
+// NewOutboxPublisher creates and initializes a new OutboxPublisher instance.
 func NewOutboxPublisher(repo repository.OutboxRepository, sns messaging.Publisher, owner string) *OutboxPublisher {
 	return &OutboxPublisher{
 		repository: repo,
@@ -64,6 +67,7 @@ func (p *OutboxPublisher) Run(ctx context.Context) {
 	}
 }
 
+// PublishOnce performs publish once on p.
 func (p *OutboxPublisher) PublishOnce(ctx context.Context) (int, error) {
 	events, err := p.repository.ClaimWithLease(ctx, p.config.BatchSize, p.owner, p.config.LeaseDuration)
 	if err != nil {

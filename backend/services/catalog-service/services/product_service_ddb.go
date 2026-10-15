@@ -43,6 +43,7 @@ type ProductServiceDDB struct {
 	priceDropPublisher PriceDropPublisher
 }
 
+// NewProductServiceDDB creates and initializes a new ProductServiceDDB instance.
 func NewProductServiceDDB(
 	pr repository.ProductRepo,
 	cr repository.CategoryRepo,
@@ -100,10 +101,12 @@ func (s *ProductServiceDDB) presignObjectUpload(ctx context.Context, key, conten
 	return uploadURL, key, publicURL, nil
 }
 
+// GetProduct executes business logic for get product.
 func (s *ProductServiceDDB) GetProduct(ctx context.Context, id uuid.UUID) (*models.Product, error) {
 	return s.productRepo.FindByID(ctx, id)
 }
 
+// ListProducts executes business logic for list products.
 func (s *ProductServiceDDB) ListProducts(ctx context.Context, params ListProductsParams) ([]*models.Product, int64, error) {
 	// Build filter map (use plain types for repository layer)
 	filter := make(map[string]interface{})
@@ -157,6 +160,7 @@ func (s *ProductServiceDDB) ListProducts(ctx context.Context, params ListProduct
 	return products, total, nil
 }
 
+// CreateProduct executes business logic for create product.
 func (s *ProductServiceDDB) CreateProduct(ctx context.Context, req ProductCreateRequest, images []*multipart.FileHeader) (*models.Product, error) {
 	if req.SKU != "" {
 		existing, err := s.productRepo.FindBySKUs(ctx, []string{req.SKU})
@@ -266,6 +270,7 @@ func (s *ProductServiceDDB) CreateProduct(ctx context.Context, req ProductCreate
 	return product, nil
 }
 
+// UpdateProduct executes business logic for update product.
 func (s *ProductServiceDDB) UpdateProduct(ctx context.Context, id uuid.UUID, req ProductUpdateRequest) (int64, error) {
 	// Fetch current product to track old category IDs
 	oldProduct, err := s.productRepo.FindByID(ctx, id)
@@ -365,6 +370,7 @@ func (s *ProductServiceDDB) UpdateProduct(ctx context.Context, id uuid.UUID, req
 	return 1, nil
 }
 
+// DeleteProduct executes business logic for delete product.
 func (s *ProductServiceDDB) DeleteProduct(ctx context.Context, id uuid.UUID) (int64, error) {
 	// Fetch product before deletion to get its category IDs for count updates
 	product, err := s.productRepo.FindByID(ctx, id)
@@ -450,6 +456,7 @@ func (s *ProductServiceDDB) BulkDeleteProducts(ctx context.Context, req BulkDele
 	return int64(len(idsToDelete)), nil
 }
 
+// GetProductInternal executes business logic for get product internal.
 func (s *ProductServiceDDB) GetProductInternal(ctx context.Context, id uuid.UUID) (*ProductInternalDTO, error) {
 	product, err := s.productRepo.FindByID(ctx, id)
 	if err != nil {

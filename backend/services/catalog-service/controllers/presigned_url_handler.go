@@ -21,6 +21,7 @@ type PresignedURLHandler struct {
 	timeout        time.Duration
 }
 
+// NewPresignedURLHandler creates and initializes a new PresignedURLHandler instance.
 func NewPresignedURLHandler(ps ProductServiceAPI) *PresignedURLHandler {
 	return &PresignedURLHandler{
 		productService: ps,

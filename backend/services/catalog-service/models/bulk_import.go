@@ -1,5 +1,7 @@
+// Package models defines GORM database models for products, categories, and bulk import metadata.
 package models
 
+// BulkImportValidation represents bulk import validation.
 type BulkImportValidation struct {
 	TotalProducts     int                      `json:"total_products"`
 	ValidProducts     int                      `json:"valid_products"`
@@ -10,6 +12,7 @@ type BulkImportValidation struct {
 	Warnings          []map[string]interface{} `json:"warnings"`
 }
 
+// BulkImportResult represents bulk import result.
 type BulkImportResult struct {
 	InsertedCount int                      `json:"inserted_count"`
 	ErrorsCount   int                      `json:"errors_count"`

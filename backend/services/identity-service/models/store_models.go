@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 )
 
+// StoreRole defines authorization role classifications.
 type StoreRole string
 
 const (
@@ -16,6 +17,7 @@ const (
 	StoreRoleViewer  StoreRole = "viewer"
 )
 
+// Store represents store.
 type Store struct {
 	ID          uuid.UUID      `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	Name        string         `gorm:"size:100;not null" json:"name"`
@@ -34,34 +36,37 @@ type Store struct {
 	Subscription *StoreSubscription `gorm:"foreignKey:StoreID" json:"subscription,omitempty"`
 }
 
+// StoreMembership represents store membership.
 type StoreMembership struct {
-	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	UserID    uuid.UUID `gorm:"type:uuid;not null;index" json:"user_id"`
-	StoreID   uuid.UUID `gorm:"type:uuid;not null;index" json:"store_id"`
-	Role      StoreRole `gorm:"type:store_role;not null;default:'viewer'" json:"role"`
+	ID        uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	UserID    uuid.UUID  `gorm:"type:uuid;not null;index" json:"user_id"`
+	StoreID   uuid.UUID  `gorm:"type:uuid;not null;index" json:"store_id"`
+	Role      StoreRole  `gorm:"type:store_role;not null;default:'viewer'" json:"role"`
 	InvitedBy *uuid.UUID `gorm:"type:uuid" json:"invited_by,omitempty"`
-	Accepted  bool      `gorm:"not null;default:false" json:"accepted"`
-	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
-	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+	Accepted  bool       `gorm:"not null;default:false" json:"accepted"`
+	CreatedAt time.Time  `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt time.Time  `gorm:"autoUpdateTime" json:"updated_at"`
 
 	User  *User  `gorm:"foreignKey:UserID" json:"user,omitempty"`
 	Store *Store `gorm:"foreignKey:StoreID" json:"store,omitempty"`
 }
 
+// StoreSettings represents store settings.
 type StoreSettings struct {
-	StoreID          uuid.UUID      `gorm:"type:uuid;primaryKey" json:"store_id"`
-	ContactEmail     *string        `gorm:"type:text" json:"contact_email,omitempty"`
-	ContactPhone     *string        `gorm:"type:text" json:"contact_phone,omitempty"`
-	Address          *string        `gorm:"type:text" json:"address,omitempty"`
-	SMTPHost         *string        `gorm:"type:text" json:"smtp_host,omitempty"`
-	SMTPPort         *int           `json:"smtp_port,omitempty"`
-	MaintenanceMode  bool           `gorm:"not null;default:false" json:"maintenance_mode"`
-	AnalyticsEnabled bool           `gorm:"not null;default:true" json:"analytics_enabled"`
-	ShippingConfig   string         `gorm:"type:jsonb;default:'{}'" json:"shipping_config"`
-	PaymentConfig    string         `gorm:"type:jsonb;default:'{}'" json:"payment_config"`
-	UpdatedAt        time.Time      `gorm:"autoUpdateTime" json:"updated_at"`
+	StoreID          uuid.UUID `gorm:"type:uuid;primaryKey" json:"store_id"`
+	ContactEmail     *string   `gorm:"type:text" json:"contact_email,omitempty"`
+	ContactPhone     *string   `gorm:"type:text" json:"contact_phone,omitempty"`
+	Address          *string   `gorm:"type:text" json:"address,omitempty"`
+	SMTPHost         *string   `gorm:"type:text" json:"smtp_host,omitempty"`
+	SMTPPort         *int      `json:"smtp_port,omitempty"`
+	MaintenanceMode  bool      `gorm:"not null;default:false" json:"maintenance_mode"`
+	AnalyticsEnabled bool      `gorm:"not null;default:true" json:"analytics_enabled"`
+	ShippingConfig   string    `gorm:"type:jsonb;default:'{}'" json:"shipping_config"`
+	PaymentConfig    string    `gorm:"type:jsonb;default:'{}'" json:"payment_config"`
+	UpdatedAt        time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 }
 
+// Plan represents plan.
 type Plan struct {
 	ID           uuid.UUID         `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	Name         string            `gorm:"size:50;not null" json:"name"`
@@ -74,6 +79,7 @@ type Plan struct {
 	Entitlements []PlanEntitlement `gorm:"foreignKey:PlanID" json:"entitlements,omitempty"`
 }
 
+// PlanEntitlement represents plan entitlement.
 type PlanEntitlement struct {
 	ID         uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	PlanID     uuid.UUID `gorm:"type:uuid;not null;index" json:"plan_id"`
@@ -82,6 +88,7 @@ type PlanEntitlement struct {
 	Enabled    bool      `gorm:"not null;default:true" json:"enabled"`
 }
 
+// StoreSubscription represents store subscription.
 type StoreSubscription struct {
 	ID                   uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	StoreID              uuid.UUID  `gorm:"type:uuid;not null;index" json:"store_id"`
@@ -98,10 +105,12 @@ type StoreSubscription struct {
 	Plan *Plan `gorm:"foreignKey:PlanID" json:"plan,omitempty"`
 }
 
+// TableName specifies the custom database table name in GORM.
 func (StoreSubscription) TableName() string {
 	return "subscriptions"
 }
 
+// UsageRecord represents usage record.
 type UsageRecord struct {
 	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	StoreID     uuid.UUID `gorm:"type:uuid;not null;index" json:"store_id"`

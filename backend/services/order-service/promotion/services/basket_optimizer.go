@@ -1,3 +1,4 @@
+// Package services implements discount calculation logic and optimal coupon basket recommendations.
 package services
 
 import (
@@ -5,10 +6,11 @@ import (
 	"math"
 	"strings"
 
-	"order-service/promotion/models"
 	"go.uber.org/zap"
+	"order-service/promotion/models"
 )
 
+// BasketOptimizerService defines the interface contract for basket optimizer service.
 type BasketOptimizerService interface {
 	Optimize(ctx context.Context, req *models.OptimizeBasketRequest) (*models.OptimizeBasketResponse, *ServiceError)
 }
@@ -17,10 +19,12 @@ type basketOptimizerServiceImpl struct {
 	logger *zap.Logger
 }
 
+// NewBasketOptimizerService creates and initializes a new BasketOptimizerService instance.
 func NewBasketOptimizerService(logger *zap.Logger) BasketOptimizerService {
 	return &basketOptimizerServiceImpl{logger: logger}
 }
 
+// Optimize executes business logic for optimize.
 func (s *basketOptimizerServiceImpl) Optimize(ctx context.Context, req *models.OptimizeBasketRequest) (*models.OptimizeBasketResponse, *ServiceError) {
 	if len(req.Items) == 0 {
 		return nil, &ServiceError{StatusCode: 400, Message: "Cart cannot be empty"}
@@ -67,14 +71,14 @@ func (s *basketOptimizerServiceImpl) Optimize(ctx context.Context, req *models.O
 		currentShipping = 0.0
 	}
 
-	amountToFreeShipping := math.Max(0.0, freeShippingThreshold - subtotal)
-	
+	amountToFreeShipping := math.Max(0.0, freeShippingThreshold-subtotal)
+
 	// Next weight step (1kg increments) headroom
 	tierCeil := math.Ceil(totalWeightKg)
 	if tierCeil == totalWeightKg {
 		tierCeil += 1.0
 	}
-	weightHeadroom := math.Round((tierCeil - totalWeightKg) * 100) / 100
+	weightHeadroom := math.Round((tierCeil-totalWeightKg)*100) / 100
 
 	recommendations := make([]models.UpsellRecommendation, 0)
 	eligible := false
@@ -82,9 +86,9 @@ func (s *basketOptimizerServiceImpl) Optimize(ctx context.Context, req *models.O
 	if amountToFreeShipping > 0 && amountToFreeShipping <= 35.0 {
 		eligible = true
 		// High-margin micro-bundle recommendation: offsets shipping cost
-		recPrice := math.Round((amountToFreeShipping + 4.00) * 100) / 100
-		recDiscount := math.Min(5.00, math.Round(currentShipping * 0.7 * 100) / 100)
-		netSavings := math.Round(currentShipping * 100) / 100
+		recPrice := math.Round((amountToFreeShipping+4.00)*100) / 100
+		recDiscount := math.Min(5.00, math.Round(currentShipping*0.7*100)/100)
+		netSavings := math.Round(currentShipping*100) / 100
 
 		recommendations = append(recommendations, models.UpsellRecommendation{
 			ProductID:       "sku-acc-braided-cable",

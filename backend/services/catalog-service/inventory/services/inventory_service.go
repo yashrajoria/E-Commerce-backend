@@ -1,3 +1,4 @@
+// Package services provides business logic for inventory reservations, stock updates, and waiting queues.
 package services
 
 import (

@@ -1,3 +1,4 @@
+// Package main provides the entrypoint and HTTP server lifecycle for the Catalog Service.
 package main
 
 import (
@@ -8,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	cartroutes "catalog-service/cart/routes"
 	"catalog-service/controllers"
 	inventorycontrollers "catalog-service/inventory/controllers"
 	inventorymodels "catalog-service/inventory/models"
@@ -17,7 +19,6 @@ import (
 	"catalog-service/repository"
 	"catalog-service/routes"
 	"catalog-service/services"
-	cartroutes "catalog-service/cart/routes"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -38,6 +39,7 @@ type inventoryStockSync struct {
 	svc *inventoryservices.InventoryService
 }
 
+// SetStock sets the stock of the a.
 func (a *inventoryStockSync) SetStock(ctx context.Context, productID string, quantity int) error {
 	_, err := a.svc.SetStock(ctx, &inventorymodels.SetStockRequest{
 		ProductID: productID,

@@ -25,6 +25,7 @@ type CacheManager struct {
 	ttl   time.Duration
 }
 
+// NewCacheManager creates and initializes a new CacheManager instance.
 func NewCacheManager(redis *redis.Client) *CacheManager {
 	return &CacheManager{
 		redis: redis,

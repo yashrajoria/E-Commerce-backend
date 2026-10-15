@@ -16,6 +16,7 @@ type PGCategoryRepo struct{ db *gorm.DB }
 
 var _ CategoryRepo = (*PGCategoryRepo)(nil)
 
+// NewPGCategoryRepo creates and initializes a new PGCategoryRepo instance.
 func NewPGCategoryRepo(db *gorm.DB) *PGCategoryRepo { return &PGCategoryRepo{db: db} }
 
 type pgCategory struct {
@@ -70,6 +71,7 @@ func (r *PGCategoryRepo) find(ctx context.Context, where string, args ...interfa
 	return out, nil
 }
 
+// FindByID performs find by id on r.
 func (r *PGCategoryRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.Category, error) {
 	cats, err := r.find(ctx, "id = ?", id)
 	if err != nil {
@@ -81,6 +83,7 @@ func (r *PGCategoryRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.Ca
 	return &cats[0], nil
 }
 
+// FindByName performs find by name on r.
 func (r *PGCategoryRepo) FindByName(ctx context.Context, name string) (*models.Category, error) {
 	cats, err := r.find(ctx, "name = ?", name)
 	if err != nil {
@@ -92,6 +95,7 @@ func (r *PGCategoryRepo) FindByName(ctx context.Context, name string) (*models.C
 	return &cats[0], nil
 }
 
+// FindByNames performs find by names on r.
 func (r *PGCategoryRepo) FindByNames(ctx context.Context, names []string) ([]models.Category, error) {
 	seen := make(map[string]struct{}, len(names))
 	uniq := make([]string, 0, len(names))
@@ -108,10 +112,12 @@ func (r *PGCategoryRepo) FindByNames(ctx context.Context, names []string) ([]mod
 	return r.find(ctx, "name IN ?", uniq)
 }
 
+// FindAll performs find all on r.
 func (r *PGCategoryRepo) FindAll(ctx context.Context) ([]models.Category, error) {
 	return r.find(ctx, "TRUE")
 }
 
+// FindPage performs find page on r.
 func (r *PGCategoryRepo) FindPage(ctx context.Context, search string, active *bool, sortBy string, limit, offset int) ([]models.Category, int64, error) {
 	query := r.db.WithContext(ctx).Table("catalog.categories").Where("deleted_at IS NULL")
 	if search != "" {
@@ -151,6 +157,7 @@ func (r *PGCategoryRepo) FindPage(ctx context.Context, search string, active *bo
 	return out, total, nil
 }
 
+// Create performs create on r.
 func (r *PGCategoryRepo) Create(ctx context.Context, c *models.Category) error {
 	return r.db.WithContext(ctx).Exec(`
 		INSERT INTO catalog.categories
@@ -188,6 +195,7 @@ func (r *PGCategoryRepo) Update(ctx context.Context, id uuid.UUID, updates map[s
 	return nil
 }
 
+// Delete performs delete on r.
 func (r *PGCategoryRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	res := r.db.WithContext(ctx).Exec(
 		`UPDATE catalog.categories SET deleted_at = now(), updated_at = now() WHERE id = ? AND deleted_at IS NULL`, id)

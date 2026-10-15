@@ -1,3 +1,4 @@
+// Package controllers provides HTTP endpoints for inventory levels and waiting room queues.
 package controllers
 
 import (
@@ -22,8 +23,7 @@ func NewInventoryController(service *services.InventoryService) *InventoryContro
 	return &InventoryController{service: service}
 }
 
-// GetStock returns the inventory for a product
-// GET /inventory/:productId
+// GetStock handles GET /inventory/:productId, returning real-time available and reserved stock counts.
 func (ic *InventoryController) GetStock(c *gin.Context) {
 	productID := c.Param("productId")
 	if productID == "" {
@@ -104,8 +104,7 @@ func (ic *InventoryController) UpdateStock(c *gin.Context) {
 	c.JSON(http.StatusOK, inv)
 }
 
-// ReserveStock reserves inventory for order items
-// POST /inventory/reserve
+// ReserveStock handles POST /inventory/reserve, placing temporary holds on inventory items during checkout.
 func (ic *InventoryController) ReserveStock(c *gin.Context) {
 	var req models.ReserveRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -126,8 +125,7 @@ func (ic *InventoryController) ReserveStock(c *gin.Context) {
 	})
 }
 
-// ReleaseStock releases reserved stock
-// POST /inventory/release
+// ReleaseStock handles POST /inventory/release, releasing reserved inventory back to available stock.
 func (ic *InventoryController) ReleaseStock(c *gin.Context) {
 	var req models.ReleaseRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -146,8 +144,7 @@ func (ic *InventoryController) ReleaseStock(c *gin.Context) {
 	})
 }
 
-// ConfirmStock confirms reserved stock (payment succeeded)
-// POST /inventory/confirm
+// ConfirmStock handles POST /inventory/confirm, committing reserved inventory deductions upon completed payment.
 func (ic *InventoryController) ConfirmStock(c *gin.Context) {
 	var req models.ConfirmRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

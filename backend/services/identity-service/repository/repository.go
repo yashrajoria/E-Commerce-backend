@@ -1,3 +1,4 @@
+// Package repository provides database access layers for users, refresh tokens, and store entities.
 package repository
 
 import (
@@ -21,37 +22,43 @@ type UserRepository struct {
 	db *gorm.DB
 }
 
+// NewUserRepository creates and initializes a new UserRepository instance.
 func NewUserRepository(db *gorm.DB) *UserRepository {
 	return &UserRepository{db: db}
 }
 
 // --- Auth flows (ex-auth-service) ---
 
+// FindByEmail queries the database for  by email.
 func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*models.User, error) {
 	var user models.User
 	err := r.db.WithContext(ctx).Where("email = ?", email).First(&user).Error
 	return &user, err
 }
 
+// Create persists a new  record in the database.
 func (r *UserRepository) Create(ctx context.Context, user *models.User) error {
 	return r.db.WithContext(ctx).Create(user).Error
 }
 
+// Update updates  in the database.
 func (r *UserRepository) Update(ctx context.Context, user *models.User) error {
 	return r.db.WithContext(ctx).Save(user).Error
 }
 
+// FindByID queries the database for  by id.
 func (r *UserRepository) FindByID(ctx context.Context, id uuid.UUID) (*models.User, error) {
 	var user models.User
 	err := r.db.WithContext(ctx).Where("id = ?", id).First(&user).Error
 	return &user, err
 }
 
-// Refresh token storage
+// CreateRefreshToken persists a new refresh token record for session tracking.
 func (r *UserRepository) CreateRefreshToken(ctx context.Context, rt *models.RefreshToken) error {
 	return r.db.WithContext(ctx).Create(rt).Error
 }
 
+// GetRefreshTokenByTokenID queries the database for refresh token by token id.
 func (r *UserRepository) GetRefreshTokenByTokenID(ctx context.Context, tokenID string) (*models.RefreshToken, error) {
 	var rt models.RefreshToken
 	err := r.db.WithContext(ctx).Where("token_id = ?", tokenID).First(&rt).Error
@@ -77,6 +84,7 @@ func (r *UserRepository) RevokeRefreshTokenByTokenID(ctx context.Context, tokenI
 	return nil
 }
 
+// RevokeAllUserRefreshTokens performs revoke all user refresh tokens on r.
 func (r *UserRepository) RevokeAllUserRefreshTokens(ctx context.Context, userID uuid.UUID) error {
 	return r.db.WithContext(ctx).Model(&models.RefreshToken{}).Where("user_id = ?", userID).Update("revoked", true).Error
 }
@@ -96,6 +104,7 @@ func (r *UserRepository) CountByRole(ctx context.Context, role string) (int64, e
 
 // --- Profile flows (ex-user-service) ---
 
+// GetByID queries the database for by id.
 func (r *UserRepository) GetByID(ctx context.Context, id string) (*models.User, error) {
 	var user models.User
 	err := r.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", id).First(&user).Error
@@ -108,6 +117,7 @@ func (r *UserRepository) GetByID(ctx context.Context, id string) (*models.User, 
 	return &user, nil
 }
 
+// List retrieves a collection of  from the database.
 func (r *UserRepository) List(ctx context.Context, offset, limit int, search, role, sortBy, sortOrder string) ([]models.User, int64, error) {
 	var users []models.User
 	var total int64

@@ -1,3 +1,4 @@
+// Package middleware provides authentication and configuration injection middlewares for order routes.
 package middleware
 
 import (
@@ -10,6 +11,7 @@ import (
 
 const UserContextKey = "userID"
 
+// AuthMiddleware returns a Gin middleware handler for request processing.
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.GetHeader("X-User-ID")
@@ -30,6 +32,7 @@ func AuthMiddleware() gin.HandlerFunc {
 	}
 }
 
+// GetUserID retrieves user id.
 func GetUserID(c *gin.Context) (string, error) {
 	if val, ok := c.Get(UserContextKey); ok {
 		if id, ok := val.(string); ok && id != "" {
@@ -39,13 +42,14 @@ func GetUserID(c *gin.Context) (string, error) {
 	return "", errors.New("user ID not found in context")
 }
 
-// Injects any config value into Gin context; here for product service URL
+// ConfigMiddleware injects configuration values into the Gin context, such as upstream service URLs.
 func ConfigMiddleware(productServiceURL string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Set("product_service_url", productServiceURL)
 		c.Next()
 	}
 }
+// AdminOnly returns a Gin middleware handler for request processing.
 func AdminOnly() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		roleVal, exists := c.Get("role")

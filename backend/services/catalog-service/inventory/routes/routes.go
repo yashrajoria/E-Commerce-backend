@@ -1,9 +1,10 @@
+// Package routes mounts HTTP endpoints for inventory reservations and waiting rooms.
 package routes
 
 import (
-	"github.com/gin-gonic/gin"
 	"catalog-service/inventory/controllers"
 	"catalog-service/inventory/middleware"
+	"github.com/gin-gonic/gin"
 )
 
 // RegisterRoutes registers all inventory service routes.
@@ -56,4 +57,3 @@ func RegisterRoutes(r *gin.Engine, ctrl *controllers.InventoryController, wsCtrl
 		}
 	}
 }
-

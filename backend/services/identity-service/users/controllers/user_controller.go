@@ -1,3 +1,4 @@
+// Package controllers provides HTTP endpoints for user profile management and password changes.
 package controllers
 
 import (
@@ -17,10 +18,12 @@ import (
 	"gorm.io/gorm"
 )
 
+// UserController represents user controller.
 type UserController struct {
 	userService *services.UserService
 }
 
+// NewUserController creates and initializes a new UserController instance.
 func NewUserController(us *services.UserService) *UserController {
 	return &UserController{userService: us}
 }
@@ -56,6 +59,7 @@ func (ctrl *UserController) GetProfile(c *gin.Context) {
 	})
 }
 
+// UpdateProfile handles PUT /users/profile requests, updating name, contact info, and default address references.
 func (ctrl *UserController) UpdateProfile(c *gin.Context) {
 	userID, err := middleware.GetUserID(c)
 	if err != nil {
@@ -100,6 +104,7 @@ func (ctrl *UserController) UpdateProfile(c *gin.Context) {
 	})
 }
 
+// ChangePassword handles POST /users/change-password, verifying current credentials and updating to a new password hash.
 func (ctrl *UserController) ChangePassword(c *gin.Context) {
 	userID, err := middleware.GetUserID(c)
 	if err != nil {

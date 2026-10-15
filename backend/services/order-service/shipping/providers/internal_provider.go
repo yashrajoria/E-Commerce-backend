@@ -1,15 +1,17 @@
+// Package providers defines shipping carrier interfaces and internal carrier provider implementations.
 package providers
 
 import (
 	"fmt"
-	"regexp"
 	"order-service/shipping/models"
+	"regexp"
 	"strings"
 )
 
 // InternalDynamicProvider calculates shipping rates locally based on zones and weight.
 type InternalDynamicProvider struct{}
 
+// NewInternalDynamicProvider creates and initializes a new InternalDynamicProvider instance.
 func NewInternalDynamicProvider() *InternalDynamicProvider {
 	return &InternalDynamicProvider{}
 }
@@ -24,6 +26,7 @@ var ErrInvalidWeight = fmt.Errorf("invalid weight")
 
 var iso2CountryCode = regexp.MustCompile(`^[A-Z]{2}$`)
 
+// GetRates returns the rates of the p.
 func (p *InternalDynamicProvider) GetRates(weightKg float64, destination models.Address) ([]models.ShippingRate, error) {
 	if weightKg <= 0 {
 		return nil, fmt.Errorf("%w: must be positive, got %f", ErrInvalidWeight, weightKg)
@@ -35,7 +38,7 @@ func (p *InternalDynamicProvider) GetRates(weightKg float64, destination models.
 	}
 
 	zone := p.determineZone(destination.Country)
-	
+
 	// Base rates and surcharges per zone
 	var baseRate, weightSurcharge float64
 	switch zone {
@@ -63,7 +66,7 @@ func (p *InternalDynamicProvider) GetRates(weightKg float64, destination models.
 	rates := make([]models.ShippingRate, 0, len(serviceLevels))
 	for _, sl := range serviceLevels {
 		amount := (baseRate + (weightKg * weightSurcharge)) * sl.multiplier
-		
+
 		rates = append(rates, models.ShippingRate{
 			Provider:      "ShopSwift Internal",
 			ServiceLevel:  sl.name,

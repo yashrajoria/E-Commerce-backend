@@ -13,6 +13,7 @@ import (
 	"github.com/yashrajoria/common/internalauth"
 )
 
+// Product represents product.
 type Product struct {
 	ID    uuid.UUID `json:"id"`
 	Name  string    `json:"name"`
@@ -29,6 +30,7 @@ func priceToCents(price float64) int {
 // ErrProductNotFound is permanent (product deleted); other fetch errors are transient.
 var ErrProductNotFound = errors.New("product not found")
 
+// FetchProductByID performs fetch product by id.
 func FetchProductByID(ctx context.Context, baseURL string, productID uuid.UUID) (*Product, error) {
 	url := fmt.Sprintf("%s/products/internal/%s", baseURL, productID.String())
 

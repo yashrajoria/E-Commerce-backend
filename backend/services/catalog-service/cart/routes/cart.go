@@ -1,3 +1,4 @@
+// Package routes configures and registers HTTP routes for shopping cart and checkout endpoints.
 package routes
 
 import (
@@ -13,6 +14,7 @@ import (
 	"github.com/yashrajoria/common/messaging"
 )
 
+// RegisterCartRoutes configures and mounts HTTP route handlers on the router.
 func RegisterCartRoutes(
 	r *gin.Engine,
 	redisClient *redis.Client,

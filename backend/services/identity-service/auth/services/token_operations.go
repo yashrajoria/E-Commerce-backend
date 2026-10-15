@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// RefreshTokens executes business logic for refresh tokens.
 func (s *AuthService) RefreshTokens(ctx context.Context, refreshToken string) (*TokenPair, error) {
 	claims, err := s.tokenService.ValidateToken(refreshToken, "refresh")
 	if err != nil {
@@ -101,6 +102,7 @@ func (s *AuthService) RefreshTokens(ctx context.Context, refreshToken string) (*
 	return tokenPair, nil
 }
 
+// Logout executes business logic for logout.
 func (s *AuthService) Logout(ctx context.Context, refreshToken string) error {
 	claims, err := s.tokenService.ValidateToken(refreshToken, "refresh")
 	if err != nil {
@@ -124,4 +126,3 @@ func (s *AuthService) RevokeUserTokens(ctx context.Context, userID string) error
 	}
 	return s.userRepo.RevokeAllUserRefreshTokens(ctx, id)
 }
-

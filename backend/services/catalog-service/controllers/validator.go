@@ -87,6 +87,7 @@ type RequestValidator struct {
 	validate *validator.Validate
 }
 
+// NewRequestValidator creates and initializes a new RequestValidator instance.
 func NewRequestValidator() *RequestValidator {
 	return &RequestValidator{
 		validate: validator.New(),

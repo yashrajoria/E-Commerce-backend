@@ -1,3 +1,4 @@
+// Package routes registers catalog, category, and bulk import HTTP endpoints.
 package routes
 
 import (

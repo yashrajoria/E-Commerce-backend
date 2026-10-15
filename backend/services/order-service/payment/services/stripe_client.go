@@ -30,11 +30,13 @@ func frontendURL() string {
 	return "http://localhost:3001"
 }
 
+// StripeService represents stripe service.
 type StripeService struct {
 	SecretKey  string
 	WebhookKey string
 }
 
+// NewStripeService creates and initializes a new StripeService instance.
 func NewStripeService(secretKey, webhookKey string) *StripeService {
 	stripe.Key = secretKey
 	// Explicit retries: stripe-go defaults to 2 network retries, but pin it
@@ -46,6 +48,7 @@ func NewStripeService(secretKey, webhookKey string) *StripeService {
 	return &StripeService{SecretKey: secretKey, WebhookKey: webhookKey}
 }
 
+// CreatePaymentIntent executes business logic for create payment intent.
 func (s *StripeService) CreatePaymentIntent(amount int64, currency string) (*stripe.PaymentIntent, error) {
 	params := &stripe.PaymentIntentParams{
 		Amount:   stripe.Int64(amount),
@@ -58,14 +61,17 @@ func (s *StripeService) CreatePaymentIntent(amount int64, currency string) (*str
 	return pi, nil
 }
 
+// CreateCheckoutSession executes business logic for create checkout session.
 func (s *StripeService) CreateCheckoutSession(amount int64, currency, orderID, userID string) (*stripe.CheckoutSession, error) {
 	return s.CreateCheckoutSessionWithDetails(amount, currency, orderID, userID, "", "", nil)
 }
 
+// CreateCheckoutSessionWithIdempotency executes business logic for create checkout session with idempotency.
 func (s *StripeService) CreateCheckoutSessionWithIdempotency(amount int64, currency, orderID, userID, idempotencyKey string) (*stripe.CheckoutSession, error) {
 	return s.CreateCheckoutSessionWithDetails(amount, currency, orderID, userID, idempotencyKey, "", nil)
 }
 
+// CreateCheckoutSessionWithDetails executes business logic for create checkout session with details.
 func (s *StripeService) CreateCheckoutSessionWithDetails(amount int64, currency, orderID, userID, idempotencyKey, email string, shipping *models.ShippingAddress) (*stripe.CheckoutSession, error) {
 	frontend := frontendURL()
 	params := &stripe.CheckoutSessionParams{
@@ -134,6 +140,7 @@ func (s *StripeService) CreateCheckoutSessionWithDetails(amount int64, currency,
 	return sess, nil
 }
 
+// ParseWebhook executes business logic for parse webhook.
 func (s *StripeService) ParseWebhook(r *http.Request) (stripe.Event, error) {
 	var event stripe.Event
 	payload, err := ioutil.ReadAll(r.Body)

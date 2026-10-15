@@ -1,3 +1,4 @@
+// Package database manages PostgreSQL database connections for payment entities and outbox events.
 package database
 
 import (
@@ -15,6 +16,7 @@ import (
 
 var DB *gorm.DB
 
+// ConnectPostgres establishes a database connection pool.
 func ConnectPostgres(autoMigrateModels ...interface{}) (*gorm.DB, error) {
 	_ = godotenv.Load() // Only load if not already loaded
 
@@ -79,6 +81,7 @@ func ConnectPostgres(autoMigrateModels ...interface{}) (*gorm.DB, error) {
 	return nil, fmt.Errorf("failed to connect to PostgreSQL after retries: %w", err)
 }
 
+// Connect establishes a database connection pool.
 func Connect() error {
 	var err error
 	DB, err = ConnectPostgres(&models.Payment{})

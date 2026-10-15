@@ -13,19 +13,23 @@ import (
 	"order-service/models"
 )
 
+// PriceDropRepository defines the interface contract for price drop repository.
 type PriceDropRepository interface {
 	FindEligibleOrderItems(ctx context.Context, productID uuid.UUID, cutoff time.Time) ([]models.OrderItem, error)
 	RecordRefundOutboxEvents(ctx context.Context, events []models.OutboxEvent) error
 }
 
+// GormPriceDropRepository represents gorm price drop repository.
 type GormPriceDropRepository struct {
 	db *gorm.DB
 }
 
+// NewGormPriceDropRepository creates and initializes a new GormPriceDropRepository instance.
 func NewGormPriceDropRepository(db *gorm.DB) *GormPriceDropRepository {
 	return &GormPriceDropRepository{db: db}
 }
 
+// FindEligibleOrderItems queries the database for  eligible order items.
 func (r *GormPriceDropRepository) FindEligibleOrderItems(ctx context.Context, productID uuid.UUID, cutoff time.Time) ([]models.OrderItem, error) {
 	var orderItems []models.OrderItem
 	err := r.db.WithContext(ctx).
@@ -36,6 +40,7 @@ func (r *GormPriceDropRepository) FindEligibleOrderItems(ctx context.Context, pr
 	return orderItems, err
 }
 
+// RecordRefundOutboxEvents performs record refund outbox events on r.
 func (r *GormPriceDropRepository) RecordRefundOutboxEvents(ctx context.Context, events []models.OutboxEvent) error {
 	if len(events) == 0 {
 		return nil
@@ -50,10 +55,12 @@ func (r *GormPriceDropRepository) RecordRefundOutboxEvents(ctx context.Context, 
 	})
 }
 
+// PriceDropService defines the interface contract for price drop service.
 type PriceDropService interface {
 	ProcessPriceDrop(ctx context.Context, event events.ProductPriceDecreasedEvent) (*PriceDropResult, error)
 }
 
+// PriceDropResult represents price drop result.
 type PriceDropResult struct {
 	EligibleOrdersCount int     `json:"eligible_orders_count"`
 	TotalRefundAmount   float64 `json:"total_refund_amount"`
@@ -66,6 +73,7 @@ type priceDropServiceImpl struct {
 	logger               *zap.Logger
 }
 
+// NewPriceDropService creates and initializes a new PriceDropService instance.
 func NewPriceDropService(repo PriceDropRepository, notificationTopicARN string, logger *zap.Logger) PriceDropService {
 	return &priceDropServiceImpl{
 		repo:                 repo,
@@ -74,6 +82,7 @@ func NewPriceDropService(repo PriceDropRepository, notificationTopicARN string, 
 	}
 }
 
+// ProcessPriceDrop executes business logic for process price drop.
 func (s *priceDropServiceImpl) ProcessPriceDrop(ctx context.Context, event events.ProductPriceDecreasedEvent) (*PriceDropResult, error) {
 	if event.DeltaPrice <= 0 {
 		return &PriceDropResult{}, nil

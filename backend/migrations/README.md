@@ -2,7 +2,7 @@
 
 Active migrations use [golang-migrate](https://github.com/golang-migrate/migrate) naming:
 
-- `NNNNNN_name.up.sql` / `NNNNNN_name.down.sql`, currently `000001` to `000024` (`000008` is unused).
+- `NNNNNN_name.up.sql` / `NNNNNN_name.down.sql`, currently `000001` to `000025` (`000008` is unused).
 
 | Range | Area |
 |-------|------|
@@ -12,6 +12,7 @@ Active migrations use [golang-migrate](https://github.com/golang-migrate/migrate
 | 000015-000016 | `catalog` schema and inventory/reservations |
 | 000017-000019 | Postgres message queues, Supabase storage, verification code expiry |
 | 000020-000024 | Multi-tenant stores, store scoping, subscription plans, integer-column alignment, admin portal tables |
+| 000025 | Store credit accounts, immutable ledger, and order payment allocations |
 
 Apply:
 

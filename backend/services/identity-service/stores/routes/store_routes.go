@@ -1,3 +1,4 @@
+// Package routes registers HTTP endpoints for store administration and tenant features.
 package routes
 
 import (
@@ -7,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// RegisterStoreRoutes configures and mounts HTTP route handlers on the router.
 func RegisterStoreRoutes(public *gin.RouterGroup, protected *gin.RouterGroup, ctrl *controllers.StoreController) {
 	// Public store lookup by slug and plans listing
 	public.GET("/stores/by-slug/:slug", ctrl.GetStoreBySlug)
@@ -19,6 +21,7 @@ func RegisterStoreRoutes(public *gin.RouterGroup, protected *gin.RouterGroup, ct
 		stores.POST("", ctrl.CreateStore)
 		stores.GET("", ctrl.ListStores)
 		stores.GET("/:id", ctrl.GetStore)
+		stores.GET("/:id/membership/me", ctrl.GetMyMembership)
 		stores.PUT("/:id", ctrl.UpdateStore)
 		stores.DELETE("/:id", ctrl.DeleteStore)
 

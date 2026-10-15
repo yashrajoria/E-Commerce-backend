@@ -1,3 +1,4 @@
+// Package models defines database schemas for discount coupons and basket optimizer promotion rules.
 package models
 
 // BasketItem represents an individual line item in the customer's cart.

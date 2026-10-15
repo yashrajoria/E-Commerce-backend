@@ -1,3 +1,4 @@
+// Package messaging provides abstracted message queue and notification publishers for AWS SQS and SNS.
 package messaging
 
 import (

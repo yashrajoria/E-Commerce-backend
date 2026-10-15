@@ -14,6 +14,7 @@ type WaitingRoomController struct {
 	service services.WaitingRoomService
 }
 
+// NewWaitingRoomController creates and initializes a new WaitingRoomController instance.
 func NewWaitingRoomController(service services.WaitingRoomService) *WaitingRoomController {
 	return &WaitingRoomController{service: service}
 }
@@ -127,8 +128,7 @@ func (w *WaitingRoomController) Claim(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Lease successfully claimed", "product_id": req.ProductID})
 }
 
-// Release returns a lease back to the pool
-// POST /inventory/flash-sale/release
+// Release handles POST /store-credit/releases, unholding previously reserved store credit upon order cancellation.
 func (w *WaitingRoomController) Release(c *gin.Context) {
 	var req models.ReleaseLeaseRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

@@ -1,3 +1,4 @@
+// Package health provides standardized HTTP health check probes and status handlers.
 package health
 
 import (
@@ -65,6 +66,7 @@ func RedisCheck(client *redis.Client) func(context.Context) error {
 
 type simpleError string
 
+// Error returns the string representation of the error.
 func (e simpleError) Error() string { return string(e) }
 
 func errNotConfigured(name string) error {

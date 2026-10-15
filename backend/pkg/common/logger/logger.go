@@ -1,3 +1,4 @@
+// Package logger provides centralized structured logging wrappers and context loggers.
 package logger
 
 import (

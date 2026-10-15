@@ -1,3 +1,4 @@
+// Package services implements business logic for processing notification events and template rendering.
 package services
 
 import (
@@ -14,6 +15,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// NotificationService defines the interface contract for notification service.
 type NotificationService interface {
 	ProcessEvent(ctx context.Context, payload *models.EventPayload) error
 	GetLogs(ctx context.Context, filter models.NotificationFilter) ([]models.NotificationLog, int64, error)
@@ -102,6 +104,7 @@ type notificationService struct {
 	logger      *zap.Logger
 }
 
+// NewNotificationService creates and initializes a new NotificationService instance.
 func NewNotificationService(
 	repo repository.NotificationRepository,
 	emailSender sender.EmailSender,
@@ -125,6 +128,7 @@ func NewNotificationService(
 	}, nil
 }
 
+// ProcessEvent executes business logic for process event.
 func (s *notificationService) ProcessEvent(ctx context.Context, payload *models.EventPayload) (err error) {
 	if payload.EventID != "" {
 		claimed, claimErr := s.repo.ClaimEvent(ctx, payload.EventID)
@@ -141,6 +145,16 @@ func (s *notificationService) ProcessEvent(ctx context.Context, payload *models.
 				}
 			}
 		}()
+	}
+	// Store-credit events are routed and deduplicated now; email templates are
+	// intentionally deferred. Marking them delivered prevents queue retries
+	// while retaining the event in the notification audit path.
+	switch payload.EventType {
+	case models.TypeStoreCreditGranted, models.TypeStoreCreditRedeemed, models.TypeStoreCreditReleased, models.TypeStoreCreditAdjusted:
+		if payload.EventID != "" {
+			return s.repo.MarkEventDelivered(ctx, payload.EventID)
+		}
+		return nil
 	}
 	cfg, ok := eventConfigs[payload.EventType]
 	if !ok {
@@ -263,6 +277,7 @@ func (s *notificationService) sendWithRetry(
 	return lastErr
 }
 
+// GetLogs executes business logic for get logs.
 func (s *notificationService) GetLogs(ctx context.Context, filter models.NotificationFilter) ([]models.NotificationLog, int64, error) {
 	return s.repo.GetLogs(ctx, filter)
 }

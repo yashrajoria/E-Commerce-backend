@@ -32,6 +32,7 @@ type DashboardController struct {
 	logger       *zap.Logger
 }
 
+// NewDashboardController creates and initializes a new DashboardController instance.
 func NewDashboardController(orderRepo repositories.OrderRepository, logger *zap.Logger) *DashboardController {
 	return &DashboardController{
 		orderRepo:    orderRepo,
@@ -163,6 +164,7 @@ func (d *DashboardController) fetchJSON(ctx context.Context, url string, headers
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
+// GetDashboardSummary handles HTTP requests to retrieve dashboard summary.
 func (d *DashboardController) GetDashboardSummary(c *gin.Context) {
 	ctx := c.Request.Context()
 	headers := forwardHeaders(c)

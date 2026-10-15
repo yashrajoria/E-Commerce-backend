@@ -1,3 +1,4 @@
+// Package repository provides database access for discount coupons and basket optimization rules.
 package repository
 
 import (

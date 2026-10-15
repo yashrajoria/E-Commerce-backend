@@ -1,3 +1,4 @@
+// Package controllers provides HTTP endpoints for notification log inquiries and health checks.
 package controllers
 
 import (
@@ -12,11 +13,13 @@ import (
 	"go.uber.org/zap"
 )
 
+// NotificationController represents notification controller.
 type NotificationController struct {
 	notificationService services.NotificationService
 	logger              *zap.Logger
 }
 
+// NewNotificationController creates and initializes a new NotificationController instance.
 func NewNotificationController(svc services.NotificationService, logger *zap.Logger) *NotificationController {
 	return &NotificationController{notificationService: svc, logger: logger}
 }
@@ -43,6 +46,7 @@ func parsePaginationParams(ctx *gin.Context) (int, int) {
 	return page, pageSize
 }
 
+// GetNotificationLogs handles GET /notifications/logs, returning paginated delivery logs and message dispatch statuses.
 func (cc *NotificationController) GetNotificationLogs(ctx *gin.Context) {
 	// Parse optional user_id filter
 	userID := ctx.Query("user_id")

@@ -1,3 +1,4 @@
+// Package controllers provides HTTP endpoints for store management, membership invites, and settings.
 package controllers
 
 import (
@@ -13,10 +14,12 @@ import (
 	"go.uber.org/zap"
 )
 
+// StoreController represents store controller.
 type StoreController struct {
 	storeService services.StoreService
 }
 
+// NewStoreController creates and initializes a new StoreController instance.
 func NewStoreController(ss services.StoreService) *StoreController {
 	return &StoreController{storeService: ss}
 }
@@ -56,6 +59,7 @@ func getUserContext(c *gin.Context) (uuid.UUID, bool) {
 	return uid, roleStr == "admin"
 }
 
+// CreateStore handles POST /stores requests to provision a new merchant store, assigning the caller as store owner.
 func (ctrl *StoreController) CreateStore(c *gin.Context) {
 	userID, _ := getUserContext(c)
 	if userID == uuid.Nil {
@@ -83,6 +87,7 @@ func (ctrl *StoreController) CreateStore(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"store": store})
 }
 
+// ListStores handles GET /stores requests, retrieving all stores where the authenticated caller is an active member.
 func (ctrl *StoreController) ListStores(c *gin.Context) {
 	userID, _ := getUserContext(c)
 	if userID == uuid.Nil {
@@ -100,6 +105,7 @@ func (ctrl *StoreController) ListStores(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"stores": stores})
 }
 
+// GetStore handles GET /stores/:id requests, returning detailed store metadata if the caller has sufficient membership access.
 func (ctrl *StoreController) GetStore(c *gin.Context) {
 	userID, isSystemAdmin := getUserContext(c)
 	idStr := c.Param("id")
@@ -122,6 +128,7 @@ func (ctrl *StoreController) GetStore(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"store": store})
 }
 
+// GetStoreBySlug handles GET /stores/slug/:slug requests for public storefront lookup by unique store slug.
 func (ctrl *StoreController) GetStoreBySlug(c *gin.Context) {
 	slug := c.Param("slug")
 	if strings.TrimSpace(slug) == "" {
@@ -147,16 +154,17 @@ func (ctrl *StoreController) GetStoreBySlug(c *gin.Context) {
 			"timezone":    store.Timezone,
 			"is_active":   store.IsActive,
 			"settings": gin.H{
-				"contact_email":     store.Settings.ContactEmail,
-				"contact_phone":     store.Settings.ContactPhone,
-				"address":           store.Settings.Address,
-				"maintenance_mode":  store.Settings.MaintenanceMode,
-				"shipping_config":   store.Settings.ShippingConfig,
+				"contact_email":    store.Settings.ContactEmail,
+				"contact_phone":    store.Settings.ContactPhone,
+				"address":          store.Settings.Address,
+				"maintenance_mode": store.Settings.MaintenanceMode,
+				"shipping_config":  store.Settings.ShippingConfig,
 			},
 		},
 	})
 }
 
+// UpdateStore handles PUT /stores/:id requests to update store metadata including name, description, logo, and timezone.
 func (ctrl *StoreController) UpdateStore(c *gin.Context) {
 	userID, isSystemAdmin := getUserContext(c)
 	idStr := c.Param("id")
@@ -185,6 +193,7 @@ func (ctrl *StoreController) UpdateStore(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"store": updated})
 }
 
+// DeleteStore handles DELETE /stores/:id requests, soft-deleting a store if the caller is the owner or a platform admin.
 func (ctrl *StoreController) DeleteStore(c *gin.Context) {
 	userID, isSystemAdmin := getUserContext(c)
 	idStr := c.Param("id")
@@ -206,6 +215,7 @@ func (ctrl *StoreController) DeleteStore(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "store deleted successfully"})
 }
 
+// ListMembers handles GET /stores/:id/members requests, listing team members and their roles within the store.
 func (ctrl *StoreController) ListMembers(c *gin.Context) {
 	userID, isSystemAdmin := getUserContext(c)
 	idStr := c.Param("id")
@@ -228,6 +238,7 @@ func (ctrl *StoreController) ListMembers(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"members": members})
 }
 
+// InviteMember handles POST /stores/:id/members requests to invite a user to the store team with an assigned role.
 func (ctrl *StoreController) InviteMember(c *gin.Context) {
 	userID, isSystemAdmin := getUserContext(c)
 	idStr := c.Param("id")
@@ -259,6 +270,7 @@ func (ctrl *StoreController) InviteMember(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"membership": membership})
 }
 
+// UpdateMemberRole handles PUT /stores/:id/members/:userId requests to modify a member's role (owner, admin, manager, viewer).
 func (ctrl *StoreController) UpdateMemberRole(c *gin.Context) {
 	userID, isSystemAdmin := getUserContext(c)
 	storeID, err := uuid.Parse(c.Param("id"))
@@ -292,6 +304,7 @@ func (ctrl *StoreController) UpdateMemberRole(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "member role updated"})
 }
 
+// RemoveMember handles DELETE /stores/:id/members/:userId requests to revoke a user's membership from the store.
 func (ctrl *StoreController) RemoveMember(c *gin.Context) {
 	userID, isSystemAdmin := getUserContext(c)
 	storeID, err := uuid.Parse(c.Param("id"))
@@ -317,6 +330,7 @@ func (ctrl *StoreController) RemoveMember(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "member removed"})
 }
 
+// GetSettings handles GET /stores/:id/settings requests, retrieving operational, shipping, and payment configuration.
 func (ctrl *StoreController) GetSettings(c *gin.Context) {
 	userID, isSystemAdmin := getUserContext(c)
 	storeID, err := uuid.Parse(c.Param("id"))
@@ -338,6 +352,7 @@ func (ctrl *StoreController) GetSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"settings": settings})
 }
 
+// UpdateSettings handles PUT /stores/:id/settings requests to update operational settings, maintenance mode, and carrier configs.
 func (ctrl *StoreController) UpdateSettings(c *gin.Context) {
 	userID, isSystemAdmin := getUserContext(c)
 	storeID, err := uuid.Parse(c.Param("id"))
@@ -366,6 +381,7 @@ func (ctrl *StoreController) UpdateSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"settings": updated})
 }
 
+// GetSubscription handles GET /stores/:id/subscription requests, retrieving active subscription plan and billing period details.
 func (ctrl *StoreController) GetSubscription(c *gin.Context) {
 	userID, isSystemAdmin := getUserContext(c)
 	storeID, err := uuid.Parse(c.Param("id"))
@@ -387,6 +403,7 @@ func (ctrl *StoreController) GetSubscription(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"subscription": sub})
 }
 
+// ListPlans handles GET /stores/plans requests, returning available SaaS subscription tiers and feature entitlements.
 func (ctrl *StoreController) ListPlans(c *gin.Context) {
 	plans, err := ctrl.storeService.ListPlans(c.Request.Context())
 	if err != nil {
@@ -394,4 +411,20 @@ func (ctrl *StoreController) ListPlans(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"plans": plans})
+}
+
+// GetMyMembership handles GET /stores/:id/my-membership requests, returning the authenticated user's role and permissions.
+func (ctrl *StoreController) GetMyMembership(c *gin.Context) {
+	userID, _ := getUserContext(c)
+	storeID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid store id"})
+		return
+	}
+	role, err := ctrl.storeService.MembershipRole(c.Request.Context(), storeID, userID)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "not a store member"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"store_id": storeID, "user_id": userID, "role": role})
 }

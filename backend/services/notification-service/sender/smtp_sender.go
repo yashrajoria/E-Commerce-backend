@@ -12,6 +12,7 @@ import (
 	"time"
 )
 
+// SMTPSender represents smtp sender.
 type SMTPSender struct {
 	host     string
 	port     string
@@ -22,6 +23,7 @@ type SMTPSender struct {
 	client *smtp.Client
 }
 
+// NewSMTPSender creates and initializes a new SMTPSender instance.
 func NewSMTPSender() (*SMTPSender, error) {
 	host := os.Getenv("SMTP_HOST")
 	port := os.Getenv("SMTP_PORT")
@@ -43,6 +45,7 @@ func NewSMTPSender() (*SMTPSender, error) {
 	return &SMTPSender{host: host, port: port, username: username, password: password}, nil
 }
 
+// SendEmail dispatches message delivery via the provider.
 func (s *SMTPSender) SendEmail(ctx context.Context, to, subject, body string) (SendResult, error) {
 	// CR/LF in a header value would let event data inject extra headers or recipients.
 	if strings.ContainsAny(to, "\r\n") || strings.ContainsAny(subject, "\r\n") {

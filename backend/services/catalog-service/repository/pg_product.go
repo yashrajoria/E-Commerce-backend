@@ -17,6 +17,7 @@ type PGProductRepo struct{ db *gorm.DB }
 
 var _ ProductRepo = (*PGProductRepo)(nil)
 
+// NewPGProductRepo creates and initializes a new PGProductRepo instance.
 func NewPGProductRepo(db *gorm.DB) *PGProductRepo { return &PGProductRepo{db: db} }
 
 type pgProduct struct {
@@ -145,6 +146,7 @@ func (r *PGProductRepo) query(ctx context.Context, where, orderBy, tail string, 
 	return out, nil
 }
 
+// FindByID performs find by id on r.
 func (r *PGProductRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.Product, error) {
 	ps, err := r.query(ctx, "p.id = ?", "p.created_at DESC, p.id", "", id)
 	if err != nil {
@@ -187,6 +189,7 @@ func (r *PGProductRepo) Find(ctx context.Context, filter map[string]interface{},
 	return r.query(ctx, where, orderBy, tail, args...)
 }
 
+// Count performs count on r.
 func (r *PGProductRepo) Count(ctx context.Context, filter map[string]interface{}) (int64, error) {
 	where, args := productWhere(filter)
 	var n int64
@@ -196,6 +199,7 @@ func (r *PGProductRepo) Count(ctx context.Context, filter map[string]interface{}
 	return n, err
 }
 
+// CountByCategoryIDs performs count by category i ds on r.
 func (r *PGProductRepo) CountByCategoryIDs(ctx context.Context, categoryIDs []uuid.UUID) (map[uuid.UUID]int, error) {
 	counts := make(map[uuid.UUID]int, len(categoryIDs))
 	if len(categoryIDs) == 0 {
@@ -222,6 +226,7 @@ func (r *PGProductRepo) CountByCategoryIDs(ctx context.Context, categoryIDs []uu
 	return counts, nil
 }
 
+// Create performs create on r.
 func (r *PGProductRepo) Create(ctx context.Context, p *models.Product) error {
 	return r.CreateMany(ctx, []models.Product{*p})
 }
@@ -352,6 +357,7 @@ func (r *PGProductRepo) Update(ctx context.Context, id uuid.UUID, updates map[st
 	})
 }
 
+// Delete performs delete on r.
 func (r *PGProductRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		res := tx.Exec(`UPDATE catalog.products SET deleted_at = now(), updated_at = now() WHERE id = ? AND deleted_at IS NULL`, id)
@@ -365,6 +371,7 @@ func (r *PGProductRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	})
 }
 
+// DeleteMany performs delete many on r.
 func (r *PGProductRepo) DeleteMany(ctx context.Context, ids []uuid.UUID) error {
 	if len(ids) == 0 {
 		return nil
@@ -378,6 +385,7 @@ func (r *PGProductRepo) DeleteMany(ctx context.Context, ids []uuid.UUID) error {
 	})
 }
 
+// FindBySKUs performs find by sk us on r.
 func (r *PGProductRepo) FindBySKUs(ctx context.Context, skus []string) ([]models.Product, error) {
 	seen := make(map[string]struct{}, len(skus))
 	uniq := make([]string, 0, len(skus))

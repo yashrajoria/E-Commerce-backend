@@ -6,6 +6,7 @@ import (
 	"strings"
 )
 
+// Config holds configuration options for .
 type Config struct {
 	Port                string
 	PostgresUser        string
@@ -29,6 +30,7 @@ type Config struct {
 	StripeWebhookSecret     string
 }
 
+// LoadConfig performs load config.
 func LoadConfig() (*Config, error) {
 	cfg := &Config{
 		Port:                    getEnv("PORT", "8083"),

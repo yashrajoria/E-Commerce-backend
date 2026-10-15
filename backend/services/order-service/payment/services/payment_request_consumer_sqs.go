@@ -21,6 +21,7 @@ import (
 // so ':' must be permitted alongside the SQS-message-safe charset.
 var validIdempotencyKey = regexp.MustCompile(`^[a-zA-Z0-9_:\-]{1,128}$`)
 
+// PaymentRequestConsumer represents payment request consumer.
 type PaymentRequestConsumer struct {
 	sqsConsumer          messaging.Consumer
 	snsPublisher         messaging.Publisher
@@ -32,12 +33,14 @@ type PaymentRequestConsumer struct {
 	repo                 repository.PaymentRepository
 }
 
+// StripeCheckoutCreator defines the interface contract for stripe checkout creator.
 type StripeCheckoutCreator interface {
 	CreateCheckoutSession(amount int64, currency, orderID, userID string) (*stripe.CheckoutSession, error)
 	CreateCheckoutSessionWithIdempotency(amount int64, currency, orderID, userID, idempotencyKey string) (*stripe.CheckoutSession, error)
 	CreateCheckoutSessionWithDetails(amount int64, currency, orderID, userID, idempotencyKey, customerEmail string, shipping *models.ShippingAddress) (*stripe.CheckoutSession, error)
 }
 
+// NewPaymentRequestConsumer creates and initializes a new PaymentRequestConsumer instance.
 func NewPaymentRequestConsumer(
 	sqsConsumer messaging.Consumer,
 	snsPublisher messaging.Publisher,
@@ -60,6 +63,7 @@ func NewPaymentRequestConsumer(
 	}
 }
 
+// Start begins consumer loop execution.
 func (c *PaymentRequestConsumer) Start(ctx context.Context) {
 	c.logger.Info("Starting PaymentRequestConsumer (SQS)")
 
@@ -107,13 +111,17 @@ func (c *PaymentRequestConsumer) handleMessage(ctx context.Context, body string)
 	if currency == "" {
 		currency = c.defaultCurrency
 	}
+	payableAmount := int64(req.Amount) - req.StoreCreditAmount
+	if payableAmount < 0 {
+		return fmt.Errorf("store credit exceeds checkout amount")
+	}
 
 	// Create payment record
 	payment := models.Payment{
 		Payment_ID:    uuid.New(),
 		OrderID:       orderID,
 		UserID:        userID,
-		Amount:        req.Amount,
+		Amount:        int(payableAmount),
 		Currency:      currency,
 		Status:        "pending",
 		CreatedAt:     time.Now().UTC(),
@@ -145,13 +153,28 @@ func (c *PaymentRequestConsumer) handleMessage(ctx context.Context, body string)
 	}
 
 	c.logger.Info("Payment record created", zap.String("payment_id", payment.Payment_ID.String()))
+	if payableAmount == 0 {
+		now := time.Now().UTC()
+		if err := c.repo.Update(ctx, orderID, map[string]interface{}{"status": "succeeded", "succeeded_at": now}); err != nil {
+			return err
+		}
+		eventBytes, _ := json.Marshal(models.PaymentEvent{
+			Type: "payment_succeeded", OrderID: orderID.String(), UserID: userID.String(),
+			PaymentID: payment.Payment_ID.String(), Amount: 0, Currency: currency,
+			Timestamp: now, CorrelationID: req.CorrelationID,
+		})
+		if err := c.snsPublisher.Publish(ctx, c.paymentTopicArn, eventBytes); err != nil {
+			return err
+		}
+		return nil
+	}
 
 	// Create Stripe Checkout Session (provides a hosted URL for the user to complete payment)
 	// Amount is already in the smallest currency unit for the configured store currency.
 	// Do NOT multiply by 100 here; prices are stored and passed in cents throughout the system.
 	// Idempotency key is forwarded so Stripe-side retries are safe.
 	sess, err := c.stripeSvc.CreateCheckoutSessionWithDetails(
-		int64(req.Amount),
+		payableAmount,
 		currency,
 		req.OrderID,
 		req.UserID,
@@ -169,14 +192,16 @@ func (c *PaymentRequestConsumer) handleMessage(ctx context.Context, body string)
 
 		// Publish failure event
 		eventMsg := models.PaymentEvent{
-			Type:          "payment_failed",
-			OrderID:       orderID.String(),
-			UserID:        userID.String(),
-			PaymentID:     payment.Payment_ID.String(),
-			Amount:        payment.Amount,
-			Currency:      payment.Currency,
-			Timestamp:     time.Now().UTC(),
-			CorrelationID: req.CorrelationID,
+			Type:              "payment_failed",
+			OrderID:           orderID.String(),
+			UserID:            userID.String(),
+			PaymentID:         payment.Payment_ID.String(),
+			Amount:            payment.Amount,
+			Currency:          payment.Currency,
+			Timestamp:         time.Now().UTC(),
+			CorrelationID:     req.CorrelationID,
+			StoreID:           req.StoreID,
+			StoreCreditAmount: req.StoreCreditAmount,
 		}
 		eventBytes, _ := json.Marshal(eventMsg)
 		c.snsPublisher.Publish(ctx, c.paymentTopicArn, eventBytes)

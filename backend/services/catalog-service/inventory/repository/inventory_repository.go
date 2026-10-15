@@ -1,3 +1,4 @@
+// Package repository provides database access for product inventory and reservation records.
 package repository
 
 import (

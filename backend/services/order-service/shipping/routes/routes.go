@@ -1,3 +1,4 @@
+// Package routes mounts HTTP endpoints for shipping calculations and tracking updates.
 package routes
 
 import (

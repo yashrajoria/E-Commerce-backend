@@ -1,9 +1,10 @@
+// Package repositories provides database access layers for orders, payment allocations, and outbox events.
 package repositories
 
 import (
 	"context"
-	"fmt"
 	"errors"
+	"fmt"
 	"order-service/models"
 	"time"
 
@@ -129,6 +130,7 @@ func (r *GormOrderRepository) FindAll(ctx context.Context, page, limit int) ([]m
 	return orders, total, nil
 }
 
+// FindByID queries the database for  by id.
 func (r *GormOrderRepository) FindByID(ctx context.Context, orderID uuid.UUID) (*models.Order, error) {
 	var order models.Order
 	if err := r.db.WithContext(ctx).Preload("OrderItems").Where("id = ?", orderID).First(&order).Error; err != nil {
@@ -156,6 +158,7 @@ func (r *GormOrderRepository) Create(ctx context.Context, order *models.Order) e
 	return r.db.WithContext(ctx).Create(order).Error
 }
 
+// CreateWithOutbox persists a new ox record in the database.
 func (r *GormOrderRepository) CreateWithOutbox(ctx context.Context, order *models.Order, events []models.OutboxEvent) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(order).Error; err != nil {
@@ -175,6 +178,7 @@ func (r *GormOrderRepository) Update(ctx context.Context, order *models.Order) e
 	return r.db.WithContext(ctx).Save(order).Error
 }
 
+// UpdateOrderStatus updates order status in the database.
 func (r *GormOrderRepository) UpdateOrderStatus(ctx context.Context, orderID uuid.UUID, fromStatus, toStatus string, extra map[string]interface{}) error {
 	updates := map[string]interface{}{"status": toStatus}
 	for k, v := range extra {
@@ -193,6 +197,7 @@ func (r *GormOrderRepository) UpdateOrderStatus(ctx context.Context, orderID uui
 	return nil
 }
 
+// FindByIdempotencyKey queries the database for  by idempotency key.
 func (r *GormOrderRepository) FindByIdempotencyKey(ctx context.Context, key string) (*models.Order, error) {
 	var order models.Order
 	err := r.db.WithContext(ctx).Where("idempotency_key = ?", key).First(&order).Error
@@ -206,6 +211,7 @@ func (r *GormOrderRepository) FindByIdempotencyKey(ctx context.Context, key stri
 // (pending_payment, payment_failed) and cancelled/refunded orders must not.
 var RevenueStatuses = []string{"paid", "processing", "completed"}
 
+// GetRevenueAnalytics queries the database for revenue analytics.
 func (r *GormOrderRepository) GetRevenueAnalytics(ctx context.Context) (map[string]interface{}, error) {
 	var totalRevenue int64
 	var revenueToday, revenueYesterday int64
@@ -239,6 +245,7 @@ func (r *GormOrderRepository) GetRevenueAnalytics(ctx context.Context) (map[stri
 	}, nil
 }
 
+// RevenueSeries performs revenue series on r.
 func (r *GormOrderRepository) RevenueSeries(ctx context.Context, unit string, since time.Time) ([]RevenuePoint, error) {
 	if unit != "day" && unit != "month" {
 		return nil, fmt.Errorf("unsupported revenue bucket %q", unit)

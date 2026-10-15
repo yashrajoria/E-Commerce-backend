@@ -11,14 +11,15 @@ import (
 	"catalog-service/services"
 
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
 // ErrNotFound is returned when a resource is not found
 var ErrNotFound = errors.New("not found")
 
+// ProductController represents product controller.
 type ProductController struct {
 	productService ProductServiceAPI
 	redis          *redis.Client
@@ -27,6 +28,7 @@ type ProductController struct {
 	validator      *RequestValidator
 }
 
+// NewProductController creates and initializes a new ProductController instance.
 func NewProductController(ps ProductServiceAPI, redis *redis.Client) *ProductController {
 	return &ProductController{
 		productService: ps,
@@ -73,7 +75,7 @@ func (ctrl *ProductController) WithContextTimeout(timeout time.Duration) *Produc
 	return ctrl
 }
 
-// GetProductByID retrieves a single product by ID
+// GetProductByID handles GET /products/:id, retrieving detailed product specs, images, and live inventory.
 func (ctrl *ProductController) GetProductByID(c *gin.Context) {
 	id := c.Param("id")
 	productID, err := uuid.Parse(id)
@@ -111,7 +113,7 @@ func (ctrl *ProductController) GetProductByID(c *gin.Context) {
 	c.JSON(http.StatusOK, product)
 }
 
-// GetProducts retrieves a paginated list of products with filters
+// GetProducts handles GET /products, supporting pagination, filtering, searching, and sorting.
 func (ctrl *ProductController) GetProducts(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), ctrl.config.ContextTimeout)
 	defer cancel()
@@ -156,8 +158,7 @@ func (ctrl *ProductController) GetProducts(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-// CreateProduct creates a new product from an application/json payload.
-// Image upload is handled separately via presigned upload endpoints.
+// CreateProduct handles POST /products, adding new merchandise items to the catalog.
 func (ctrl *ProductController) CreateProduct(c *gin.Context) {
 	// Parse and validate request
 	req, err := ctrl.validator.ParseCreateProductJSONRequest(c)
@@ -186,7 +187,7 @@ func (ctrl *ProductController) CreateProduct(c *gin.Context) {
 	c.JSON(http.StatusCreated, product)
 }
 
-// UpdateProduct updates an existing product
+// UpdateProduct handles PUT /products/:id, modifying product details, pricing, and attributes.
 func (ctrl *ProductController) UpdateProduct(c *gin.Context) {
 	id := c.Param("id")
 	productID, err := uuid.Parse(id)
@@ -221,7 +222,7 @@ func (ctrl *ProductController) UpdateProduct(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Product updated successfully"})
 }
 
-// DeleteProduct deletes a product
+// DeleteProduct handles DELETE /products/:id, soft-deleting products from active catalog listings.
 func (ctrl *ProductController) DeleteProduct(c *gin.Context) {
 	id := c.Param("id")
 	productID, err := uuid.Parse(id)

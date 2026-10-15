@@ -1,3 +1,4 @@
+// Package services implements user authentication, credential validation, OTP emails, and token rotation.
 package services
 
 import (
@@ -19,6 +20,7 @@ import (
 	"gorm.io/gorm"
 )
 
+// IUserRepository defines the interface contract for i user repository.
 type IUserRepository interface {
 	FindByEmail(ctx context.Context, email string) (*models.User, error)
 	FindByID(ctx context.Context, id uuid.UUID) (*models.User, error)
@@ -32,6 +34,7 @@ type IUserRepository interface {
 	CountByRole(ctx context.Context, role string) (int64, error)
 }
 
+// ITokenService defines the interface contract for i token service.
 type ITokenService interface {
 	GenerateTokenPair(userID, email, role string) (*TokenPair, string, error)
 	ValidateToken(tokenStr, expectedType string) (jwt.MapClaims, error)
@@ -51,6 +54,7 @@ const dummyPasswordHash = "$2a$10$CwTycUXWue0Thq9StjUM0uJ8vFN/eD3ubjLBQZTV5D0Rwa
 // verificationCodeTTL is how long an email verification code remains valid.
 const verificationCodeTTL = 15 * time.Minute
 
+// AuthService represents auth service.
 type AuthService struct {
 	userRepo       IUserRepository
 	tokenService   ITokenService
@@ -58,6 +62,7 @@ type AuthService struct {
 	db             *gorm.DB
 }
 
+// NewAuthService creates and initializes a new AuthService instance.
 func NewAuthService(
 	ur IUserRepository,
 	ts ITokenService,
@@ -72,6 +77,7 @@ func NewAuthService(
 	}
 }
 
+// Login executes business logic for login.
 func (s *AuthService) Login(ctx context.Context, email, password string) (*TokenPair, error) {
 	user, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil {
@@ -125,6 +131,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*Token
 	return tokenPair, nil
 }
 
+// Register configures and mounts HTTP route handlers on the router.
 func (s *AuthService) Register(ctx context.Context, name, email, password, role string) error {
 	return s.ProvisionUser(ctx, ProvisionUserInput{
 		Name:          name,
@@ -218,6 +225,7 @@ func (s *AuthService) provisionWithRepo(ctx context.Context, repo IUserRepositor
 	return nil
 }
 
+// GuestSessionInput represents guest session input.
 type GuestSessionInput struct {
 	Email string
 	Name  string
@@ -368,7 +376,6 @@ func (s *AuthService) recordFailedLogin(ctx context.Context, user *models.User) 
 		zap.L().Warn("failed to persist failed login attempt count", zap.Error(err))
 	}
 }
-
 
 // GetUserByID returns the user for status / RBAC checks.
 func (s *AuthService) GetUserByID(ctx context.Context, userID string) (*models.User, error) {

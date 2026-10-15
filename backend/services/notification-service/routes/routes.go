@@ -1,3 +1,4 @@
+// Package routes registers HTTP endpoints for notification management and logs.
 package routes
 
 import (
@@ -8,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// RegisterRoutes configures and mounts HTTP route handlers on the router.
 func RegisterRoutes(router *gin.Engine, controller *controllers.NotificationController) {
 	// Public
 	live := func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "notification-service"}) }

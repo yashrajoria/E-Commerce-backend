@@ -17,9 +17,9 @@ import (
 )
 
 var (
-	secretKey       []byte
-	authBaseURL     string
-	refreshHTTP     = &http.Client{
+	secretKey   []byte
+	authBaseURL string
+	refreshHTTP = &http.Client{
 		Timeout: 5 * time.Second,
 		Transport: &http.Transport{
 			MaxIdleConns:        100,
@@ -30,6 +30,7 @@ var (
 	refreshInflight singleflight.Group
 )
 
+// InitJWTConfig initializes the jwt config subsystem.
 func InitJWTConfig() error {
 	secret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
 	if secret == "" {
@@ -169,7 +170,6 @@ func trySilentRefresh(c *gin.Context) (jwt.MapClaims, bool, error) {
 	if err != nil || strings.TrimSpace(refreshToken) == "" {
 		return nil, false, nil
 	}
-
 
 	correlationID := c.GetString("CorrelationID")
 	path := c.Request.URL.Path

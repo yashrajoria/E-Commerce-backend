@@ -15,6 +15,7 @@ var ErrInvalidClaimLimit = errors.New("outbox claim limit must be greater than z
 var ErrInvalidLease = errors.New("outbox lease owner and duration are required")
 var ErrOutboxLeaseLost = errors.New("outbox lease was lost")
 
+// OutboxRepository defines the interface contract for outbox repository.
 type OutboxRepository interface {
 	Create(ctx context.Context, tx *gorm.DB, event *models.OutboxEvent) error
 	Claim(ctx context.Context, limit int) ([]models.OutboxEvent, error)
@@ -25,14 +26,17 @@ type OutboxRepository interface {
 	MarkFailedByOwner(ctx context.Context, eventID uuid.UUID, owner, eventErr string, availableAt time.Time) error
 }
 
+// GormOutboxRepository represents gorm outbox repository.
 type GormOutboxRepository struct {
 	db *gorm.DB
 }
 
+// NewGormOutboxRepository creates and initializes a new GormOutboxRepository instance.
 func NewGormOutboxRepository(db *gorm.DB) OutboxRepository {
 	return &GormOutboxRepository{db: db}
 }
 
+// Create persists a new  record in the database.
 func (r *GormOutboxRepository) Create(ctx context.Context, tx *gorm.DB, event *models.OutboxEvent) error {
 	if tx == nil {
 		tx = r.db
@@ -40,10 +44,12 @@ func (r *GormOutboxRepository) Create(ctx context.Context, tx *gorm.DB, event *m
 	return tx.WithContext(ctx).Create(event).Error
 }
 
+// Claim attempts to acquire a processing lease for the event.
 func (r *GormOutboxRepository) Claim(ctx context.Context, limit int) ([]models.OutboxEvent, error) {
 	return r.ClaimWithLease(ctx, limit, uuid.NewString(), time.Minute)
 }
 
+// ClaimWithLease attempts to acquire a processing lease for the event.
 func (r *GormOutboxRepository) ClaimWithLease(ctx context.Context, limit int, owner string, leaseDuration time.Duration) ([]models.OutboxEvent, error) {
 	if limit <= 0 {
 		return nil, ErrInvalidClaimLimit
@@ -95,6 +101,7 @@ func (r *GormOutboxRepository) ClaimWithLease(ctx context.Context, limit int, ow
 	return events, err
 }
 
+// MarkPublished updates the status of the record in the database.
 func (r *GormOutboxRepository) MarkPublished(ctx context.Context, eventID uuid.UUID) error {
 	now := time.Now().UTC()
 	return r.db.WithContext(ctx).Model(&models.OutboxEvent{}).
@@ -106,6 +113,7 @@ func (r *GormOutboxRepository) MarkPublished(ctx context.Context, eventID uuid.U
 		}).Error
 }
 
+// MarkPublishedByOwner updates the status of the record in the database.
 func (r *GormOutboxRepository) MarkPublishedByOwner(ctx context.Context, eventID uuid.UUID, owner string) error {
 	now := time.Now().UTC()
 	result := r.db.WithContext(ctx).Model(&models.OutboxEvent{}).
@@ -126,6 +134,7 @@ func (r *GormOutboxRepository) MarkPublishedByOwner(ctx context.Context, eventID
 	return nil
 }
 
+// MarkFailed updates the status of the record in the database.
 func (r *GormOutboxRepository) MarkFailed(ctx context.Context, eventID uuid.UUID, eventErr string, availableAt time.Time) error {
 	now := time.Now().UTC()
 	return r.db.WithContext(ctx).Model(&models.OutboxEvent{}).
@@ -140,6 +149,7 @@ func (r *GormOutboxRepository) MarkFailed(ctx context.Context, eventID uuid.UUID
 		}).Error
 }
 
+// MarkFailedByOwner updates the status of the record in the database.
 func (r *GormOutboxRepository) MarkFailedByOwner(ctx context.Context, eventID uuid.UUID, owner, eventErr string, availableAt time.Time) error {
 	now := time.Now().UTC()
 	result := r.db.WithContext(ctx).Model(&models.OutboxEvent{}).

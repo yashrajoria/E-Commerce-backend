@@ -12,10 +12,12 @@ import (
 	"go.uber.org/zap"
 )
 
+// OutboxSQSPublisher defines the interface contract for outbox sqs publisher.
 type OutboxSQSPublisher interface {
 	Publish(ctx context.Context, destination string, message []byte) error
 }
 
+// OutboxPublisherConfig holds configuration options for outbox publisher.
 type OutboxPublisherConfig struct {
 	BatchSize     int
 	LeaseDuration time.Duration
@@ -24,6 +26,7 @@ type OutboxPublisherConfig struct {
 	RetryMax      time.Duration
 }
 
+// OutboxPublisher represents outbox publisher.
 type OutboxPublisher struct {
 	repository repositories.OutboxRepository
 	sqs        OutboxSQSPublisher
@@ -32,6 +35,7 @@ type OutboxPublisher struct {
 	config     OutboxPublisherConfig
 }
 
+// NewOutboxPublisher creates and initializes a new OutboxPublisher instance.
 func NewOutboxPublisher(repository repositories.OutboxRepository, sqs OutboxSQSPublisher, sns messaging.Publisher, owner string) *OutboxPublisher {
 	return NewOutboxPublisherWithConfig(repository, sqs, sns, owner, OutboxPublisherConfig{
 		BatchSize:     10,
@@ -42,6 +46,7 @@ func NewOutboxPublisher(repository repositories.OutboxRepository, sqs OutboxSQSP
 	})
 }
 
+// NewOutboxPublisherWithConfig creates and initializes a new OutboxPublisherWithConfig instance.
 func NewOutboxPublisherWithConfig(repository repositories.OutboxRepository, sqs OutboxSQSPublisher, sns messaging.Publisher, owner string, config OutboxPublisherConfig) *OutboxPublisher {
 	if config.BatchSize <= 0 {
 		config.BatchSize = 10
@@ -84,6 +89,7 @@ func (p *OutboxPublisher) Run(ctx context.Context) {
 	}
 }
 
+// PublishOnce performs publish once on p.
 func (p *OutboxPublisher) PublishOnce(ctx context.Context) (int, error) {
 	events, err := p.repository.ClaimWithLease(ctx, p.config.BatchSize, p.owner, p.config.LeaseDuration)
 	if err != nil {

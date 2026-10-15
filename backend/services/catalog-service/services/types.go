@@ -21,6 +21,7 @@ type ListProductsParams struct {
 	StoreID    *uuid.UUID
 }
 
+// ListCategoriesParams represents list categories params.
 type ListCategoriesParams struct {
 	Page    int
 	PerPage int
@@ -29,11 +30,13 @@ type ListCategoriesParams struct {
 	Sort    string
 }
 
+// CategoryPage represents category page.
 type CategoryPage struct {
 	Categories []*models.Category `json:"categories"`
 	Meta       CategoryPageMeta   `json:"meta"`
 }
 
+// CategoryPageMeta represents category page meta.
 type CategoryPageMeta struct {
 	Page       int  `json:"page"`
 	PerPage    int  `json:"perPage"`

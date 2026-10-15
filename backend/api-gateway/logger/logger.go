@@ -1,3 +1,4 @@
+// Package logger provides structured Uber Zap logging for the API Gateway.
 package logger
 
 import (
@@ -8,6 +9,7 @@ import (
 
 var Log *zap.Logger
 
+// InitLogger initializes the logger subsystem.
 func InitLogger() error {
 	if Log != nil {
 		return nil
@@ -33,6 +35,7 @@ func InitLogger() error {
 	return nil
 }
 
+// Sync flushes any buffered log entries.
 func Sync() {
 	if Log != nil {
 		_ = Log.Sync()

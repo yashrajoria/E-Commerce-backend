@@ -1,3 +1,4 @@
+// Package services implements business logic for multi-tenant stores, memberships, and plans.
 package services
 
 import (
@@ -20,6 +21,7 @@ var (
 	ErrStoreLimitReached = errors.New("store limit reached for your current plan")
 )
 
+// CreateStoreRequest defines the request payload for create store operations.
 type CreateStoreRequest struct {
 	Name        string  `json:"name" binding:"required"`
 	Slug        string  `json:"slug"`
@@ -29,6 +31,7 @@ type CreateStoreRequest struct {
 	Timezone    string  `json:"timezone"`
 }
 
+// UpdateStoreRequest defines the request payload for update store operations.
 type UpdateStoreRequest struct {
 	Name        string  `json:"name"`
 	Slug        string  `json:"slug"`
@@ -39,6 +42,7 @@ type UpdateStoreRequest struct {
 	IsActive    *bool   `json:"is_active"`
 }
 
+// StoreService defines the interface contract for store service.
 type StoreService interface {
 	CreateStore(ctx context.Context, userID uuid.UUID, req CreateStoreRequest) (*models.Store, error)
 	GetStore(ctx context.Context, storeID, userID uuid.UUID, isSystemAdmin bool) (*models.Store, error)
@@ -48,6 +52,7 @@ type StoreService interface {
 	DeleteStore(ctx context.Context, storeID, userID uuid.UUID, isSystemAdmin bool) error
 
 	ListMembers(ctx context.Context, storeID, userID uuid.UUID, isSystemAdmin bool) ([]models.StoreMembership, error)
+	MembershipRole(ctx context.Context, storeID, userID uuid.UUID) (models.StoreRole, error)
 	InviteMember(ctx context.Context, storeID, currentUserID uuid.UUID, isSystemAdmin bool, email string, role models.StoreRole) (*models.StoreMembership, error)
 	UpdateMemberRole(ctx context.Context, storeID, currentUserID uuid.UUID, isSystemAdmin bool, targetUserID uuid.UUID, role models.StoreRole) error
 	RemoveMember(ctx context.Context, storeID, currentUserID uuid.UUID, isSystemAdmin bool, targetUserID uuid.UUID) error
@@ -59,11 +64,24 @@ type StoreService interface {
 	ListPlans(ctx context.Context) ([]models.Plan, error)
 }
 
+// MembershipRole executes business logic for membership role.
+func (s *storeService) MembershipRole(ctx context.Context, storeID, userID uuid.UUID) (models.StoreRole, error) {
+	m, err := s.storeRepo.GetMembership(ctx, storeID, userID)
+	if err != nil {
+		return "", err
+	}
+	if m == nil || !m.Accepted {
+		return "", ErrForbidden
+	}
+	return m.Role, nil
+}
+
 type storeService struct {
 	storeRepo repository.StoreRepository
 	userRepo  *repository.UserRepository
 }
 
+// NewStoreService creates and initializes a new StoreService instance.
 func NewStoreService(sr repository.StoreRepository, ur *repository.UserRepository) StoreService {
 	return &storeService{storeRepo: sr, userRepo: ur}
 }
@@ -92,6 +110,7 @@ func (s *storeService) checkPermission(ctx context.Context, storeID, userID uuid
 	return false, ErrForbidden
 }
 
+// CreateStore executes business logic for create store.
 func (s *storeService) CreateStore(ctx context.Context, userID uuid.UUID, req CreateStoreRequest) (*models.Store, error) {
 	slug := sanitizeSlug(req.Slug)
 	if slug == "" {
@@ -123,6 +142,7 @@ func (s *storeService) CreateStore(ctx context.Context, userID uuid.UUID, req Cr
 	return s.storeRepo.CreateStore(ctx, store, userID)
 }
 
+// GetStore executes business logic for get store.
 func (s *storeService) GetStore(ctx context.Context, storeID, userID uuid.UUID, isSystemAdmin bool) (*models.Store, error) {
 	if !isSystemAdmin {
 		if _, err := s.checkPermission(ctx, storeID, userID, models.StoreRoleOwner, models.StoreRoleAdmin, models.StoreRoleManager, models.StoreRoleViewer); err != nil {
@@ -132,15 +152,18 @@ func (s *storeService) GetStore(ctx context.Context, storeID, userID uuid.UUID, 
 	return s.storeRepo.FindByID(ctx, storeID)
 }
 
+// GetStoreBySlug executes business logic for get store by slug.
 func (s *storeService) GetStoreBySlug(ctx context.Context, slug string) (*models.Store, error) {
 	cleanSlug := strings.ToLower(strings.TrimSpace(slug))
 	return s.storeRepo.FindBySlug(ctx, cleanSlug)
 }
 
+// ListUserStores executes business logic for list user stores.
 func (s *storeService) ListUserStores(ctx context.Context, userID uuid.UUID) ([]*models.Store, error) {
 	return s.storeRepo.ListUserStores(ctx, userID)
 }
 
+// UpdateStore executes business logic for update store.
 func (s *storeService) UpdateStore(ctx context.Context, storeID, userID uuid.UUID, isSystemAdmin bool, req UpdateStoreRequest) (*models.Store, error) {
 	if !isSystemAdmin {
 		if _, err := s.checkPermission(ctx, storeID, userID, models.StoreRoleOwner, models.StoreRoleAdmin); err != nil {
@@ -186,6 +209,7 @@ func (s *storeService) UpdateStore(ctx context.Context, storeID, userID uuid.UUI
 	return store, nil
 }
 
+// DeleteStore executes business logic for delete store.
 func (s *storeService) DeleteStore(ctx context.Context, storeID, userID uuid.UUID, isSystemAdmin bool) error {
 	if !isSystemAdmin {
 		if _, err := s.checkPermission(ctx, storeID, userID, models.StoreRoleOwner); err != nil {
@@ -195,6 +219,7 @@ func (s *storeService) DeleteStore(ctx context.Context, storeID, userID uuid.UUI
 	return s.storeRepo.DeleteStore(ctx, storeID)
 }
 
+// ListMembers executes business logic for list members.
 func (s *storeService) ListMembers(ctx context.Context, storeID, userID uuid.UUID, isSystemAdmin bool) ([]models.StoreMembership, error) {
 	if !isSystemAdmin {
 		if _, err := s.checkPermission(ctx, storeID, userID, models.StoreRoleOwner, models.StoreRoleAdmin, models.StoreRoleManager, models.StoreRoleViewer); err != nil {
@@ -204,6 +229,7 @@ func (s *storeService) ListMembers(ctx context.Context, storeID, userID uuid.UUI
 	return s.storeRepo.ListMembers(ctx, storeID)
 }
 
+// InviteMember executes business logic for invite member.
 func (s *storeService) InviteMember(ctx context.Context, storeID, currentUserID uuid.UUID, isSystemAdmin bool, email string, role models.StoreRole) (*models.StoreMembership, error) {
 	if !isSystemAdmin {
 		if _, err := s.checkPermission(ctx, storeID, currentUserID, models.StoreRoleOwner, models.StoreRoleAdmin); err != nil {
@@ -236,6 +262,7 @@ func (s *storeService) InviteMember(ctx context.Context, storeID, currentUserID 
 	return membership, nil
 }
 
+// UpdateMemberRole executes business logic for update member role.
 func (s *storeService) UpdateMemberRole(ctx context.Context, storeID, currentUserID uuid.UUID, isSystemAdmin bool, targetUserID uuid.UUID, role models.StoreRole) error {
 	if !isSystemAdmin {
 		if _, err := s.checkPermission(ctx, storeID, currentUserID, models.StoreRoleOwner); err != nil {
@@ -245,6 +272,7 @@ func (s *storeService) UpdateMemberRole(ctx context.Context, storeID, currentUse
 	return s.storeRepo.UpdateMemberRole(ctx, storeID, targetUserID, role)
 }
 
+// RemoveMember executes business logic for remove member.
 func (s *storeService) RemoveMember(ctx context.Context, storeID, currentUserID uuid.UUID, isSystemAdmin bool, targetUserID uuid.UUID) error {
 	if !isSystemAdmin {
 		if _, err := s.checkPermission(ctx, storeID, currentUserID, models.StoreRoleOwner); err != nil {
@@ -254,6 +282,7 @@ func (s *storeService) RemoveMember(ctx context.Context, storeID, currentUserID 
 	return s.storeRepo.RemoveMember(ctx, storeID, targetUserID)
 }
 
+// GetSettings executes business logic for get settings.
 func (s *storeService) GetSettings(ctx context.Context, storeID, userID uuid.UUID, isSystemAdmin bool) (*models.StoreSettings, error) {
 	if !isSystemAdmin {
 		if _, err := s.checkPermission(ctx, storeID, userID, models.StoreRoleOwner, models.StoreRoleAdmin, models.StoreRoleManager, models.StoreRoleViewer); err != nil {
@@ -263,6 +292,7 @@ func (s *storeService) GetSettings(ctx context.Context, storeID, userID uuid.UUI
 	return s.storeRepo.GetSettings(ctx, storeID)
 }
 
+// UpdateSettings executes business logic for update settings.
 func (s *storeService) UpdateSettings(ctx context.Context, storeID, userID uuid.UUID, isSystemAdmin bool, settings *models.StoreSettings) (*models.StoreSettings, error) {
 	if !isSystemAdmin {
 		if _, err := s.checkPermission(ctx, storeID, userID, models.StoreRoleOwner, models.StoreRoleAdmin); err != nil {
@@ -309,6 +339,7 @@ func (s *storeService) UpdateSettings(ctx context.Context, storeID, userID uuid.
 	return current, nil
 }
 
+// GetSubscription executes business logic for get subscription.
 func (s *storeService) GetSubscription(ctx context.Context, storeID, userID uuid.UUID, isSystemAdmin bool) (*models.StoreSubscription, error) {
 	if !isSystemAdmin {
 		if _, err := s.checkPermission(ctx, storeID, userID, models.StoreRoleOwner, models.StoreRoleAdmin, models.StoreRoleManager, models.StoreRoleViewer); err != nil {
@@ -318,6 +349,7 @@ func (s *storeService) GetSubscription(ctx context.Context, storeID, userID uuid
 	return s.storeRepo.GetSubscription(ctx, storeID)
 }
 
+// ListPlans executes business logic for list plans.
 func (s *storeService) ListPlans(ctx context.Context) ([]models.Plan, error) {
 	return s.storeRepo.ListPlans(ctx)
 }

@@ -1,3 +1,4 @@
+// Package controllers provides HTTP request handlers for order placement, tracking, and cancellations.
 package controllers
 
 import (
@@ -14,10 +15,12 @@ import (
 
 type contextKey string
 
+// OrderController represents order controller.
 type OrderController struct {
 	orderService *services.OrderService
 }
 
+// NewOrderController creates and initializes a new OrderController instance.
 func NewOrderController(orderService *services.OrderService) *OrderController {
 	return &OrderController{
 		orderService: orderService,
@@ -169,6 +172,7 @@ func (oc *OrderController) GetAllOrders(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, result)
 }
 
+// GetRevenueStats handles GET /orders/admin/revenue-stats, computing platform-wide sales and revenue analytics.
 func (oc *OrderController) GetRevenueStats(ctx *gin.Context) {
 	stats, serviceErr := oc.orderService.GetRevenueStats(ctx.Request.Context())
 	if serviceErr != nil {

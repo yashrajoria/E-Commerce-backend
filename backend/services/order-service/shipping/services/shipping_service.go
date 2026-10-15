@@ -1,3 +1,4 @@
+// Package services implements business logic for shipping fee estimation and carrier assignment.
 package services
 
 import (
@@ -16,6 +17,7 @@ type ServiceError struct {
 	Message    string
 }
 
+// Error executes business logic for error.
 func (e *ServiceError) Error() string { return e.Message }
 
 // ShippingService defines the business logic interface.

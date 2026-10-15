@@ -1,3 +1,4 @@
+// Package errors provides standardized application errors and Gin HTTP error handling middlewares.
 package errors
 
 import (
@@ -54,7 +55,7 @@ var (
 	ErrServiceUnavailable = New(http.StatusServiceUnavailable, "Service unavailable", nil)
 )
 
-// Error handlers
+// HandleError inspects application errors and writes standardized JSON error responses.
 func HandleError(w http.ResponseWriter, err error) {
 	var appErr *Error
 	if e, ok := err.(*Error); ok {
@@ -69,7 +70,7 @@ func HandleError(w http.ResponseWriter, err error) {
 	w.Write([]byte(appErr.JSON()))
 }
 
-// Error middleware for Gin
+// ErrorMiddleware returns a Gin middleware for centralized application error handling and recovery.
 func ErrorMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Next()

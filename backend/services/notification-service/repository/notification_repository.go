@@ -1,3 +1,4 @@
+// Package repository provides database access for notification logs and distributed event claiming locks.
 package repository
 
 import (
@@ -8,6 +9,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// NotificationRepository defines the interface contract for notification repository.
 type NotificationRepository interface {
 	SaveLog(ctx context.Context, log *models.NotificationLog) error
 	ClaimEvent(ctx context.Context, eventID string) (bool, error)
@@ -17,18 +19,21 @@ type NotificationRepository interface {
 	GetLogByID(ctx context.Context, id int64) (*models.NotificationLog, error)
 }
 
+// ClaimEvent attempts to acquire a processing lease for the event.
 func (r *notificationRepository) ClaimEvent(ctx context.Context, eventID string) (bool, error) {
 	event := &models.NotificationEvent{EventID: eventID, Status: "processing"}
 	tx := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(event)
 	return tx.RowsAffected > 0, tx.Error
 }
 
+// MarkEventDelivered updates the status of the record in the database.
 func (r *notificationRepository) MarkEventDelivered(ctx context.Context, eventID string) error {
 	return r.db.WithContext(ctx).Model(&models.NotificationEvent{}).
 		Where("event_id = ?", eventID).
 		Updates(map[string]interface{}{"status": models.NotificationEventDelivered, "processed_at": gorm.Expr("NOW()")}).Error
 }
 
+// ReleaseEvent releases the claimed lease in the database.
 func (r *notificationRepository) ReleaseEvent(ctx context.Context, eventID string) error {
 	return r.db.WithContext(ctx).Where("event_id = ?", eventID).Delete(&models.NotificationEvent{}).Error
 }
@@ -37,14 +42,17 @@ type notificationRepository struct {
 	db *gorm.DB
 }
 
+// NewNotificationRepository creates and initializes a new NotificationRepository instance.
 func NewNotificationRepository(db *gorm.DB) NotificationRepository {
 	return &notificationRepository{db: db}
 }
 
+// SaveLog persists a new g record in the database.
 func (r *notificationRepository) SaveLog(ctx context.Context, log *models.NotificationLog) error {
 	return r.db.WithContext(ctx).Create(log).Error
 }
 
+// GetLogs queries the database for logs.
 func (r *notificationRepository) GetLogs(ctx context.Context, filter models.NotificationFilter) ([]models.NotificationLog, int64, error) {
 	var logs []models.NotificationLog
 	var total int64
@@ -84,6 +92,7 @@ func (r *notificationRepository) GetLogs(ctx context.Context, filter models.Noti
 	return logs, total, err
 }
 
+// GetLogByID queries the database for log by id.
 func (r *notificationRepository) GetLogByID(ctx context.Context, id int64) (*models.NotificationLog, error) {
 	var log models.NotificationLog
 	err := r.db.WithContext(ctx).First(&log, id).Error

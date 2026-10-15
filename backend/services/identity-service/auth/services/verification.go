@@ -40,6 +40,7 @@ func hashVerificationCode(code string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// VerifyEmail executes business logic for verify email.
 func (s *AuthService) VerifyEmail(ctx context.Context, email, code string) error {
 	user, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil {
@@ -88,6 +89,7 @@ func (s *AuthService) VerifyEmail(ctx context.Context, email, code string) error
 	return s.userRepo.Update(ctx, user)
 }
 
+// ResendVerificationEmail executes business logic for resend verification email.
 func (s *AuthService) ResendVerificationEmail(ctx context.Context, email string) error {
 	user, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil {

@@ -1,3 +1,4 @@
+// Package admin provides administrative dashboard statistics and reporting HTTP handlers for orders.
 package admin
 
 import (

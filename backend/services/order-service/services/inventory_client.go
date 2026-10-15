@@ -34,25 +34,25 @@ type ReserveItem struct {
 	Quantity  int    `json:"quantity"`
 }
 
-// ReserveRequest is the payload sent to POST /inventory/reserve
+// InventoryReserveRequest represents the payload sent to POST /inventory/reserve.
 type InventoryReserveRequest struct {
 	OrderID string        `json:"order_id"`
 	Items   []ReserveItem `json:"items"`
 }
 
-// ReleaseRequest is the payload sent to POST /inventory/release
+// InventoryReleaseRequest represents the payload sent to POST /inventory/release.
 type InventoryReleaseRequest struct {
 	OrderID string        `json:"order_id"`
 	Items   []ReserveItem `json:"items"`
 }
 
-// ConfirmRequest is the payload sent to POST /inventory/confirm
+// InventoryConfirmRequest represents the payload sent to POST /inventory/confirm.
 type InventoryConfirmRequest struct {
 	OrderID string        `json:"order_id"`
 	Items   []ReserveItem `json:"items"`
 }
 
-// RestockRequest is the payload sent to POST /inventory/restock
+// InventoryRestockRequest represents the payload sent to POST /inventory/restock.
 type InventoryRestockRequest struct {
 	OrderID string        `json:"order_id"`
 	Items   []ReserveItem `json:"items"`

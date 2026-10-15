@@ -1,3 +1,4 @@
+// Package middleware provides HTTP security headers, Prometheus metrics, and request logging middlewares.
 package middleware
 
 import (

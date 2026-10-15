@@ -1,3 +1,4 @@
+// Package controllers provides HTTP endpoints for shipping rate calculations and carrier selection.
 package controllers
 
 import (

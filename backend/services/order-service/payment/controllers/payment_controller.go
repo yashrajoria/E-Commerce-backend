@@ -1,3 +1,4 @@
+// Package controllers provides HTTP endpoints and Stripe webhook handlers for payment processing.
 package controllers
 
 import (
@@ -227,23 +228,23 @@ func (pc *PaymentController) CreateCheckoutSession(c *gin.Context) {
 }
 
 // InitiatePayment creates a Stripe PaymentIntent and persists the record.
-	// Deprecated: prefer CreateCheckoutSession.
-	func (pc *PaymentController) InitiatePayment(c *gin.Context) {
-		var req struct {
-			OrderID  string `json:"order_id" binding:"required"`
-			Amount   int    `json:"amount" binding:"required,min=1"`
-			Currency string `json:"currency" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			pc.respondError(c, http.StatusBadRequest, err.Error(), err)
-			return
-		}
+// Deprecated: prefer CreateCheckoutSession.
+func (pc *PaymentController) InitiatePayment(c *gin.Context) {
+	var req struct {
+		OrderID  string `json:"order_id" binding:"required"`
+		Amount   int    `json:"amount" binding:"required,min=1"`
+		Currency string `json:"currency" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		pc.respondError(c, http.StatusBadRequest, err.Error(), err)
+		return
+	}
 
-		userID, err := middleware.GetUserID(c)
-		if err != nil {
-			pc.respondError(c, http.StatusUnauthorized, "unauthorized", err)
-			return
-		}
+	userID, err := middleware.GetUserID(c)
+	if err != nil {
+		pc.respondError(c, http.StatusUnauthorized, "unauthorized", err)
+		return
+	}
 
 	pi, err := pc.Stripe.CreatePaymentIntent(int64(req.Amount), strings.ToLower(req.Currency))
 	if err != nil {

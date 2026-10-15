@@ -1,3 +1,4 @@
+// Package middleware provides role-based access control (RBAC) middlewares for catalog operations.
 package middleware
 
 import (

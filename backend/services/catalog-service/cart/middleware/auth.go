@@ -1,3 +1,4 @@
+// Package middleware provides user authentication and session validation for shopping cart routes.
 package middleware
 
 import (

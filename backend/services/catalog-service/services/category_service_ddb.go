@@ -1,3 +1,4 @@
+// Package services provides business logic for product management, image uploads, and bulk imports.
 package services
 
 import (
@@ -19,6 +20,7 @@ type CategoryServiceDDB struct {
 	productRepo repository.ProductRepo
 }
 
+// NewCategoryServiceDDB creates and initializes a new CategoryServiceDDB instance.
 func NewCategoryServiceDDB(repo repository.CategoryRepo, productRepo repository.ProductRepo) *CategoryServiceDDB {
 	return &CategoryServiceDDB{repo: repo, productRepo: productRepo}
 }
@@ -93,6 +95,7 @@ func (s *CategoryServiceDDB) resolveAncestry(ctx context.Context, parentNames []
 	return parentIDs, ancestorIDs, nil
 }
 
+// GetCategoryTree executes business logic for get category tree.
 func (s *CategoryServiceDDB) GetCategoryTree(ctx context.Context) ([]*models.Category, error) {
 	categories, err := s.repo.FindAll(ctx)
 	if err != nil {
@@ -136,6 +139,7 @@ func (s *CategoryServiceDDB) GetCategoryTree(ctx context.Context) ([]*models.Cat
 	return rootCategories, nil
 }
 
+// ListCategories executes business logic for list categories.
 func (s *CategoryServiceDDB) ListCategories(ctx context.Context, params ListCategoriesParams) (*CategoryPage, error) {
 	if params.Page < 1 {
 		params.Page = 1
@@ -257,6 +261,7 @@ func (s *CategoryServiceDDB) collectDescendantIDs(categoryID uuid.UUID, allCateg
 	}
 }
 
+// UpdateCategory executes business logic for update category.
 func (s *CategoryServiceDDB) UpdateCategory(ctx context.Context, id uuid.UUID, req CategoryCreateRequest) (int64, error) {
 	parentIDs, ancestorIDs, err := s.resolveAncestry(ctx, req.ParentNames)
 	if err != nil {
@@ -280,6 +285,7 @@ func (s *CategoryServiceDDB) UpdateCategory(ctx context.Context, id uuid.UUID, r
 	return 1, nil
 }
 
+// DeleteCategory executes business logic for delete category.
 func (s *CategoryServiceDDB) DeleteCategory(ctx context.Context, id uuid.UUID) error {
 	// Business rule: check for associated products before deleting.
 	hasProducts, err := s.repo.HasProducts(ctx, id)

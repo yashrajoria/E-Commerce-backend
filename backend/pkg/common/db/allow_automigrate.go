@@ -1,3 +1,4 @@
+// Package db provides PostgreSQL connection pooling, migration verification, and test database snapshot helpers.
 package db
 
 import (

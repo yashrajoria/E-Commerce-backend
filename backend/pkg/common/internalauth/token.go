@@ -1,3 +1,4 @@
+// Package internalauth provides service-to-service HMAC signature authentication and verification.
 package internalauth
 
 import (

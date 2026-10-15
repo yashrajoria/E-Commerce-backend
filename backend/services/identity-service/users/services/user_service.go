@@ -1,3 +1,4 @@
+// Package services provides business logic for user profile updates and password security.
 package services
 
 import (
@@ -28,11 +29,13 @@ func NewUserService(repo *repository.UserRepository, revoker tokenRevoker) *User
 	return &UserService{repo: repo, authClient: revoker}
 }
 
+// GetUserProfile executes business logic for get user profile.
 func (s *UserService) GetUserProfile(ctx context.Context, userID string) (*models.User, error) {
 	logger.Info(ctx, "Fetching user profile", zap.String("user_id", userID))
 	return s.repo.GetByID(ctx, userID)
 }
 
+// UpdateUserProfile executes business logic for update user profile.
 func (s *UserService) UpdateUserProfile(ctx context.Context, userID string, name *string, phoneNumber *string) (*models.User, error) {
 	logger.Info(ctx, "Updating user profile", zap.String("user_id", userID))
 	user, err := s.repo.GetByID(ctx, userID)
@@ -54,6 +57,7 @@ func (s *UserService) UpdateUserProfile(ctx context.Context, userID string, name
 	return user, nil
 }
 
+// ChangeUserPassword executes business logic for change user password.
 func (s *UserService) ChangeUserPassword(ctx context.Context, userID string, hashedPassword string) error {
 	logger.Info(ctx, "Changing user password", zap.String("user_id", userID))
 	user, err := s.repo.GetByID(ctx, userID)
@@ -81,6 +85,7 @@ func (s *UserService) ChangeUserPassword(ctx context.Context, userID string, has
 	return nil
 }
 
+// ListUsers executes business logic for list users.
 func (s *UserService) ListUsers(ctx context.Context, page, pageSize int, search, role, sortBy, sortOrder string) ([]models.User, int64, error) {
 	logger.Info(ctx, "Listing users", zap.Int("page", page), zap.Int("page_size", pageSize))
 	offset := (page - 1) * pageSize

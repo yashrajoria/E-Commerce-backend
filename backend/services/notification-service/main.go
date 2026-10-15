@@ -1,3 +1,4 @@
+// Package main provides the entrypoint and background worker initialization for the Notification Service.
 package main
 
 import (

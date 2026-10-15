@@ -1,3 +1,4 @@
+// Package middleware provides JWT authentication and RBAC validation for identity endpoints.
 package middleware
 
 import (
@@ -53,6 +54,7 @@ func AdminOnly() gin.HandlerFunc {
 	}
 }
 
+// GetUserID retrieves user id.
 func GetUserID(c *gin.Context) (string, error) {
 	val, exists := c.Get(UserContextKey)
 	if !exists {

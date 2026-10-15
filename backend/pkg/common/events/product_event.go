@@ -3,12 +3,12 @@ package events
 // ProductEvent represents events for product/category operations.
 // Used for maintaining category product count projections and cross-service synchronization.
 type ProductEvent struct {
-	EventType  string                 `json:"event_type"`   // product_created, product_updated, product_deleted, etc.
-	ProductID  string                 `json:"product_id"`
-	CategoryIDs []string              `json:"category_ids,omitempty"`  // Categories this product belongs to
-	OldCategoryIDs []string           `json:"old_category_ids,omitempty"` // For move/update operations
-	Data       map[string]interface{} `json:"data"`
-	Timestamp  int64                  `json:"timestamp"`
+	EventType      string                 `json:"event_type"` // product_created, product_updated, product_deleted, etc.
+	ProductID      string                 `json:"product_id"`
+	CategoryIDs    []string               `json:"category_ids,omitempty"`     // Categories this product belongs to
+	OldCategoryIDs []string               `json:"old_category_ids,omitempty"` // For move/update operations
+	Data           map[string]interface{} `json:"data"`
+	Timestamp      int64                  `json:"timestamp"`
 }
 
 // NewProductCreatedEvent creates an event when a product is added to the catalog.
@@ -85,4 +85,3 @@ func NewProductPriceDecreasedEvent(productID string, oldPrice, newPrice float64,
 		EffectiveDate: timestamp,
 	}
 }
-

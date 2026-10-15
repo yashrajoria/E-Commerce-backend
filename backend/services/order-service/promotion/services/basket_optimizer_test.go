@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"order-service/promotion/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"order-service/promotion/models"
 )
 
 func TestBasketOptimizer_EmptyCart(t *testing.T) {

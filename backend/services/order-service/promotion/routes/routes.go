@@ -1,3 +1,4 @@
+// Package routes mounts HTTP endpoints for coupon validation and basket optimization recommendations.
 package routes
 
 import (

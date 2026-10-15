@@ -276,4 +276,3 @@ func TestWaitingRoom_SelfHealingExpiredLease(t *testing.T) {
 
 	_ = svc.Reset(ctx, testProduct)
 }
-
