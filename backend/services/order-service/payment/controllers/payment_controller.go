@@ -13,8 +13,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/stripe/stripe-go/v80"
-	"github.com/stripe/stripe-go/v80/checkout/session"
+	"github.com/stripe/stripe-go/v86"
+	"github.com/stripe/stripe-go/v86/checkout/session"
 	"github.com/yashrajoria/common/messaging"
 	"go.uber.org/zap"
 	"gorm.io/gorm"

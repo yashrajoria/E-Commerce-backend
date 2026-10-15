@@ -8,12 +8,12 @@ import (
 	"os"
 	"strings"
 
-	"github.com/stripe/stripe-go/v80/checkout/session"
+	"github.com/stripe/stripe-go/v86/checkout/session"
 
-	"github.com/stripe/stripe-go/v80"
-	"github.com/stripe/stripe-go/v80/paymentintent"
-	"github.com/stripe/stripe-go/v80/refund"
-	"github.com/stripe/stripe-go/v80/webhook"
+	"github.com/stripe/stripe-go/v86"
+	"github.com/stripe/stripe-go/v86/paymentintent"
+	"github.com/stripe/stripe-go/v86/refund"
+	"github.com/stripe/stripe-go/v86/webhook"
 )
 
 // frontendURL returns the storefront base URL used for Stripe success/cancel

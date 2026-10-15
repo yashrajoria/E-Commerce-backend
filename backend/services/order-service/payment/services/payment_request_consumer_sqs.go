@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/stripe/stripe-go/v80"
+	"github.com/stripe/stripe-go/v86"
 	"github.com/yashrajoria/common/events"
 	"github.com/yashrajoria/common/messaging"
 	"go.uber.org/zap"

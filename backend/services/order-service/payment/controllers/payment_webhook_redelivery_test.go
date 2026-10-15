@@ -10,7 +10,7 @@ import (
 	"order-service/payment/models"
 
 	"github.com/google/uuid"
-	"github.com/stripe/stripe-go/v80"
+	"github.com/stripe/stripe-go/v86"
 	"go.uber.org/zap"
 )
 
