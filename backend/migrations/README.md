@@ -2,10 +2,16 @@
 
 Active migrations use [golang-migrate](https://github.com/golang-migrate/migrate) naming:
 
-- `000001_baseline.up.sql` / `000001_baseline.down.sql`
-- `000002_soft_delete_indexes.up.sql` / `000002_soft_delete_indexes.down.sql`
-- `000007_order_outbox_events.up.sql` / `000007_order_outbox_events.down.sql`
-- `000010_payment_correlation_id.up.sql` / `000010_payment_correlation_id.down.sql`
+- `NNNNNN_name.up.sql` / `NNNNNN_name.down.sql`, currently `000001` to `000024` (`000008` is unused).
+
+| Range | Area |
+|-------|------|
+| 000001-000006 | Baseline, soft-delete indexes, auth hardening (verification rate limit, refresh-token family, login lockout, hashed codes) |
+| 000007, 000009-000011 | Order outbox, agent audit log, payment correlation ID, payment outbox |
+| 000012-000014 | Schema integrity, indexes/retention, triggers/history/currency |
+| 000015-000016 | `catalog` schema and inventory/reservations |
+| 000017-000019 | Postgres message queues, Supabase storage, verification code expiry |
+| 000020-000024 | Multi-tenant stores, store scoping, subscription plans, integer-column alignment, admin portal tables |
 
 Apply:
 
