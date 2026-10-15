@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v4"
+	"github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 )
@@ -301,7 +301,7 @@ func parseToken(tokenStr, expectedType string) (jwt.MapClaims, error) {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 		return secretKey, nil
-	})
+	}, jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired())
 
 	if err != nil || token == nil || !token.Valid {
 		return nil, fmt.Errorf("invalid or expired token")
@@ -310,10 +310,6 @@ func parseToken(tokenStr, expectedType string) (jwt.MapClaims, error) {
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
 		return nil, fmt.Errorf("invalid token claims")
-	}
-	// jwt.Parse only checks exp when present; a signed token without it never expires.
-	if _, ok := claims["exp"]; !ok {
-		return nil, fmt.Errorf("token missing exp")
 	}
 	if expectedType != "" {
 		if typ, ok := claims["typ"].(string); !ok || typ != expectedType {

@@ -11,7 +11,7 @@ import (
 	"api-gateway/utils"
 
 	"github.com/gin-gonic/gin"
-	"github.com/go-redis/redis/v8"
+	"github.com/redis/go-redis/v9"
 )
 
 // getEnv returns the env var value for key, or fallback if unset/blank.

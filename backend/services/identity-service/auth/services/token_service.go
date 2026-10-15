@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/golang-jwt/jwt/v4"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
 
@@ -65,7 +65,7 @@ func (s *TokenService) ValidateToken(tokenStr, expectedType string) (jwt.MapClai
 			return nil, fmt.Errorf("unexpected signing method")
 		}
 		return s.secretKey, nil
-	})
+	}, jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired())
 
 	if err != nil || !token.Valid {
 		return nil, fmt.Errorf("invalid or expired token")

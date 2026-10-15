@@ -10,7 +10,7 @@ import (
 	"identity-service/models"
 	"identity-service/repository"
 
-	"github.com/golang-jwt/jwt/v4"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/yashrajoria/common/password"
 	"go.uber.org/zap"

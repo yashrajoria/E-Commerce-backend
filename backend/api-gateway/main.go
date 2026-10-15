@@ -17,7 +17,7 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"github.com/go-redis/redis/v8"
+	"github.com/redis/go-redis/v9"
 	"github.com/joho/godotenv"
 	apperrors "github.com/yashrajoria/common/errors"
 	"github.com/yashrajoria/common/internalauth"

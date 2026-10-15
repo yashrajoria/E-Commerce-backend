@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/golang-jwt/jwt/v4"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/joho/godotenv"
 )
 
@@ -34,7 +34,7 @@ func ParseAndValidateToken(tokenStr, expectedType string) (jwt.MapClaims, error)
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 		return secretKey, nil
-	})
+	}, jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired())
 
 	if err != nil || token == nil || !token.Valid {
 		return nil, fmt.Errorf("invalid or expired token")
