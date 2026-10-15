@@ -2,18 +2,32 @@ package models
 
 import "time"
 
+type ShippingAddress struct {
+	FirstName  string `json:"first_name,omitempty"`
+	LastName   string `json:"last_name,omitempty"`
+	Line1      string `json:"line1,omitempty"`
+	Line2      string `json:"line2,omitempty"`
+	City       string `json:"city,omitempty"`
+	State      string `json:"state,omitempty"`
+	PostalCode string `json:"postal_code,omitempty"`
+	Country    string `json:"country,omitempty"`
+	Phone      string `json:"phone,omitempty"`
+	Email      string `json:"email,omitempty"`
+}
+
 // From catalog cart → order-service
 type CheckoutEvent struct {
-	Event          string         `json:"event"`   // expected: "checkout.requested"
-	UserID         string         `json:"user_id"` // must be UUID string
-	Email          string         `json:"email,omitempty"`
-	IdempotencyKey string         `json:"idempotency_key,omitempty"`
-	Items          []CheckoutItem `json:"items"`
-	Timestamp      time.Time      `json:"timestamp"`
-	OrderID        string         `json:"order_id"`
-	StoreID        string         `json:"store_id,omitempty"`
-	CouponCode     string         `json:"coupon_code,omitempty"`
-	CorrelationID  string         `json:"correlation_id,omitempty"`
+	Event           string           `json:"event"`   // expected: "checkout.requested"
+	UserID          string           `json:"user_id"` // must be UUID string
+	Email           string           `json:"email,omitempty"`
+	ShippingAddress *ShippingAddress `json:"shipping_address,omitempty"`
+	IdempotencyKey  string           `json:"idempotency_key,omitempty"`
+	Items           []CheckoutItem   `json:"items"`
+	Timestamp       time.Time        `json:"timestamp"`
+	OrderID         string           `json:"order_id"`
+	StoreID         string           `json:"store_id,omitempty"`
+	CouponCode      string           `json:"coupon_code,omitempty"`
+	CorrelationID   string           `json:"correlation_id,omitempty"`
 }
 
 type CheckoutItem struct {
@@ -23,15 +37,16 @@ type CheckoutItem struct {
 
 // order-service checkout consumer → order-service payment consumer (same binary)
 type PaymentRequest struct {
-	EventID        string `json:"event_id,omitempty"`
-	OrderID        string `json:"order_id"`
-	UserID         string `json:"user_id"`
-	Email          string `json:"email,omitempty"`
-	Amount         int    `json:"amount"` // minor units
-	Currency       string `json:"currency,omitempty"`
-	StoreID        string `json:"store_id,omitempty"`
-	IdempotencyKey string `json:"idempotency_key,omitempty"`
-	CorrelationID  string `json:"correlation_id,omitempty"`
+	EventID         string           `json:"event_id,omitempty"`
+	OrderID         string           `json:"order_id"`
+	UserID          string           `json:"user_id"`
+	Email           string           `json:"email,omitempty"`
+	ShippingAddress *ShippingAddress `json:"shipping_address,omitempty"`
+	Amount          int              `json:"amount"` // minor units
+	Currency        string           `json:"currency,omitempty"`
+	StoreID         string           `json:"store_id,omitempty"`
+	IdempotencyKey  string           `json:"idempotency_key,omitempty"`
+	CorrelationID   string           `json:"correlation_id,omitempty"`
 }
 
 // order-service payment consumer → order-service payment-events consumer (same binary)

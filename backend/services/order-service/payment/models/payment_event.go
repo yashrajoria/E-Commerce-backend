@@ -15,12 +15,27 @@ type PaymentEvent struct {
 	CorrelationID string    `json:"correlation_id,omitempty"`
 }
 
+type ShippingAddress struct {
+	FirstName  string `json:"first_name,omitempty"`
+	LastName   string `json:"last_name,omitempty"`
+	Line1      string `json:"line1,omitempty"`
+	Line2      string `json:"line2,omitempty"`
+	City       string `json:"city,omitempty"`
+	State      string `json:"state,omitempty"`
+	PostalCode string `json:"postal_code,omitempty"`
+	Country    string `json:"country,omitempty"`
+	Phone      string `json:"phone,omitempty"`
+	Email      string `json:"email,omitempty"`
+}
+
 type PaymentRequest struct {
-	EventID        string `json:"event_id,omitempty"`
-	OrderID        string `json:"order_id"`
-	UserID         string `json:"user_id"`
-	Amount         int    `json:"amount"`
-	Currency       string `json:"currency"`
-	IdempotencyKey string `json:"idempotency_key,omitempty"`
-	CorrelationID  string `json:"correlation_id,omitempty"`
+	EventID         string           `json:"event_id,omitempty"`
+	OrderID         string           `json:"order_id"`
+	UserID          string           `json:"user_id"`
+	Email           string           `json:"email,omitempty"`
+	ShippingAddress *ShippingAddress `json:"shipping_address,omitempty"`
+	Amount          int              `json:"amount"`
+	Currency        string           `json:"currency"`
+	IdempotencyKey  string           `json:"idempotency_key,omitempty"`
+	CorrelationID   string           `json:"correlation_id,omitempty"`
 }

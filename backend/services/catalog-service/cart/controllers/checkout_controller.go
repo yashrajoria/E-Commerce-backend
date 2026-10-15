@@ -101,7 +101,12 @@ func (cc *CartController) Checkout(c *gin.Context) {
 	}
 
 	var reqBody struct {
-		PromoCode string `json:"promo_code"`
+		PromoCode       string                  `json:"promo_code"`
+		ShippingAddress *models.ShippingAddress `json:"shipping_address"`
+		Contact         *struct {
+			Email string `json:"email"`
+			Phone string `json:"phone"`
+		} `json:"contact"`
 	}
 	_ = c.ShouldBindJSON(&reqBody)
 	couponCode := cart.CouponCode
@@ -109,8 +114,17 @@ func (cc *CartController) Checkout(c *gin.Context) {
 		couponCode = strings.TrimSpace(reqBody.PromoCode)
 	}
 
+	customerEmail := ""
+	if reqBody.Contact != nil && reqBody.Contact.Email != "" {
+		customerEmail = strings.TrimSpace(reqBody.Contact.Email)
+	} else if reqBody.ShippingAddress != nil && reqBody.ShippingAddress.Email != "" {
+		customerEmail = strings.TrimSpace(reqBody.ShippingAddress.Email)
+	}
+
 	// Build SNS payload
 	event := buildCheckoutEvent(userID, cart, orderID, scopedIdemKey, correlationID, couponCode)
+	event.Email = customerEmail
+	event.ShippingAddress = reqBody.ShippingAddress
 
 	eventBytes, err := json.Marshal(event)
 	if err != nil {

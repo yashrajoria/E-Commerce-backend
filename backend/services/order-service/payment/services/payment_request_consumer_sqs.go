@@ -35,6 +35,7 @@ type PaymentRequestConsumer struct {
 type StripeCheckoutCreator interface {
 	CreateCheckoutSession(amount int64, currency, orderID, userID string) (*stripe.CheckoutSession, error)
 	CreateCheckoutSessionWithIdempotency(amount int64, currency, orderID, userID, idempotencyKey string) (*stripe.CheckoutSession, error)
+	CreateCheckoutSessionWithDetails(amount int64, currency, orderID, userID, idempotencyKey, customerEmail string, shipping *models.ShippingAddress) (*stripe.CheckoutSession, error)
 }
 
 func NewPaymentRequestConsumer(
@@ -149,7 +150,15 @@ func (c *PaymentRequestConsumer) handleMessage(ctx context.Context, body string)
 	// Amount is already in the smallest currency unit for the configured store currency.
 	// Do NOT multiply by 100 here; prices are stored and passed in cents throughout the system.
 	// Idempotency key is forwarded so Stripe-side retries are safe.
-	sess, err := c.stripeSvc.CreateCheckoutSessionWithIdempotency(int64(req.Amount), currency, req.OrderID, req.UserID, req.IdempotencyKey)
+	sess, err := c.stripeSvc.CreateCheckoutSessionWithDetails(
+		int64(req.Amount),
+		currency,
+		req.OrderID,
+		req.UserID,
+		req.IdempotencyKey,
+		req.Email,
+		req.ShippingAddress,
+	)
 	if err != nil {
 		c.logger.Error("Failed to create Stripe Checkout Session", zap.Error(err))
 		payment.Status = "failed"

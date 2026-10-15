@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"order-service/payment/models"
 	"os"
 	"strings"
 
@@ -58,10 +59,14 @@ func (s *StripeService) CreatePaymentIntent(amount int64, currency string) (*str
 }
 
 func (s *StripeService) CreateCheckoutSession(amount int64, currency, orderID, userID string) (*stripe.CheckoutSession, error) {
-	return s.CreateCheckoutSessionWithIdempotency(amount, currency, orderID, userID, "")
+	return s.CreateCheckoutSessionWithDetails(amount, currency, orderID, userID, "", "", nil)
 }
 
 func (s *StripeService) CreateCheckoutSessionWithIdempotency(amount int64, currency, orderID, userID, idempotencyKey string) (*stripe.CheckoutSession, error) {
+	return s.CreateCheckoutSessionWithDetails(amount, currency, orderID, userID, idempotencyKey, "", nil)
+}
+
+func (s *StripeService) CreateCheckoutSessionWithDetails(amount int64, currency, orderID, userID, idempotencyKey, email string, shipping *models.ShippingAddress) (*stripe.CheckoutSession, error) {
 	frontend := frontendURL()
 	params := &stripe.CheckoutSessionParams{
 		PaymentMethodTypes: stripe.StringSlice([]string{"card"}),
@@ -81,6 +86,39 @@ func (s *StripeService) CreateCheckoutSessionWithIdempotency(amount int64, curre
 			},
 		},
 	}
+
+	if email != "" {
+		params.CustomerEmail = stripe.String(email)
+	}
+
+	if shipping != nil {
+		fullName := strings.TrimSpace(shipping.FirstName + " " + shipping.LastName)
+		if fullName == "" {
+			fullName = "Valued Customer"
+		}
+		country := strings.ToUpper(strings.TrimSpace(shipping.Country))
+		if country == "" || len(country) != 2 {
+			country = "GB"
+		}
+
+		params.PaymentIntentData = &stripe.CheckoutSessionPaymentIntentDataParams{
+			Shipping: &stripe.ShippingDetailsParams{
+				Name: stripe.String(fullName),
+				Address: &stripe.AddressParams{
+					Line1:      stripe.String(shipping.Line1),
+					Line2:      stripe.String(shipping.Line2),
+					City:       stripe.String(shipping.City),
+					State:      stripe.String(shipping.State),
+					PostalCode: stripe.String(shipping.PostalCode),
+					Country:    stripe.String(country),
+				},
+			},
+		}
+		if shipping.Phone != "" {
+			params.PaymentIntentData.Shipping.Phone = stripe.String(shipping.Phone)
+		}
+	}
+
 	params.AddMetadata("order_id", orderID)
 	if userID != "" {
 		params.AddMetadata("user_id", userID)

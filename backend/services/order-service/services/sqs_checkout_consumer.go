@@ -244,16 +244,22 @@ func (c *SQSCheckoutConsumer) handleMessage(ctx context.Context, body string) er
 		return err
 	}
 
+	customerEmail := evt.Email
+	if customerEmail == "" && evt.ShippingAddress != nil {
+		customerEmail = evt.ShippingAddress.Email
+	}
+
 	req := models.PaymentRequest{
-		EventID:        uuid.New().String(),
-		OrderID:        order.ID.String(),
-		UserID:         order.UserID.String(),
-		Email:          evt.Email,
-		Amount:         order.Amount,
-		Currency:       c.storeCurrency,
-		StoreID:        evt.StoreID,
-		IdempotencyKey: idemKey,
-		CorrelationID:  evt.CorrelationID,
+		EventID:         uuid.New().String(),
+		OrderID:         order.ID.String(),
+		UserID:          order.UserID.String(),
+		Email:           customerEmail,
+		ShippingAddress: evt.ShippingAddress,
+		Amount:          order.Amount,
+		Currency:        c.storeCurrency,
+		StoreID:         evt.StoreID,
+		IdempotencyKey:  idemKey,
+		CorrelationID:   evt.CorrelationID,
 	}
 	reqBytes, err := json.Marshal(req)
 	if err != nil {

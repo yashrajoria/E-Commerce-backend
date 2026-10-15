@@ -99,7 +99,9 @@ func (pc *PaymentController) GetPaymentStatusByOrderID(c *gin.Context) {
 // CreateCheckoutSession creates a Stripe Checkout Session and stores the URL in the DB.
 func (pc *PaymentController) CreateCheckoutSession(c *gin.Context) {
 	var req struct {
-		OrderID string `json:"order_id" binding:"required"`
+		OrderID         string                  `json:"order_id" binding:"required"`
+		CustomerEmail   string                  `json:"customer_email"`
+		ShippingAddress *models.ShippingAddress `json:"shipping_address"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		pc.respondError(c, http.StatusBadRequest, err.Error(), err)
@@ -165,6 +167,37 @@ func (pc *PaymentController) CreateCheckoutSession(c *gin.Context) {
 			"order_id": req.OrderID,
 			"user_id":  payment.UserID.String(),
 		},
+	}
+
+	if req.CustomerEmail != "" {
+		params.CustomerEmail = stripe.String(req.CustomerEmail)
+	}
+
+	if req.ShippingAddress != nil {
+		fullName := strings.TrimSpace(req.ShippingAddress.FirstName + " " + req.ShippingAddress.LastName)
+		if fullName == "" {
+			fullName = "Valued Customer"
+		}
+		country := strings.ToUpper(strings.TrimSpace(req.ShippingAddress.Country))
+		if country == "" || len(country) != 2 {
+			country = "GB"
+		}
+		params.PaymentIntentData = &stripe.CheckoutSessionPaymentIntentDataParams{
+			Shipping: &stripe.ShippingDetailsParams{
+				Name: stripe.String(fullName),
+				Address: &stripe.AddressParams{
+					Line1:      stripe.String(req.ShippingAddress.Line1),
+					Line2:      stripe.String(req.ShippingAddress.Line2),
+					City:       stripe.String(req.ShippingAddress.City),
+					State:      stripe.String(req.ShippingAddress.State),
+					PostalCode: stripe.String(req.ShippingAddress.PostalCode),
+					Country:    stripe.String(country),
+				},
+			},
+		}
+		if req.ShippingAddress.Phone != "" {
+			params.PaymentIntentData.Shipping.Phone = stripe.String(req.ShippingAddress.Phone)
+		}
 	}
 
 	sess, err := session.New(params)

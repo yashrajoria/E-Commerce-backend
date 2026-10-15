@@ -67,6 +67,10 @@ func (unexpectedStripeCall) CreateCheckoutSessionWithIdempotency(int64, string, 
 	panic("duplicate payment request called Stripe")
 }
 
+func (unexpectedStripeCall) CreateCheckoutSessionWithDetails(int64, string, string, string, string, string, *models.ShippingAddress) (*stripe.CheckoutSession, error) {
+	panic("duplicate payment request called Stripe")
+}
+
 func TestPaymentRequestDuplicateSkipsStripe(t *testing.T) {
 	consumer := NewPaymentRequestConsumer(nil, nil, "", "", unexpectedStripeCall{}, "usd", duplicatePaymentRepo{}, zap.NewNop())
 	body := `{"event_id":"event-1","order_id":"` + uuid.NewString() + `","user_id":"` + uuid.NewString() + `","amount":1000,"currency":"usd","idempotency_key":"idem-1"}`
