@@ -5,6 +5,7 @@ import (
 	"order-service/middleware"
 
 	"github.com/gin-gonic/gin"
+	"github.com/yashrajoria/common/internalauth"
 )
 
 func RegisterOrderRoutes(r *gin.Engine, controllers *controllers.OrderController) {
@@ -15,7 +16,10 @@ func RegisterOrderRoutes(r *gin.Engine, controllers *controllers.OrderController
 	orderRoutes.GET("/", controllers.GetOrders)
 	orderRoutes.GET("/:id", controllers.GetOrderByID)
 	orderRoutes.PUT("/:id/cancel", middleware.AdminOnly(), controllers.CancelOrder)
-	orderRoutes.POST("/:id/refund", controllers.RefundOrder)
+	// Refunds trust gateway-injected X-User-* claims, so require the mesh
+	// credential before accepting those claims. This prevents direct callers
+	// from forging an admin identity at the order-service listener.
+	orderRoutes.POST("/:id/refund", internalauth.Require(), controllers.RefundOrder)
 
 	// Admin-only routes
 	adminRoutes := orderRoutes.Group("/admin")

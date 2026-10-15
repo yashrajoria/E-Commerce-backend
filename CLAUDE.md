@@ -14,6 +14,8 @@ This document contains key commands, architectural rules, code style guidelines,
   - [SERVICES_AND_DATABASES.md](SERVICES_AND_DATABASES.md) — per-service data model detail.
   - [SERVICE_ISSUES_AND_AUDIT.md](SERVICE_ISSUES_AND_AUDIT.md) — known bugs, security gaps, and perf issues per service (check before touching a service to avoid re-introducing a known-flagged pattern).
   - [backend/CLAUDE.md](backend/CLAUDE.md) — directory layout when working directly inside `backend/`.
+  - [../ORCHESTRATOR.md](../ORCHESTRATOR.md) — Master Orchestrator, multi-agent dispatch rules, and delegation pipeline.
+  - [.github/agents/](.github/agents/) — Service-specific and specialist sub-agents (`api-gateway`, `identity-service`, `catalog-service`, `order-service`, `security-auditor`, `database-migration`, etc.).
 
 ---
 

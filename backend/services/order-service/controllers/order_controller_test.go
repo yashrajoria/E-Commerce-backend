@@ -19,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/yashrajoria/common/internalauth"
 )
 
 type mockOrderRepo struct {
@@ -92,7 +93,9 @@ func (m *mockRefunder) RefundPayment(ctx context.Context, orderID uuid.UUID, amo
 	}, nil
 }
 
-func setupTestRouter(repo *mockOrderRepo, refunder services.PaymentRefunder) *gin.Engine {
+func setupTestRouter(t *testing.T, repo *mockOrderRepo, refunder services.PaymentRefunder) *gin.Engine {
+	t.Helper()
+	t.Setenv("INTERNAL_SERVICE_TOKEN", "test-token")
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	svc := services.NewOrderServiceSQS(repo, nil, "", "", nil)
@@ -102,8 +105,17 @@ func setupTestRouter(repo *mockOrderRepo, refunder services.PaymentRefunder) *gi
 	ctrl := NewOrderController(svc)
 	orderRoutes := r.Group("/orders")
 	orderRoutes.Use(middleware.AuthMiddleware())
-	orderRoutes.POST("/:id/refund", ctrl.RefundOrder)
+	orderRoutes.POST("/:id/refund", internalauth.Require(), ctrl.RefundOrder)
 	return r
+}
+
+func setInternalToken(req *http.Request) {
+	req.Header.Set(internalauth.Header, "test-token")
+}
+
+func serveWithInternalToken(r http.Handler, w http.ResponseWriter, req *http.Request) {
+	setInternalToken(req)
+	r.ServeHTTP(w, req)
 }
 
 func TestRefundOrderRoute_SuccessFullRefund(t *testing.T) {
@@ -120,7 +132,7 @@ func TestRefundOrderRoute_SuccessFullRefund(t *testing.T) {
 		},
 	}
 	ref := &mockRefunder{}
-	r := setupTestRouter(repo, ref)
+	r := setupTestRouter(t, repo, ref)
 
 	req, _ := http.NewRequest("POST", "/orders/"+orderID.String()+"/refund", nil)
 	req.Header.Set("X-User-ID", userID.String())
@@ -128,7 +140,7 @@ func TestRefundOrderRoute_SuccessFullRefund(t *testing.T) {
 	req.Header.Set("Idempotency-Key", "refund-req-001")
 
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	serveWithInternalToken(r, w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
@@ -168,7 +180,7 @@ func TestRefundOrderRoute_SuccessPartialRefund(t *testing.T) {
 		},
 	}
 	ref := &mockRefunder{}
-	r := setupTestRouter(repo, ref)
+	r := setupTestRouter(t, repo, ref)
 
 	bodyBytes, _ := json.Marshal(map[string]interface{}{
 		"amount": 3500,
@@ -179,7 +191,7 @@ func TestRefundOrderRoute_SuccessPartialRefund(t *testing.T) {
 	req.Header.Set("X-User-ID", userID.String())
 
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	serveWithInternalToken(r, w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
@@ -208,13 +220,13 @@ func TestRefundOrderRoute_RejectsInvalidStates(t *testing.T) {
 			Amount: 5000,
 		},
 	}
-	r := setupTestRouter(repo, &mockRefunder{})
+	r := setupTestRouter(t, repo, &mockRefunder{})
 
 	req, _ := http.NewRequest("POST", "/orders/"+orderID.String()+"/refund", nil)
 	req.Header.Set("X-User-ID", userID.String())
 
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	serveWithInternalToken(r, w, req)
 
 	if w.Code != http.StatusConflict {
 		t.Fatalf("expected 409 Conflict for pending order, got %d: %s", w.Code, w.Body.String())
@@ -223,7 +235,7 @@ func TestRefundOrderRoute_RejectsInvalidStates(t *testing.T) {
 	// 2. Already refunded order
 	repo.order.Status = "refunded"
 	w2 := httptest.NewRecorder()
-	r.ServeHTTP(w2, req)
+	serveWithInternalToken(r, w2, req)
 
 	if w2.Code != http.StatusConflict {
 		t.Fatalf("expected 409 Conflict for already refunded order, got %d: %s", w2.Code, w2.Body.String())
@@ -243,13 +255,13 @@ func TestRefundOrderRoute_MissingPayment(t *testing.T) {
 		},
 	}
 	ref := &mockRefunder{returnErr: paymentservices.ErrPaymentNotFound}
-	r := setupTestRouter(repo, ref)
+	r := setupTestRouter(t, repo, ref)
 
 	req, _ := http.NewRequest("POST", "/orders/"+orderID.String()+"/refund", nil)
 	req.Header.Set("X-User-ID", userID.String())
 
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	serveWithInternalToken(r, w, req)
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 Not Found for missing payment, got %d: %s", w.Code, w.Body.String())
@@ -269,13 +281,13 @@ func TestRefundOrderRoute_StripeFailure(t *testing.T) {
 		},
 	}
 	ref := &mockRefunder{returnErr: errors.New("Stripe API down")}
-	r := setupTestRouter(repo, ref)
+	r := setupTestRouter(t, repo, ref)
 
 	req, _ := http.NewRequest("POST", "/orders/"+orderID.String()+"/refund", nil)
 	req.Header.Set("X-User-ID", userID.String())
 
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	serveWithInternalToken(r, w, req)
 
 	if w.Code != http.StatusBadGateway {
 		t.Fatalf("expected 502 Bad Gateway for Stripe error, got %d: %s", w.Code, w.Body.String())
@@ -295,7 +307,7 @@ func TestRefundOrderRoute_UnauthorizedAndForbidden(t *testing.T) {
 			Amount: 5000,
 		},
 	}
-	r := setupTestRouter(repo, &mockRefunder{})
+	r := setupTestRouter(t, repo, &mockRefunder{})
 
 	// 1. Unauthenticated (no X-User-ID header)
 	reqUnauth, _ := http.NewRequest("POST", "/orders/"+orderID.String()+"/refund", nil)
@@ -305,12 +317,23 @@ func TestRefundOrderRoute_UnauthorizedAndForbidden(t *testing.T) {
 		t.Fatalf("expected 401 Unauthorized, got %d", wUnauth.Code)
 	}
 
+	// A direct caller must not be able to forge an admin identity with only
+	// X-User-* headers; the gateway's mesh credential is also required.
+	reqForgedAdmin, _ := http.NewRequest("POST", "/orders/"+orderID.String()+"/refund", nil)
+	reqForgedAdmin.Header.Set("X-User-ID", strangerID.String())
+	reqForgedAdmin.Header.Set("X-User-Role", "admin")
+	wForgedAdmin := httptest.NewRecorder()
+	r.ServeHTTP(wForgedAdmin, reqForgedAdmin)
+	if wForgedAdmin.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for forged direct admin headers, got %d", wForgedAdmin.Code)
+	}
+
 	// 2. Stranger (non-owner, non-admin)
 	reqStranger, _ := http.NewRequest("POST", "/orders/"+orderID.String()+"/refund", nil)
 	reqStranger.Header.Set("X-User-ID", strangerID.String())
 	reqStranger.Header.Set("X-User-Role", "customer")
 	wStranger := httptest.NewRecorder()
-	r.ServeHTTP(wStranger, reqStranger)
+	serveWithInternalToken(r, wStranger, reqStranger)
 	if wStranger.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 Forbidden, got %d", wStranger.Code)
 	}
@@ -320,20 +343,20 @@ func TestRefundOrderRoute_UnauthorizedAndForbidden(t *testing.T) {
 	reqAdmin.Header.Set("X-User-ID", strangerID.String())
 	reqAdmin.Header.Set("X-User-Role", "admin")
 	wAdmin := httptest.NewRecorder()
-	r.ServeHTTP(wAdmin, reqAdmin)
+	serveWithInternalToken(r, wAdmin, reqAdmin)
 	if wAdmin.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK for admin, got %d: %s", wAdmin.Code, wAdmin.Body.String())
 	}
 }
 
 func TestRefundOrderRoute_InvalidIDAndMalformedBody(t *testing.T) {
-	r := setupTestRouter(&mockOrderRepo{}, &mockRefunder{})
+	r := setupTestRouter(t, &mockOrderRepo{}, &mockRefunder{})
 
 	// Invalid UUID
 	reqInvalidID, _ := http.NewRequest("POST", "/orders/not-a-uuid/refund", nil)
 	reqInvalidID.Header.Set("X-User-ID", uuid.NewString())
 	w1 := httptest.NewRecorder()
-	r.ServeHTTP(w1, reqInvalidID)
+	serveWithInternalToken(r, w1, reqInvalidID)
 	if w1.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 Bad Request for bad UUID, got %d", w1.Code)
 	}
@@ -344,7 +367,7 @@ func TestRefundOrderRoute_InvalidIDAndMalformedBody(t *testing.T) {
 	reqBadKey.Header.Set("X-User-ID", uuid.NewString())
 	reqBadKey.Header.Set("Idempotency-Key", "invalid spaces and @@@@")
 	w2 := httptest.NewRecorder()
-	r.ServeHTTP(w2, reqBadKey)
+	serveWithInternalToken(r, w2, reqBadKey)
 	if w2.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 Bad Request for bad idempotency key, got %d", w2.Code)
 	}
