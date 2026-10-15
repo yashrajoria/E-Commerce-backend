@@ -6,13 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"order-service/models"
+	paymentservices "order-service/payment/services"
 	repositories "order-service/repository"
-
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/yashrajoria/common/messaging"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 type ContextKey string
@@ -66,6 +68,18 @@ var cancellableStatuses = map[string]bool{
 	"paid":            true,
 }
 
+// refundableStatuses are the order statuses an order may be refunded from.
+var refundableStatuses = map[string]bool{
+	"paid":      true,
+	"fulfilled": true,
+	"completed": true,
+}
+
+type RefundOrderRequest struct {
+	Reason string `json:"reason,omitempty"`
+	Amount *int   `json:"amount,omitempty"`
+}
+
 type OrderService struct {
 	orderRepo            repositories.OrderRepository
 	snsClient            messaging.Publisher
@@ -78,6 +92,11 @@ type OrderService struct {
 // PaymentRefunder refunds the captured payment of a paid order (idempotent).
 type PaymentRefunder interface {
 	RefundOrder(ctx context.Context, orderID uuid.UUID) error
+}
+
+// DetailedPaymentRefunder provides full/partial refund with details.
+type DetailedPaymentRefunder interface {
+	RefundPayment(ctx context.Context, orderID uuid.UUID, amount *int, reason string, idempotencyKey string) (*paymentservices.RefundDetails, error)
 }
 
 // SetRefunder enables Stripe refunds when a paid order is cancelled.
@@ -347,6 +366,150 @@ func (s *OrderService) CancelOrder(ctx context.Context, orderID uuid.UUID, admin
 		zap.String("admin_id", adminID),
 		zap.String("reason", reason),
 	)
+	return order, nil
+}
+
+// RefundOrder processes a refund for an order in eligible status (e.g., PAID or FULFILLED).
+// It validates order state, prevents double-refunding, calls Stripe's refund API via the
+// payment refunder, updates order status to "refunded", restocks inventory, and emits
+// a payment_refunded event.
+func (s *OrderService) RefundOrder(ctx context.Context, orderID uuid.UUID, callerID, callerRole string, req *RefundOrderRequest) (*models.Order, *ServiceError) {
+	order, err := s.orderRepo.FindByID(ctx, orderID)
+	if err != nil {
+		if err.Error() == "record not found" || errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, &ServiceError{StatusCode: 404, Message: "Order not found"}
+		}
+		zap.L().Error("failed to fetch order for refund", zap.String("order_id", orderID.String()), zap.Error(err))
+		return nil, &ServiceError{StatusCode: 500, Message: "Failed to fetch order"}
+	}
+
+	// Authorization check: admin or order owner
+	if callerRole != "admin" && order.UserID.String() != callerID {
+		return nil, &ServiceError{StatusCode: 403, Message: "Access denied"}
+	}
+
+	currentStatus := strings.ToLower(strings.TrimSpace(order.Status))
+	if currentStatus == "refunded" {
+		return nil, &ServiceError{
+			StatusCode: 409,
+			Message:    "order is already refunded",
+		}
+	}
+
+	if !refundableStatuses[currentStatus] {
+		return nil, &ServiceError{
+			StatusCode: 409,
+			Message:    fmt.Sprintf("order cannot be refunded from status %q", order.Status),
+		}
+	}
+
+	if req.Amount != nil {
+		if *req.Amount <= 0 {
+			return nil, &ServiceError{StatusCode: 400, Message: "Refund amount must be greater than zero"}
+		}
+		if *req.Amount > order.Amount {
+			return nil, &ServiceError{StatusCode: 400, Message: "Refund amount exceeds order total"}
+		}
+	}
+
+	if s.refunder == nil {
+		return nil, &ServiceError{StatusCode: 500, Message: "Payment refunder not configured"}
+	}
+
+	idemKey := ""
+	if v, ok := ctx.Value(IdempotencyKeyContextKey).(string); ok && v != "" {
+		idemKey = v
+	}
+
+	var refundDetails *paymentservices.RefundDetails
+	if detailed, ok := s.refunder.(DetailedPaymentRefunder); ok {
+		var rErr error
+		refundDetails, rErr = detailed.RefundPayment(ctx, orderID, req.Amount, req.Reason, idemKey)
+		if rErr != nil {
+			if errors.Is(rErr, paymentservices.ErrPaymentNotFound) {
+				return nil, &ServiceError{StatusCode: 404, Message: "Payment record not found for order"}
+			}
+			if errors.Is(rErr, paymentservices.ErrPaymentAlreadyRefunded) {
+				return nil, &ServiceError{StatusCode: 409, Message: "Payment is already refunded"}
+			}
+			if errors.Is(rErr, paymentservices.ErrPaymentNotSucceeded) {
+				return nil, &ServiceError{StatusCode: 409, Message: rErr.Error()}
+			}
+			if errors.Is(rErr, paymentservices.ErrMissingStripePaymentID) {
+				return nil, &ServiceError{StatusCode: 400, Message: rErr.Error()}
+			}
+			zap.L().Error("failed to refund payment via Stripe", zap.String("order_id", orderID.String()), zap.Error(rErr))
+			return nil, &ServiceError{StatusCode: 502, Message: fmt.Sprintf("Failed to refund payment: %v", rErr)}
+		}
+	} else {
+		if err := s.refunder.RefundOrder(ctx, orderID); err != nil {
+			if errors.Is(err, paymentservices.ErrPaymentNotFound) {
+				return nil, &ServiceError{StatusCode: 404, Message: "Payment record not found for order"}
+			}
+			zap.L().Error("failed to refund payment via refunder", zap.String("order_id", orderID.String()), zap.Error(err))
+			return nil, &ServiceError{StatusCode: 502, Message: fmt.Sprintf("Failed to refund payment: %v", err)}
+		}
+	}
+
+	now := time.Now().UTC()
+	extra := map[string]interface{}{
+		"updated_at": now,
+	}
+	if err := s.orderRepo.UpdateOrderStatus(ctx, orderID, order.Status, "refunded", extra); err != nil {
+		if errors.Is(err, repositories.ErrStatusConflict) {
+			return nil, &ServiceError{StatusCode: 409, Message: "order status changed concurrently, please retry"}
+		}
+		zap.L().Error("failed to update order status to refunded", zap.String("order_id", orderID.String()), zap.Error(err))
+		return nil, &ServiceError{StatusCode: 500, Message: "Failed to update order status to refunded"}
+	}
+
+	order.Status = "refunded"
+	order.UpdatedAt = now
+
+	// Restock inventory for refunded paid/fulfilled orders
+	if s.inventoryClient != nil && len(order.OrderItems) > 0 {
+		items := make([]ReserveItem, 0, len(order.OrderItems))
+		for _, item := range order.OrderItems {
+			items = append(items, ReserveItem{ProductID: item.ProductID.String(), Quantity: item.Quantity})
+		}
+		if restErr := s.inventoryClient.RestockStock(ctx, orderID.String(), items); restErr != nil {
+			zap.L().Error("failed to restock inventory for refunded order",
+				zap.String("order_id", orderID.String()), zap.Error(restErr))
+		}
+	}
+
+	// Publish refunded event
+	refundedAmount := order.Amount
+	if req.Amount != nil && *req.Amount > 0 {
+		refundedAmount = *req.Amount
+	}
+	paymentEvt := models.PaymentEvent{
+		Type:      "payment_refunded",
+		OrderID:   orderID.String(),
+		UserID:    order.UserID.String(),
+		Amount:    refundedAmount,
+		Currency:  order.Currency,
+		Timestamp: now,
+	}
+	if refundDetails != nil {
+		paymentEvt.PaymentID = refundDetails.PaymentID
+		paymentEvt.CorrelationID = refundDetails.CorrelationID
+	}
+	if eventBytes, err := json.Marshal(paymentEvt); err == nil {
+		if s.snsClient != nil && s.snsTopicArn != "" {
+			if err := s.snsClient.Publish(ctx, s.snsTopicArn, eventBytes); err != nil {
+				zap.L().Error("failed to publish payment_refunded event to SNS", zap.Error(err))
+			}
+		}
+	}
+
+	zap.L().Info("[AUDIT] order refunded",
+		zap.String("order_id", orderID.String()),
+		zap.String("caller_id", callerID),
+		zap.String("reason", req.Reason),
+		zap.Int("amount", refundedAmount),
+	)
+
 	return order, nil
 }
 

@@ -61,6 +61,7 @@ Checkout correlation metadata is optional for backward compatibility. When order
 | `GET /orders/` | List the current user's orders | Authenticated |
 | `GET /orders/:id` | Read one owned order | Authenticated |
 | `PUT /orders/:id/cancel` | Cancel an order | Admin |
+| `POST /orders/:id/refund` | Refund an order (full or partial) via Stripe | Authenticated (Owner or Admin) |
 | `GET /orders/admin/` | List all orders | Admin |
 | `GET /orders/admin/stats` | Read revenue/order statistics | Admin |
 | `POST /coupons/validate` | Validate coupon (guest-friendly) | Public |
@@ -70,6 +71,15 @@ Checkout correlation metadata is optional for backward compatibility. When order
 | `GET /payment/status/by-order/:order_id` | Poll payment status | Authenticated |
 | `POST /payment/create-checkout`, `POST /payment/verify-payment` | Stripe session ops | Authenticated |
 | `POST /stripe/webhook` | Stripe webhook (signature-verified) | Public |
+
+### Order Refund Flow
+
+The `POST /orders/:id/refund` endpoint processes order refunds using the Stripe SDK:
+- **State Validation**: Only orders in refundable states (`paid`, `fulfilled`, `completed`) may be refunded. Unpaid orders (`pending_payment`), cancelled orders, or already `refunded` orders are rejected with `409 Conflict`.
+- **Refund Amount & Reason**: Accepts optional JSON body `{"amount": <minor_units>, "reason": "<reason>"}`. If amount is omitted, it defaults to a full refund of the order total. Partial refunds must specify an amount greater than 0 and less than or equal to the order total.
+- **Stripe Integration & Idempotency**: Retrieves the order's payment record, resolves the Stripe `PaymentIntentID`, and issues the refund via Stripe SDK (`refund.New` with `stripe.RefundParams`) using an idempotency key (derived from header or order ID).
+- **Payment & Order State Updates**: Updates payment status to `refunded` with full transaction details stored in `stripe_event_payload`, transitions order status to `refunded`, restocks catalog inventory, and emits a `payment_refunded` event via SNS.
+
 
 ## Persistence and idempotency
 

@@ -163,10 +163,31 @@ func (s *StripeService) PaymentIntentID(stripeID string) (string, error) {
 	return sess.PaymentIntent.ID, nil
 }
 
+// Refund creates a Stripe refund for a PaymentIntent with optional partial amount and reason.
+// The idempotency key makes retries return the same refund.
+func (s *StripeService) Refund(paymentIntentID string, amount int64, reason string, idempotencyKey string) (*stripe.Refund, error) {
+	params := &stripe.RefundParams{
+		PaymentIntent: stripe.String(paymentIntentID),
+	}
+	if amount > 0 {
+		params.Amount = stripe.Int64(amount)
+	}
+	if reason != "" {
+		switch reason {
+		case "duplicate", "fraudulent", "requested_by_customer":
+			params.Reason = stripe.String(reason)
+		default:
+			params.AddMetadata("reason", reason)
+		}
+	}
+	if idempotencyKey != "" {
+		params.SetIdempotencyKey(idempotencyKey)
+	}
+	return refund.New(params)
+}
+
 // RefundPaymentIntent fully refunds a PaymentIntent. The idempotency key makes retries return the same refund.
 func (s *StripeService) RefundPaymentIntent(paymentIntentID, idempotencyKey string) error {
-	params := &stripe.RefundParams{PaymentIntent: stripe.String(paymentIntentID)}
-	params.SetIdempotencyKey(idempotencyKey)
-	_, err := refund.New(params)
+	_, err := s.Refund(paymentIntentID, 0, "", idempotencyKey)
 	return err
 }

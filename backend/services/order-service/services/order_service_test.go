@@ -1,13 +1,15 @@
 package services
 
 import (
-	"errors"
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"order-service/models"
+	paymentservices "order-service/payment/services"
 	repositories "order-service/repository"
 
 	"github.com/google/uuid"
@@ -65,15 +67,15 @@ func TestCreateOrderPropagatesIdempotencyKey(t *testing.T) {
 
 // fakeInventoryReleaser records ReleaseStock/RestockStock calls for cancellation tests.
 type fakeInventoryReleaser struct {
-	mu          sync.Mutex
-	calls       int
-	restockCalls int
-	lastOrder   string
-	lastItems   []ReserveItem
+	mu               sync.Mutex
+	calls            int
+	restockCalls     int
+	lastOrder        string
+	lastItems        []ReserveItem
 	lastRestockOrder string
 	lastRestockItems []ReserveItem
-	releaseErr  error
-	restockErr  error
+	releaseErr       error
+	restockErr       error
 }
 
 func (f *fakeInventoryReleaser) ReleaseStock(ctx context.Context, orderID string, items []ReserveItem) error {
@@ -250,5 +252,262 @@ func TestCancelOrder_RefundFailureKeepsOrderPaid(t *testing.T) {
 	}
 	if repo.order.Status != "paid" {
 		t.Fatalf("order must stay paid when refund fails, got %s", repo.order.Status)
+	}
+}
+
+type fakeDetailedRefunder struct {
+	calls        int
+	lastOrderID  uuid.UUID
+	lastAmount   *int
+	lastReason   string
+	lastIdemKey  string
+	returnErr    error
+	returnResult *paymentservices.RefundDetails
+}
+
+func (f *fakeDetailedRefunder) RefundOrder(ctx context.Context, orderID uuid.UUID) error {
+	f.calls++
+	f.lastOrderID = orderID
+	return f.returnErr
+}
+
+func (f *fakeDetailedRefunder) RefundPayment(ctx context.Context, orderID uuid.UUID, amount *int, reason string, idempotencyKey string) (*paymentservices.RefundDetails, error) {
+	f.calls++
+	f.lastOrderID = orderID
+	f.lastAmount = amount
+	f.lastReason = reason
+	f.lastIdemKey = idempotencyKey
+	if f.returnErr != nil {
+		return nil, f.returnErr
+	}
+	if f.returnResult != nil {
+		return f.returnResult, nil
+	}
+	amt := 5000
+	if amount != nil {
+		amt = *amount
+	}
+	return &paymentservices.RefundDetails{
+		RefundID:      "re_test_999",
+		Amount:        amt,
+		Currency:      "usd",
+		Status:        "succeeded",
+		PaymentID:     uuid.NewString(),
+		UserID:        uuid.NewString(),
+		CorrelationID: "corr-test",
+		RefundedAt:    time.Now().UTC(),
+	}, nil
+}
+
+func TestRefundOrder_TransitionsToRefunded(t *testing.T) {
+	orderID := uuid.New()
+	userID := uuid.New()
+	productID := uuid.New()
+
+	repo := &fakeOrderRepo{
+		order: models.Order{
+			ID:       orderID,
+			UserID:   userID,
+			Status:   "paid",
+			Amount:   5000,
+			Currency: "usd",
+			OrderItems: []models.OrderItem{
+				{ProductID: productID, Quantity: 2},
+			},
+		},
+	}
+	releaser := &fakeInventoryReleaser{}
+	refunder := &fakeDetailedRefunder{}
+	fakePublisher := &fakeSNSPublisher{}
+
+	svc := NewOrderServiceSQS(repo, fakePublisher, "arn:aws:sns:local:123456789012:payments", "", releaser)
+	svc.SetRefunder(refunder)
+
+	partialAmt := 2500
+	order, serr := svc.RefundOrder(context.Background(), orderID, userID.String(), "customer", &RefundOrderRequest{
+		Reason: "customer_return",
+		Amount: &partialAmt,
+	})
+	if serr != nil {
+		t.Fatalf("expected successful refund, got error: %v", serr)
+	}
+
+	if order.Status != "refunded" {
+		t.Fatalf("expected order status to be 'refunded', got %s", order.Status)
+	}
+	if refunder.calls != 1 {
+		t.Fatalf("expected refunder called once, got %d", refunder.calls)
+	}
+	if *refunder.lastAmount != 2500 || refunder.lastReason != "customer_return" {
+		t.Fatalf("unexpected refunder args: amount=%v reason=%s", refunder.lastAmount, refunder.lastReason)
+	}
+	if releaser.restockCalls != 1 {
+		t.Fatalf("expected 1 restock call, got %d", releaser.restockCalls)
+	}
+	if fakePublisher.lastTopic != "arn:aws:sns:local:123456789012:payments" {
+		t.Fatalf("unexpected published topic: %s", fakePublisher.lastTopic)
+	}
+
+	var pubEvt models.PaymentEvent
+	if err := json.Unmarshal(fakePublisher.lastMessage, &pubEvt); err != nil {
+		t.Fatalf("unmarshal refund event: %v", err)
+	}
+	if pubEvt.Type != "payment_refunded" || pubEvt.Amount != 2500 {
+		t.Fatalf("unexpected published event: %+v", pubEvt)
+	}
+}
+
+func TestRefundOrder_FulfilledOrderEligible(t *testing.T) {
+	orderID := uuid.New()
+	userID := uuid.New()
+
+	for _, status := range []string{"fulfilled", "completed", "PAID", "FULFILLED"} {
+		repo := &fakeOrderRepo{
+			order: models.Order{
+				ID:       orderID,
+				UserID:   userID,
+				Status:   status,
+				Amount:   3000,
+				Currency: "usd",
+			},
+		}
+		refunder := &fakeDetailedRefunder{}
+		svc := NewOrderServiceSQS(repo, nil, "", "", nil)
+		svc.SetRefunder(refunder)
+
+		order, serr := svc.RefundOrder(context.Background(), orderID, userID.String(), "", &RefundOrderRequest{})
+		if serr != nil {
+			t.Fatalf("status %s should be eligible for refund, got error: %v", status, serr)
+		}
+		if order.Status != "refunded" {
+			t.Fatalf("expected status 'refunded', got %s", order.Status)
+		}
+	}
+}
+
+func TestRefundOrder_RejectsInvalidStates(t *testing.T) {
+	orderID := uuid.New()
+	userID := uuid.New()
+
+	// 1. Pending payment
+	repoPending := &fakeOrderRepo{
+		order: models.Order{ID: orderID, UserID: userID, Status: "pending_payment"},
+	}
+	svc := NewOrderServiceSQS(repoPending, nil, "", "", nil)
+	svc.SetRefunder(&fakeDetailedRefunder{})
+	_, serr := svc.RefundOrder(context.Background(), orderID, userID.String(), "", &RefundOrderRequest{})
+	if serr == nil || serr.StatusCode != 409 {
+		t.Fatalf("expected 409 for pending_payment, got %v", serr)
+	}
+
+	// 2. Already refunded
+	repoRefunded := &fakeOrderRepo{
+		order: models.Order{ID: orderID, UserID: userID, Status: "refunded"},
+	}
+	svc = NewOrderServiceSQS(repoRefunded, nil, "", "", nil)
+	svc.SetRefunder(&fakeDetailedRefunder{})
+	_, serr = svc.RefundOrder(context.Background(), orderID, userID.String(), "", &RefundOrderRequest{})
+	if serr == nil || serr.StatusCode != 409 || serr.Message != "order is already refunded" {
+		t.Fatalf("expected 409 'order is already refunded', got %v", serr)
+	}
+
+	// 3. Cancelled
+	repoCancelled := &fakeOrderRepo{
+		order: models.Order{ID: orderID, UserID: userID, Status: "cancelled"},
+	}
+	svc = NewOrderServiceSQS(repoCancelled, nil, "", "", nil)
+	svc.SetRefunder(&fakeDetailedRefunder{})
+	_, serr = svc.RefundOrder(context.Background(), orderID, userID.String(), "", &RefundOrderRequest{})
+	if serr == nil || serr.StatusCode != 409 {
+		t.Fatalf("expected 409 for cancelled order, got %v", serr)
+	}
+}
+
+func TestRefundOrder_Authorization(t *testing.T) {
+	orderID := uuid.New()
+	ownerID := uuid.New()
+	strangerID := uuid.New()
+
+	repo := &fakeOrderRepo{
+		order: models.Order{ID: orderID, UserID: ownerID, Status: "paid", Amount: 2000},
+	}
+	svc := NewOrderServiceSQS(repo, nil, "", "", nil)
+	svc.SetRefunder(&fakeDetailedRefunder{})
+
+	// Stranger without admin role is forbidden
+	_, serr := svc.RefundOrder(context.Background(), orderID, strangerID.String(), "customer", &RefundOrderRequest{})
+	if serr == nil || serr.StatusCode != 403 {
+		t.Fatalf("expected 403 Forbidden for stranger, got %v", serr)
+	}
+
+	// Admin stranger is allowed
+	_, serr = svc.RefundOrder(context.Background(), orderID, strangerID.String(), "admin", &RefundOrderRequest{})
+	if serr != nil {
+		t.Fatalf("expected admin to be allowed, got error: %v", serr)
+	}
+}
+
+func TestRefundOrder_InvalidAmount(t *testing.T) {
+	orderID := uuid.New()
+	userID := uuid.New()
+
+	repo := &fakeOrderRepo{
+		order: models.Order{ID: orderID, UserID: userID, Status: "paid", Amount: 5000},
+	}
+	svc := NewOrderServiceSQS(repo, nil, "", "", nil)
+	svc.SetRefunder(&fakeDetailedRefunder{})
+
+	// Negative / zero amount
+	neg := -100
+	_, serr := svc.RefundOrder(context.Background(), orderID, userID.String(), "", &RefundOrderRequest{Amount: &neg})
+	if serr == nil || serr.StatusCode != 400 {
+		t.Fatalf("expected 400 for negative amount, got %v", serr)
+	}
+
+	// Amount > order amount
+	huge := 6000
+	_, serr = svc.RefundOrder(context.Background(), orderID, userID.String(), "", &RefundOrderRequest{Amount: &huge})
+	if serr == nil || serr.StatusCode != 400 {
+		t.Fatalf("expected 400 for amount > total, got %v", serr)
+	}
+}
+
+func TestRefundOrder_PaymentMissing(t *testing.T) {
+	orderID := uuid.New()
+	userID := uuid.New()
+
+	repo := &fakeOrderRepo{
+		order: models.Order{ID: orderID, UserID: userID, Status: "paid", Amount: 5000},
+	}
+	refunder := &fakeDetailedRefunder{returnErr: paymentservices.ErrPaymentNotFound}
+	svc := NewOrderServiceSQS(repo, nil, "", "", nil)
+	svc.SetRefunder(refunder)
+
+	_, serr := svc.RefundOrder(context.Background(), orderID, userID.String(), "", &RefundOrderRequest{})
+	if serr == nil || serr.StatusCode != 404 {
+		t.Fatalf("expected 404 when payment record missing, got %v", serr)
+	}
+	if repo.order.Status != "paid" {
+		t.Fatalf("order status should stay paid on error, got %s", repo.order.Status)
+	}
+}
+
+func TestRefundOrder_StripeFailure(t *testing.T) {
+	orderID := uuid.New()
+	userID := uuid.New()
+
+	repo := &fakeOrderRepo{
+		order: models.Order{ID: orderID, UserID: userID, Status: "paid", Amount: 5000},
+	}
+	refunder := &fakeDetailedRefunder{returnErr: errors.New("stripe service unavailable")}
+	svc := NewOrderServiceSQS(repo, nil, "", "", nil)
+	svc.SetRefunder(refunder)
+
+	_, serr := svc.RefundOrder(context.Background(), orderID, userID.String(), "", &RefundOrderRequest{})
+	if serr == nil || serr.StatusCode != 502 {
+		t.Fatalf("expected 502 when Stripe fails, got %v", serr)
+	}
+	if repo.order.Status != "paid" {
+		t.Fatalf("order status should stay paid on error, got %s", repo.order.Status)
 	}
 }

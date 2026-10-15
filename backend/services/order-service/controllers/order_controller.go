@@ -231,6 +231,55 @@ func (oc *OrderController) CancelOrder(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"order": order})
 }
 
+// RefundOrder handles refund requests for an order (full or partial).
+func (oc *OrderController) RefundOrder(ctx *gin.Context) {
+	callerID, err := middleware.GetUserID(ctx)
+	if err != nil {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	orderID := ctx.Param("id")
+	orderUUID, err := uuid.Parse(orderID)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid order ID format"})
+		return
+	}
+
+	var req services.RefundOrderRequest
+	if ctx.Request.Body != nil && ctx.Request.ContentLength > 0 {
+		if err := ctx.ShouldBindJSON(&req); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body", "details": err.Error()})
+			return
+		}
+	}
+
+	callerRole := ""
+	if roleVal, exists := ctx.Get("role"); exists {
+		if roleStr, ok := roleVal.(string); ok {
+			callerRole = roleStr
+		}
+	}
+
+	idemKey := ctx.GetHeader("Idempotency-Key")
+	reqCtx := ctx.Request.Context()
+	if idemKey != "" {
+		if !services.ValidateIdempotencyKey(idemKey) {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid Idempotency-Key format: must match ^[a-zA-Z0-9_:\\-]{1,128}$"})
+			return
+		}
+		reqCtx = context.WithValue(reqCtx, services.IdempotencyKeyContextKey, idemKey)
+	}
+
+	order, serviceErr := oc.orderService.RefundOrder(reqCtx, orderUUID, callerID, callerRole, &req)
+	if serviceErr != nil {
+		ctx.JSON(serviceErr.StatusCode, gin.H{"error": serviceErr.Message})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"order": order, "message": "Order refunded successfully"})
+}
+
 // parsePaginationParams extracts and validates pagination parameters
 func parsePaginationParams(ctx *gin.Context) (int, int) {
 	const MaxLimit = 100
