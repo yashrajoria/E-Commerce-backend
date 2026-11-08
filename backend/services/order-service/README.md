@@ -1,98 +1,186 @@
-# Order Service
+# 🛒 Order Service
 
-The order service owns orders, coupons, shipping rates, and payments. It is a Go/Gin service on port `8083` with PostgreSQL persistence and SQS consumers. It absorbed promotion-service, shipping-service, and payment-service; all three now run in-process.
+The **ShopSwift Order Service** handles orders, store credit, coupons, shipping rates, Stripe payments, and refunds. Built in **Go 1.26** with **Gin**, **GORM**, and the **Stripe SDK**, it runs on port `8083` (`PORT`) with PostgreSQL persistence and SQS/SNS messaging.
 
-## Responsibilities
+---
 
-- Consume checkout requests and create idempotent orders.
-- Validate products and coupons in-process (no inter-service hop).
-- Calculate zone shipping rates in-process.
-- Reserve inventory before finalizing the order's pending state.
-- Create Stripe Checkout Sessions, ingest Stripe webhooks, and publish payment outcomes via transactional outbox.
-- Confirm or cancel orders and release inventory when payment fails.
-- Expose customer order history and admin order/revenue views.
-- Preserve checkout correlation IDs in payment and notification outbox payloads, including retry/redelivery paths.
-
-## Architecture
+## 🏛️ Architecture
 
 ```mermaid
-flowchart LR
-  Client[Client] --> Gateway[API Gateway :8080]
-  Gateway --> Order[Order Service :8083\nGo / Gin]
-  SNS[(SNS order-events)] --> CheckoutQ[SQS order-processing-queue]
+flowchart TD
+  Gateway["API Gateway (:8080)"] --> Order["Order Service :8083<br/>Go / Gin"]
+  SNS["SNS order-events"] --> CheckoutQ["SQS order-processing-queue"]
   CheckoutQ --> Order
-  Order --> PG[(PostgreSQL\norders\norder_items\ncoupons\npayments)]
-  Order --> Catalog[Catalog :8082\nstock + product lookups]
-  Order --> Coupons[(in-process\ncoupons)]
-  Order --> Shipping[(in-process\nshipping rates)]
-  Order --> Stripe[Stripe API]
-  PaymentEvents[SQS payment-events-queue] --> Order
+
+  Order --> PG[("PostgreSQL<br/>orders, order_items, payments,<br/>coupons, store_credit_*, outbox_events,<br/>payment_outbox_events, stripe_processed_events")]
+  Order -->|"HTTP mesh: reserve / confirm / release / restock"| Catalog["Catalog Service :8082"]
+  Order --> Stripe["Stripe API<br/>Checkout & Refunds"]
+
+  Order -->|"Transactional outbox"| OutboxSNS["SNS payment-events"]
+  OutboxSNS --> PaymentEventsQ["SQS payment-events-queue"]
+  PaymentEventsQ --> Order
 ```
 
-## Checkout and payment flow
+---
+
+## ⚡ Core Capabilities
+
+### 1. Store Credit (`000025_store_credit`)
+- **Integer minor units**: balances are stored as `available_amount` and `held_amount`, with no floating-point math.
+- **Append-only ledger** (`store_credit_ledger`): each change (`grant`, `debit`, `hold`, `capture`, `release`, `refund`) is a new row with a unique idempotency key, reason, and admin audit metadata.
+- **Split tender** (`order_payment_allocations`): an order can be paid partly with store credit and partly with Stripe.
+- **100% store credit**: if store credit covers the whole order, the order is marked `paid` and Stripe is skipped.
+- **Hold and release**: checkout places credit on hold. Payment success captures the hold. Failure or expiry releases it back to `available_amount`.
+
+### 2. Refunds (`POST /orders/:id/refund`)
+- Optional body `{"amount": <minor_units>, "reason": "<reason>"}`. Without `amount`, the refund is full.
+- Partial refunds must be ≤ the unrefunded total.
+- Only orders in `paid`, `fulfilled`, or `completed` can be refunded. Others get `409 Conflict`.
+- Calls Stripe `refund.New` with an idempotency key, using the order's PaymentIntent ID.
+- Restocks returned items through catalog-service.
+- Updates `orders.refunded_amount` and `payments.refunded_amount`, and writes a `payment_refunded` outbox event.
+- This route requires the mesh token (`internalauth.Require()`). The gateway forwards it with the mesh credential. Direct calls without it are rejected.
+
+### 3. Stripe Checkout & Webhooks
+- Creates Stripe Hosted Checkout sessions with shipping details and prefilled email.
+- Success and cancel redirects use `FRONTEND_URL` (or `STOREFRONT_URL`), falling back to `http://localhost:3001`. Never point this at the admin app.
+- `POST /stripe/webhook` verifies the signature with `STRIPE_WEBHOOK_SECRET` and deduplicates events in `stripe_processed_events` before changing order state.
+
+### 4. Transactional Outbox
+- Order and payment events are written to `outbox_events` and `payment_outbox_events` in the same transaction as the business change.
+- A background worker claims events with lease locks, publishes them to SNS, and marks them published after confirmation.
+- Delivery is at-least-once.
+
+### 5. Basket Optimizer (`POST /promotions/optimize-basket`)
+- Calculates bundle discounts, multi-buy savings, and free-shipping thresholds in-process.
+
+---
+
+## 🔄 Checkout Flow
 
 ```mermaid
 sequenceDiagram
-  participant Cart
-  participant SNS
-  participant CheckoutQ as Order Queue
-  participant Order
-  participant Inventory as Catalog (inventory)
-  participant Stripe
+  autonumber
+  participant Cart as Catalog Cart
+  participant SNS as SNS order-events
+  participant Queue as order-processing-queue
+  participant Order as Order Service
+  participant Catalog as Catalog (Inventory)
+  participant Stripe as Stripe API
   participant DB as PostgreSQL
 
-  Cart->>SNS: checkout.requested
-  SNS->>CheckoutQ: Deliver message
-  CheckoutQ->>Order: Consume with idempotency key
-  Order->>Inventory: Validate product snapshot
-  Order->>Inventory: Reserve stock
-  Order->>DB: Insert pending order and items (+ coupon + payment rows)
-  Order->>Stripe: Create checkout session (in-process consumer)
-  Stripe-->>Order: webhook → payment.succeeded via outbox
-  Order->>DB: Mark paid and confirm inventory
+  Cart->>SNS: Publish checkout.requested
+  SNS->>Queue: Deliver message
+  Queue->>Order: Consume (idempotent)
+  Order->>Catalog: Validate product snapshot & pricing
+  Order->>Catalog: Reserve stock
+  opt Apply store credit
+    Order->>DB: Hold store credit
+  end
+  Order->>DB: Insert pending order, items, allocations (TX)
+  alt 100% store credit
+    Order->>DB: Mark paid, capture credit hold
+    Order->>Catalog: Confirm reservation
+  else Card payment needed
+    Order->>Stripe: Create Checkout Session
+    Order->>DB: Persist session ID
+    Stripe-->>Order: Webhook: checkout.session.completed
+    Order->>DB: Mark paid, capture allocations (TX)
+    Order->>Catalog: Confirm reservation
+  end
 ```
 
-Checkout correlation metadata is optional for backward compatibility. When order persistence fails after a successful reservation, the consumer releases the reservation before returning the error for retry.
+---
 
-## HTTP surface
+## 📋 HTTP Surface
 
-| Route | Purpose | Access |
-| --- | --- | --- |
-| `GET /orders/` | List the current user's orders | Authenticated |
-| `GET /orders/:id` | Read one owned order | Authenticated |
-| `PUT /orders/:id/cancel` | Cancel an order | Admin |
-| `POST /orders/:id/refund` | Refund an order (full or partial) via Stripe | Authenticated (Owner or Admin) |
-| `GET /orders/admin/` | List all orders | Admin |
-| `GET /orders/admin/stats` | Read revenue/order statistics | Admin |
-| `POST /coupons/validate` | Validate coupon (guest-friendly) | Public |
-| `GET /coupons/:code` | Read coupon | Authenticated |
-| `POST /coupons`, `GET /coupons`, `DELETE /coupons/:code` | Manage coupons | Admin |
-| `POST /shipping/rates` | Zone shipping rates | Authenticated |
-| `GET /payment/status/by-order/:order_id` | Poll payment status | Authenticated |
-| `POST /payment/create-checkout`, `POST /payment/verify-payment` | Stripe session ops | Authenticated |
-| `POST /stripe/webhook` | Stripe webhook (signature-verified) | Public |
+Auth column: **Public** (no check in this service), **JWT** (auth middleware; gateway also checks), **Admin** (`role=admin`), **Mesh** (`INTERNAL_SERVICE_TOKEN`). The gateway enforces JWT and admin checks before forwarding.
 
-### Order Refund Flow
+### Orders (`/orders`)
+| Method | Path | Auth | Description |
+|:---|:---|:---:|:---|
+| `GET` | `/orders/` | JWT | List the user's orders |
+| `GET` | `/orders/:id` | JWT | Order detail |
+| `PUT` | `/orders/:id/cancel` | Admin | Cancel order and release reserved stock |
+| `POST` | `/orders/:id/refund` | Mesh | Full or partial Stripe refund |
+| `GET` | `/orders/admin/` | Admin | All orders (admin view) |
+| `GET` | `/orders/admin/stats` | Admin | Revenue and order stats |
+| `GET` | `/orders/admin/dashboard` | JWT + Admin | Dashboard KPIs (registered outside the `/orders` group) |
 
-The `POST /orders/:id/refund` endpoint processes order refunds using the Stripe SDK:
-- **State Validation**: Only orders in refundable states (`paid`, `fulfilled`, `completed`) may be refunded. Unpaid orders (`pending_payment`), cancelled orders, or already `refunded` orders are rejected with `409 Conflict`.
-- **Refund Amount & Reason**: Accepts optional JSON body `{"amount": <minor_units>, "reason": "<reason>"}`. If amount is omitted, it defaults to a full refund of the order total. Partial refunds must specify an amount greater than 0 and less than or equal to the order total.
-- **Stripe Integration & Idempotency**: Retrieves the order's payment record, resolves the Stripe `PaymentIntentID`, and issues the refund via Stripe SDK (`refund.New` with `stripe.RefundParams`) using an idempotency key (derived from header or order ID).
-- **Payment & Order State Updates**: Updates payment status to `refunded` with full transaction details stored in `stripe_event_payload`, transitions order status to `refunded`, restocks catalog inventory, and emits a `payment_refunded` event via SNS.
+### Store Credit (`/store-credit`, mesh token required on every route)
+| Method | Path | Auth | Description |
+|:---|:---|:---:|:---|
+| `GET` | `/store-credit/balance` | JWT | Available and held balance |
+| `GET` | `/store-credit/ledger` | JWT | Ledger history |
+| `POST` | `/store-credit/grants` | Admin | Issue credit with audit note |
+| `POST` | `/store-credit/adjustments` | Admin | Adjust balance with required reason |
+| `POST` | `/store-credit/hold` | Mesh | Hold credit during checkout |
+| `POST` | `/store-credit/release` | Mesh | Release a hold |
+| `GET` | `/store-credit/reconcile` | Admin | Reconcile ledger against balances |
 
+### Coupons (`/coupons`)
+| Method | Path | Auth | Description |
+|:---|:---|:---:|:---|
+| `POST` | `/coupons/validate` | Public | Validate a coupon |
+| `GET` | `/coupons/:code` | JWT | Coupon details |
+| `GET` | `/coupons` | Admin | List coupons |
+| `POST` | `/coupons` | Admin | Create coupon |
+| `DELETE` | `/coupons/:code` | Admin | Deactivate coupon |
 
-## Persistence and idempotency
+### Promotions
+| Method | Path | Auth | Description |
+|:---|:---|:---:|:---|
+| `POST` | `/promotions/optimize-basket` | Public | Basket optimizer |
 
-PostgreSQL tables `orders`, `order_items`, `coupons`, `payments`, `stripe_processed_events`, and `payment_outbox_events` belong exclusively to this service. Checkout consumers deduplicate on the order idempotency key. Inventory operations are tokenized; payment-event handling checks order state before applying a terminal transition. SQS consumers must be safe to retry because acknowledgement happens only after successful processing.
+### Shipping & Payments
+| Method | Path | Auth | Description |
+|:---|:---|:---:|:---|
+| `POST` | `/shipping/rates` | JWT | Shipping rates for a zone |
+| `POST` | `/payment/create-checkout` | JWT | Create Stripe Checkout session |
+| `GET` | `/payment/status/by-order/:order_id` | JWT | Poll payment status |
+| `POST` | `/payment/verify-payment` | JWT | Verify payment intent |
+| `GET` | `/payment/methods` | JWT | Saved payment methods |
+| `POST` | `/payment/methods` | JWT | Save a payment method |
+| `DELETE` | `/payment/methods/:id` | JWT | Delete a saved payment method |
+| `POST` | `/stripe/webhook` | Public (signature verified) | Stripe webhook ingress |
 
-## Outbox publisher
+---
 
-The order service persists payment-request and order-created events in `outbox_events` in the same transaction as the order. An in-process publisher claims pending events with a lease, sends them to their destination, and marks them published only after AWS confirms the send.
+## ⚙️ Configuration
 
-Claims whose lease expires are reclaimable. Publish failures return events to `pending` with exponential backoff. A process crash after AWS accepts a message but before the database update can therefore publish the event again; consumers must remain idempotent because delivery is at least once.
+| Environment Variable | Description | Default |
+|:---|:---|:---|
+| `PORT` | HTTP port | `8083` |
+| `POSTGRES_HOST`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | Required database settings | — |
+| `POSTGRES_PORT` | Database port | `5432` |
+| `POSTGRES_SSLMODE` | SSL mode | `disable` |
+| `POSTGRES_TIMEZONE` | Timezone | `Asia/Kolkata` |
+| `STORE_CURRENCY` | Currency code | `USD` |
+| `STRIPE_API_KEY` | Stripe secret key (`sk_test_...`) | — |
+| `STRIPE_WEBHOOK_SECRET` | Webhook signing secret (`whsec_...`) | — |
+| `FRONTEND_URL` / `STOREFRONT_URL` | Stripe redirect base URL | `http://localhost:3001` |
+| `PRODUCT_SERVICE_URL` | Catalog base URL | `http://catalog-service:8082` |
+| `INVENTORY_SERVICE_URL` | Inventory base URL (catalog) | `http://catalog-service:8082` |
+| `USER_SERVICE_URL` / `IDENTITY_SERVICE_URL` | Identity base URL for store credit lookups | — |
+| `CHECKOUT_QUEUE_URL` | Queue for checkout events | `order-processing-queue` |
+| `PAYMENT_EVENTS_QUEUE_URL` | Queue for payment outcome events | `payment-events-queue` |
+| `PAYMENT_REQUEST_QUEUE_URL` | Queue for payment requests | `payment-request-queue` |
+| `ORDER_CREATED_QUEUE_URL` | Queue for order-created events | — |
+| `ORDER_SNS_TOPIC_ARN` | Order events topic | `order-events` |
+| `PAYMENT_SNS_TOPIC_ARN` | Payment events topic | `payment-events` |
+| `NOTIFICATION_SNS_TOPIC_ARN` | Notification topic | `notification-queue` |
+| `INTERNAL_SERVICE_TOKEN` | Mesh token | *Required* |
 
-The publisher resolves SQS queue names as needed and supports SNS topic ARNs. It starts with order-service and stops through the service shutdown context.
+---
 
-## Configuration
+## 🚀 Running Locally
 
-Configure Postgres, AWS SQS/SNS, `STRIPE_API_KEY` / `STRIPE_WEBHOOK_SECRET` / `FRONTEND_URL`, internal service URLs, `INTERNAL_SERVICE_TOKEN`. Apply migrations from `backend/migrations` before starting in production.
+```bash
+cd backend/services/order-service
+go run .
+```
+
+Run tests:
+```bash
+go test -v ./...
+```

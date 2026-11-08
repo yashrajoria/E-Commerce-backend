@@ -1,75 +1,81 @@
-# Load Test Toolkit — ShopSwift Backend
+# ⚡ Load Test Toolkit — ShopSwift
 
-Load tests the **local** stack through the API gateway. Never point these at production.
+Load tests for the ShopSwift gateway and flash sale path, written for [k6](https://k6.io/).
 
-## Prerequisites
+> ⚠️ **SAFETY WARNING**: Run these only against local or staging stacks. Never run them against production or unapproved endpoints.
 
-1. Stack running locally:
+---
+
+## 📋 Test Suites
+
+### 1. Gateway Baseline (`k6-loadtest.js`)
+Ramps 5 → 10 virtual users over about 2 minutes. Each iteration calls:
+- `GET /health`
+- `GET /products`
+- `POST /auth/login`, only when `LOADTEST_EMAIL` and `LOADTEST_PASSWORD` are set
+
+Thresholds:
+- `http_req_failed` rate `< 1%`
+- `health_duration` p95 `< 500 ms`
+- `products_duration` p95 `< 1500 ms`
+- `login_duration` p95 `< 2000 ms`
+- `http_req_duration` p95 `< 2000 ms` (overall)
+
+### 2. Flash Sale Contention (`k6-flashsale.js`)
+100 VUs compete for 25 slots on product `flash-sale-sku-pro` (override with `FLASH_PRODUCT_ID`).
+
+Flow:
+1. `POST /inventory/flash-sale/configure`: sets `total_slots: 25` and `lease_ttl_seconds: 120`.
+2. `POST /inventory/flash-sale/enter`: each VU joins the waiting room.
+3. `GET /inventory/flash-sale/status`: VUs poll their position.
+4. `POST /inventory/flash-sale/claim`: admitted VUs claim their slot.
+
+Checks:
+- Exactly 25 leases are granted (`flash_leases_granted` count = 25). This checks for overselling.
+- `flash_enter_duration` p95 `< 150 ms`.
+
+---
+
+## 🚀 Prerequisites
+
+1. **Local stack running**:
    ```bash
    cd backend && ./scripts/dev-up.sh
    ```
-2. `k6` installed:
+
+2. **Install k6**:
    ```bash
-   brew install k6        # macOS
-   # or https://k6.io/docs/get-started/installation/
+   # macOS
+   brew install k6
    ```
-3. Optional (for the authenticated scenario): a seeded demo user. See
-   `scripts/seed_postgres_data.sh` — demo password is `Demo123!` for the
-   seeded `*.shopswift-demo.test` emails. Export:
+   For Linux, see the install steps at [k6.io](https://k6.io/docs/get-started/installation/).
+
+3. **Demo credentials (optional, enables the login scenario)**:
    ```bash
    export LOADTEST_EMAIL=alice.johnson@shopswift-demo.test
    export LOADTEST_PASSWORD=Demo123!
    ```
 
-## Run
+---
 
+## 🏃 Running the Tests
+
+Launcher (runs a gateway health check first):
 ```bash
 cd backend/tools/loadtest
 ./run-loadtest.sh
 ```
 
-Or directly:
-
+Or run one script directly:
 ```bash
-# Standard gateway baseline
 k6 run --env GATEWAY_URL=http://localhost:8080 k6-loadtest.js
-
-# High-concurrency flash sale waiting room & FairPass contention test (100 VUs vs 25 slots)
 k6 run --env GATEWAY_URL=http://localhost:8080 k6-flashsale.js
 ```
 
-If `LOADTEST_EMAIL` / `LOADTEST_PASSWORD` are unset, the login scenario is
-skipped (logged as a warning) instead of failing the run.
+The flash sale suite needs admin rights for `/configure`. Check the script for the token it sends before running it against a non-local stack.
 
-## What it hits (gateway :8080)
+---
 
-| Scenario | Route | Method | Auth |
-|----------|-------|--------|------|
-| health   | `/health`        | GET  | none |
-| products | `/products`      | GET  | none |
-| login    | `/auth/login`    | POST | demo credentials (env vars) |
-| flash-sale | `/inventory/flash-sale/enter` | POST | none (or demo user) |
-| flash-status | `/inventory/flash-sale/status` | GET | none |
-| flash-claim | `/inventory/flash-sale/claim` | POST | demo user |
-| flash-config | `/inventory/flash-sale/configure` | POST | admin role |
+## 📊 Recording Results
 
-Thresholds (tuned after first baseline run — see `baseline-notes.md`):
-
-- `http_req_failed < 1%` overall
-- health p95 < 500 ms
-- products p95 < 1500 ms
-- login p95 < 2000 ms
-
-## Safety
-
-- **Local stack only.** The script defaults to `http://localhost:8080`.
-- Stages ramp to a modest steady VUs (see `k6-loadtest.js`) — raise them only
-  after recording a baseline on your machine.
-- The login scenario uses real credentials against the local seed; do not
-  export production credentials into this environment.
-- Stop the stack when done: `docker compose -f docker-compose.yml -f docker-compose.localstack.yml down`.
-
-## Recording results
-
-Fill in `baseline-notes.md` after each run. Keep one row per scenario per machine
-so regressions are visible across commits.
+Record results in your own notes or CI. This repo does not include a `baseline-notes.md` file.
